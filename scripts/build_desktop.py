@@ -37,14 +37,14 @@ if sys.platform=='darwin':
     import plistlib
     info=Path('dist/DizyTV.app/Contents/Info.plist')
     value=plistlib.loads(info.read_bytes())
-    value.update(CFBundleShortVersionString='0.1.0',CFBundleVersion='1',LSMinimumSystemVersion='13.0',
+    value.update(CFBundleShortVersionString='0.1.1',CFBundleVersion='2',LSMinimumSystemVersion='13.0',
                  NSLocalNetworkUsageDescription='Connect to your configured Ace Stream engine for live television and local recording.')
     info.write_bytes(plistlib.dumps(value))
     # Re-sign after Info.plist change. Ad-hoc identity is for development only.
     subprocess.run(['codesign','--force','--deep','--sign','-','dist/DizyTV.app'],check=True)
     subprocess.run(['pkgbuild','--component','dist/DizyTV.app','--install-location','/Applications',
-                    '--identifier','dev.dizygotic.dizytv','--version','0.1.0',
-                    f'dist/DizyTV-0.1.0-alpha-macos-{platform.machine()}.pkg'],check=True)
+                    '--identifier','dev.dizygotic.dizytv','--version','0.1.1',
+                    f'dist/DizyTV-0.1.1-alpha-macos-{platform.machine()}.pkg'],check=True)
 
 for file in Path('dist').glob('*'):
     if file.is_file() and file.suffix in ('.pkg','.exe'):
