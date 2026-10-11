@@ -1,6 +1,6 @@
 # DizyTV installers and distribution
 
-**0.1.0-alpha packages have been built.** These are development artifacts, with native-host package/startup checks and Android compilation/lint/signature checks. See [verification](BUILD-VERIFICATION.md) and the [README download buttons](../README.md#downloads).
+**0.1.0-alpha native test packages are built and published as individual GitHub Release files.** Downloads do not require extracting a GitHub Actions ZIP or signing into GitHub. These are development packages: native-host package/startup checks and Android compilation/lint/signature checks have passed, but physical-device tests are pending. See [verification](BUILD-VERIFICATION.md) and the [README download buttons](../README.md#downloads).
 
 ## Outputs
 
@@ -15,7 +15,7 @@ Mac packages target macOS 13+. Windows builds target x64. Build settings and CI 
 
 ## Install and configure
 
-Extract the selected artifact ZIP and check its SHA-256 file against the installer. Run the Windows EXE, install the APK through Android's permitted sideload flow, or open the matching Mac PKG to install `DizyTV.app` in Applications. Unsigned/development builds may trigger operating-system trust warnings.
+Download the native .exe, .apk or .pkg directly from the [0.1.0-alpha pre-release](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.0-alpha) and verify against its [SHA256SUMS.txt](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/SHA256SUMS.txt). Run the Windows EXE, install the APK through Android's permitted sideload flow, or open the matching Mac PKG to install `DizyTV.app` in Applications. Unsigned/development builds may trigger browser or operating-system trust warnings. Do not disable protective software to proceed.
 
 - **Windows:** install VLC 3 x64 and a separately installed Ace Stream engine. Start the engine before playback/recording. The app installs per user, without requiring an administrator by default.
 - **Android:** libVLC is embedded; install/open Ace Stream separately. Select a folder through Settings and retain its read/write grant. Allow recording notifications and grant exact-alarm access when scheduling.
@@ -33,9 +33,16 @@ Android CI debug keys are generated on build hosts and do not provide a guarante
 
 ## Distribution status
 
-The repository is public, verified 11 October 2026. GitHub Actions artifacts still require GitHub sign-in and expire after the configured 30-day retention. The README's four buttons currently link to these alpha artifacts. Publish the installers/checksums as versioned GitHub Release assets and change the buttons to those URLs for durable public downloads. The current build workflow does not create releases automatically. No GitHub Release or store listing has been published. The About description remains unset; suggested text is in [repository setup](REPOSITORY-SETUP.md).
+The public repository now uses a gated release job: after all four native builds pass on a push to `main`, GitHub Actions creates a **pre-release tagged `v0.1.0-alpha`** and uploads all four files plus a consolidated SHA-256 manifest. If that version already exists, it is not silently overwritten. The release assets are direct downloads without the 30-day GitHub Actions artifact expiry or login requirement.
 
-Public release work remains: device acceptance, durable versioned downloads, Windows signing, Android release signing, Apple Developer ID signing/notarization, exact third-party sources/relinking information and an owner-selected source licence. Licence texts and component notices are included in the packages; see [third-party notices](../THIRD-PARTY-NOTICES.md).
+- [Windows .exe](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-Setup-0.1.0-alpha-windows-x64.exe)
+- [Android .apk](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-android-universal-debug.apk)
+- [Mac arm64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-arm64.pkg)
+- [Mac x86_64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-x86_64.pkg)
+
+Direct links do **not** establish a file's reputation with Chrome, Microsoft Defender SmartScreen, Play Protect or Gatekeeper. These are explicitly **untrusted/development** packages: Windows is unsigned; Android is signed with a CI debug key that is not retained between runs; Mac PKGs are unsigned and unnotarized. Never instruct testers to turn off browser or operating-system malware protections. If Chrome reports that a file is harmful or malware, do not override the warning: investigate the exact warning and check the binaries and supply chain first. Routine publisher-identity warnings likewise mean these builds are not yet suitable for broadly trusted public distribution.
+
+Public stable-release tasks remain: device acceptance, persistent Android release signing and upgrade testing, Windows code signing, Apple Developer ID signing/notarization, exact third-party source/relinking information and an owner-selected source licence. Licence texts and component notices are included in the packages; see [third-party notices](../THIRD-PARTY-NOTICES.md).
 
 The engine is separately installed/configured; this project does not rename or redistribute Ace Stream binaries. DizyServer metadata and optional server recording are separate future milestones. Engine endpoints should be configured for trusted networks; this work does not expose a public unauthenticated engine service.
 
