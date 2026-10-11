@@ -66,3 +66,7 @@ Display-only name normalization; country and genre/category hierarchy in both na
 ## 0.1.6-alpha TV-screen experience
 
 Native TV playback: two fullscreen styles, quick programme guide, now/next and auto-hide now-playing banner, proper play/pause/volume and conditional DVR seeking. **Next**: a bounded local ring-buffer service for genuine live pause/rewind on nonseekable HTTP and HLS feeds, with per-device disk quota, retention, seeking and recording coordination. Avoid claiming universal live timeshift until tested. Retain no copy on disk where not explicitly enabled.
+
+## Rolling timeshift (0.1.7-alpha experimental)
+
+Added on-device bounded short-term MPEG-TS/HLS segment capture and playback bridge (default off). Remaining: real-device long-run soak on Windows/Android, continuous HLS playlist seek accuracy, stream reconnect/discontinuity handling and smooth live↔replay transitions, backfill segment errors, optional hardware-accelerated remux for more formats. Preserve quota and free-space reserve. Issue #9 remains open until reliable pause/resume and rewind on *nonseekable* sources are demonstrated, not merely that segment buffering and playback controls exist.
