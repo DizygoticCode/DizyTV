@@ -33,7 +33,7 @@ Android CI debug keys are generated on build hosts and do not provide a guarante
 
 ## Distribution status
 
-GitHub Actions artifacts require GitHub sign-in and repository access, and expire after 30 days. The owner has requested public source visibility; the connector cannot change the setting or About text. Instructions are in [repository setup](REPOSITORY-SETUP.md). No GitHub Release or store listing has been published.
+The repository is public, verified 11 October 2026. GitHub Actions artifacts still require GitHub sign-in and expire after the configured 30-day retention. The README's four buttons currently link to these alpha artifacts. Publish the installers/checksums as versioned GitHub Release assets and change the buttons to those URLs for durable public downloads. The current build workflow does not create releases automatically. No GitHub Release or store listing has been published. The About description remains unset; suggested text is in [repository setup](REPOSITORY-SETUP.md).
 
 Public release work remains: device acceptance, durable versioned downloads, Windows signing, Android release signing, Apple Developer ID signing/notarization, exact third-party sources/relinking information and an owner-selected source licence. Licence texts and component notices are included in the packages; see [third-party notices](../THIRD-PARTY-NOTICES.md).
 

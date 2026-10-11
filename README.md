@@ -61,7 +61,7 @@ Open the verified run, choose the platform artifact and extract the ZIP. SHA-256
 
 Windows has an unsigned installer. The Mac app has an ad-hoc signature; its PKG is not Developer ID signed or notarized. Android uses a CI debug key, with no consistent upgrade signing yet. Operating systems may show trust warnings. Back up your setup before changing development builds.
 
-Public visibility has been requested. The owner must change visibility and About text because the connected file tools cannot edit repository settings. See [repository setup](docs/REPOSITORY-SETUP.md) for the exact description and steps.
+**The repository is public** (verified 11 October 2026). The buttons above currently download temporary CI artifacts. For durable public downloads, publish the installers and checksums as versioned [GitHub Releases](https://github.com/DizygoticCode/DizyTV/releases), then point these buttons directly to the release assets. The build workflow does not publish releases automatically yet. The About description is still unset; the suggested text is in [repository setup](docs/REPOSITORY-SETUP.md).
 
 ## Getting started
 

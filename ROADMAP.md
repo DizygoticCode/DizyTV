@@ -28,7 +28,7 @@ Desktop sleep/wake and automatic recorder startup after reboot are not implement
 
 ## Next — public distribution
 
-- Make the source repository public and set About text/topics. These owner settings cannot be changed through the connected file tools.
+- Source repository made public — verified 11 October 2026. About text/topics still need the owner's repository controls.
 - Select the DizyTV source licence and finish third-party source/relinking requirements.
 - Configure Windows signing, a retained Android release key, and Apple Developer ID signing/notarization.
 - Publish durable versioned downloads and release notes after device acceptance. Current CI artifacts expire after 30 days and require GitHub access.

@@ -1,11 +1,11 @@
 # Repository About and visibility
 
-Requested visibility: **Public**.
+Visibility: **Public**, verified 11 October 2026.
 
-About description:
+About description: currently unset. Suggested text:
 
 > Native TV for Windows, Android and macOS: Ace Stream playback, XMLTV guides, country/genre filters, favourites, local recording, backups and automatic timezones.
 
 Suggested topics: `dizytv`, `iptv`, `xmltv`, `acestream`, `libvlc`, `android`, `windows`, `macos`, `pyside6`, `local-recording`.
 
-The connected GitHub tools used for this work expose file/commit changes but do not expose repository settings or visibility mutations. The repository owner can change visibility at <https://github.com/DizygoticCode/DizyTV/settings> → Danger Zone → Change repository visibility → Make public. Edit the About description with the gear icon on the repository home page. Changing visibility does not by itself sign installers or release application downloads.
+The owner has made the repository public. The connected file tools cannot edit the About description/topics; use the gear icon beside About on the repository home page to set them. Public source visibility does not sign installers or publish release downloads. The README currently links to temporary Actions artifacts; versioned GitHub Releases are the durable public download route.
