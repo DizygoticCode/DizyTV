@@ -62,3 +62,7 @@ Embed the previously omitted pre-install PowerShell safety helper; verify an act
 ## 0.1.5-alpha: country/category browser and optional Ace engine setup
 
 Display-only name normalization; country and genre/category hierarchy in both native UIs without changing stored channel IDs or XMLTV mappings. Provide explicit official Ace Stream Windows setup page option, rather than bundling unlicensed proprietary binaries. Future integration may support properly licensed/offline engine distribution if a redistribution and SDK agreement is obtained from Ace Stream.
+
+## 0.1.6-alpha TV-screen experience
+
+Native TV playback: two fullscreen styles, quick programme guide, now/next and auto-hide now-playing banner, proper play/pause/volume and conditional DVR seeking. **Next**: a bounded local ring-buffer service for genuine live pause/rewind on nonseekable HTTP and HLS feeds, with per-device disk quota, retention, seeking and recording coordination. Avoid claiming universal live timeshift until tested. Retain no copy on disk where not explicitly enabled.

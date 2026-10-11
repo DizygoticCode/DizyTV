@@ -22,7 +22,6 @@ class DesktopTests(unittest.TestCase):
             window.player.get_length.return_value=300000
             window.player.get_time.return_value=120000
             window.player.get_state.return_value=Mock()
-            window.player.get_state.return_value.__str__=lambda _:'State.Playing'
             window.playback_started=1
             window.seek_relative(-30000)
             window.player.set_time.assert_called_with(90000)
