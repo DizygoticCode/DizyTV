@@ -23,6 +23,15 @@ XML = '''<?xml version="1.0"?><tv>
 
 
 class CoreTests(unittest.TestCase):
+    def test_oversized_state_update_preserves_previous_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory); store.update(lambda s:s.update(favourites=['a'*40])); before=store.path.read_bytes()
+            channels=[{'id':f'{i:040x}','name':'N'*512,'group':'UK','tvg_id':'','stream':f'https://example.com/streams/{i}.ts'} for i in range(26000)]
+            with self.assertRaisesRegex(ValueError,'too large'):
+                store.update(lambda s:s.update(channels=channels))
+            self.assertEqual(before,store.path.read_bytes())
+            self.assertEqual(['a'*40],store.read()['favourites'])
+
     def test_country_genre_and_stream_categories(self):
         source = f'#EXTM3U\n#EXTINF:-1 tvg-country="GB" group-title="Sports",Local Sport\nacestream://{ACE}\n#EXTINF:-1 tvg-country="US" radio="true" group-title="Music",Radio\nhttps://example.com/live.ts\n'
         channels = parse_playlist(source)

@@ -207,9 +207,13 @@ class MainActivity:Activity() {
                 store.update { current->require(Domain.objects(current.getJSONArray("jobs")).none { Domain.overlap(it,j) }) { "Timer conflict" }; Domain.objects(current.getJSONArray("jobs")).first { it.getString("id")==id }.put("status","queued") }
                 Scheduler.recover(this); render()
             })
-            if(j.optString("uri").isNotEmpty()) {
-                controls.addView(button("Play file") { page="Live"; render(); val media=Media(lib,Uri.parse(j.getString("uri"))); player.media=media; media.release(); player.play() })
-                if(j.getString("status") !in Domain.active) controls.addView(button("Delete file") { AlertDialog.Builder(this).setTitle("Delete this local recording?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_->attempt { contentResolver.delete(Uri.parse(j.getString("uri")),null,null); store.update { it.put("jobs",JSONArray(Domain.objects(it.getJSONArray("jobs")).filter { job->job.getString("id")!=id })) }; render() } }.show() })
+            val uris=Domain.recordingUris(j)
+            if(uris.isNotEmpty()) {
+                controls.addView(button("Play file") {
+                    fun play(uri:String) { page="Live"; render(); val media=Media(lib,Uri.parse(uri)); player.media=media; media.release(); player.play() }
+                    if(uris.size==1) play(uris[0]) else AlertDialog.Builder(this).setTitle("Preserved recording segments").setItems(uris.mapIndexed { i,_->"Segment ${i+1}" }.toTypedArray()) { _,i->attempt { play(uris[i]) } }.show()
+                })
+                if(j.getString("status") !in Domain.active) controls.addView(button("Delete file") { AlertDialog.Builder(this).setTitle("Delete this recording and its preserved segments?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_->attempt { uris.forEach { contentResolver.delete(Uri.parse(it),null,null) }; store.update { it.put("jobs",JSONArray(Domain.objects(it.getJSONArray("jobs")).filter { job->job.getString("id")!=id })) }; render() } }.show() })
             }
             list.addView(controls)
         }
@@ -251,7 +255,7 @@ class MainActivity:Activity() {
             val names=JSONObject(); val programmes=JSONArray()
             for(url in urls) { val data=Feeds.xmltv(Feeds.download(url),settings.getInt("epg_offset_minutes")); data.getJSONObject("names").keys().forEach { names.put(it,data.getJSONObject("names").get(it)) }; Domain.objects(data.getJSONArray("programmes")).forEach { programmes.put(it) } }
             JSONObject().put("names",names).put("programmes",programmes)
-        }; handler.post { refreshing=false; result.onSuccess { guide=it; File(filesDir,"guide.json").writeText(it.toString()); status.text="Imported ${it.getJSONArray("programmes").length()} programmes • saved UTC timers unchanged"; render() }.onFailure { status.text="Guide refresh failed; cache retained: ${it.message}" } } }
+        }; handler.post { refreshing=false; result.onSuccess { fresh->attempt { JsonCache.write(File(filesDir,"guide.json"),fresh.toString()); guide=fresh; status.text="Imported ${fresh.getJSONArray("programmes").length()} programmes • saved UTC timers unchanged"; render() } }.onFailure { status.text="Guide refresh failed; cache retained: ${it.message}" } } }
     }
     @Deprecated("Native document picker compatibility")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {

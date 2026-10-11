@@ -301,9 +301,8 @@ def restore_backup(payload, now=None):
     state = copy.deepcopy(validate_state(backup.get('data')))
     state['settings']['recording_dir'] = ''
     now = int(time.time()) if now is None else now
+    state['jobs']=[{k:j[k] for k in ('id','channel_id','title','start','end','status')} for j in state['jobs']]
     for job in state['jobs']:
-        for key in ('path', 'uri', 'destination', 'error', 'bytes'):
-            job.pop(key, None)
         if job['status'] not in TERMINAL:
             job['status'] = 'missed' if job['end'] <= now else 'paused'
     return state

@@ -82,6 +82,30 @@ object Domain {
         return JSONObject().put("id",UUID.randomUUID().toString()).put("channel_id",channel).put("title",title.take(1024)).put("start",start-before*60).put("end",end+after*60).put("status","queued").put("bytes",0)
     }
     fun overlap(a:JSONObject,b:JSONObject)=a.getString("id")!=b.getString("id") && a.getString("status") in active && a.getLong("start")<b.getLong("end") && b.getLong("start")<a.getLong("end")
+    fun segmentBytes(job:JSONObject)=objects(job.optJSONArray("segments")?:JSONArray()).sumOf { it.optLong("bytes") }
+    fun recordingUris(job:JSONObject)=(objects(job.optJSONArray("segments")?:JSONArray()).map { it.optString("uri") }+job.optString("uri")).filter { it.isNotEmpty() }.distinct()
+    fun claim(job:JSONObject,now:Long):Boolean {
+        if(job.getString("status") !in active) return false
+        if(job.getLong("end")<=now) { job.put("status",if(job.optLong("bytes")>0) "partial" else "missed").put("error","Timer expired while waiting for recorder"); return false }
+        if(job.getLong("start")>now) return false
+        job.put("resume_late",now-job.getLong("start")>5 || job.getString("status") in listOf("starting","recording"))
+        val segments=job.optJSONArray("segments")?:JSONArray()
+        for(key in listOf("uri","path")) {
+            val previous=job.optString(key)
+            if(previous.isNotEmpty() && objects(segments).none { it.optString(key)==previous }) segments.put(JSONObject().put(key,previous).put("bytes",maxOf(0,job.optLong("bytes")-segmentBytes(job))).put("status","partial"))
+            job.remove(key)
+        }
+        job.put("segments",segments).put("status","recording").put("bytes",segmentBytes(job)).put("error","")
+        return true
+    }
+    fun finish(job:JSONObject,result:JSONObject) {
+        val previous=segmentBytes(job); val newBytes=result.optLong("bytes"); val bytes=previous+newBytes
+        var status=result.getString("status"); var error=result.optString("error")
+        if(previous>0 || job.optBoolean("resume_late") && status=="completed") { if(bytes>0) status="partial"; if(error.isEmpty()) error="Recording resumed after interruption or started late" }
+        if(job.getString("status")=="cancelled" && bytes==0L) { status="cancelled"; error="Recording stopped by user" }
+        job.put("status",status).put("bytes",bytes).put("error",error)
+        if(newBytes>0 && result.has("uri")) job.put("uri",result.getString("uri")) else job.remove("uri")
+    }
     fun filename(title:String,now:Long)=DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.of("UTC")).format(Instant.ofEpochSecond(now))+"_"+title.replace(Regex("[<>:\"/\\\\|?*\\x00-\\x1f]"),"_").trim(' ','.').take(90).ifEmpty { "Recording" }+".ts"
     private fun number(o:JSONObject,key:String,min:Long,max:Long) {
         val n=o.get(key); require((n is Int || n is Long) && o.getLong(key) in min..max) { "Invalid $key" }
@@ -133,10 +157,13 @@ object Domain {
             require(text.toByteArray().size<=MAX_BACKUP) { "Backup exceeds 16 MiB" }; val backup=JSONObject(text)
             require(backup.getString("app")=="DizyTV" && backup.get("version") is Int && backup.getInt("version")==1) { "Unsupported backup version" }
             val s=validate(backup.getJSONObject("data")); s.getJSONObject("settings").put("recording_dir","")
-            for(j in objects(s.getJSONArray("jobs"))) {
-                for(k in listOf("path","uri","destination","error","bytes")) j.remove(k)
+            val jobs=JSONArray()
+            for(original in objects(s.getJSONArray("jobs"))) {
+                val j=JSONObject(); for(k in listOf("id","channel_id","title","start","end","status")) j.put(k,original.get(k))
                 if(j.getString("status") !in terminal) j.put("status",if(j.getLong("end")<=now) "missed" else "paused")
+                jobs.put(j)
             }
+            s.put("jobs",jobs)
             return s
         } catch(e:Exception) { throw IllegalArgumentException("Cannot restore backup: ${e.message}",e) }
     }

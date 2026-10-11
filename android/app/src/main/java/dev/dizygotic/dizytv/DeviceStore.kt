@@ -22,4 +22,10 @@ class DeviceStore(context:Context) {
         state
     }
     fun job(id:String,change:(JSONObject)->Unit)=update { s->Domain.objects(s.getJSONArray("jobs")).firstOrNull { it.getString("id")==id }?.let(change) }
+    fun claim(id:String,now:Long):Pair<JSONObject,JSONObject>? {
+        var accepted=false
+        val state=update { s->Domain.objects(s.getJSONArray("jobs")).firstOrNull { it.getString("id")==id }?.let { accepted=Domain.claim(it,now) } }
+        if(!accepted) return null
+        return state to Domain.objects(state.getJSONArray("jobs")).first { it.getString("id")==id }
+    }
 }

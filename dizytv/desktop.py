@@ -238,7 +238,10 @@ class MainWindow(QMainWindow):
     def async_task(self,function,success):
         if self.task:self.status.setText('A refresh is already running'); return
         self.task=Task(function)
-        def done(result):self.task=None; success(result)
+        def done(result):
+            self.task=None
+            try:success(result)
+            except (ValueError,OSError) as exc:fail(str(exc))
         def fail(message):self.task=None; self.status.setText('Refresh failed — cached data retained: '+message)
         self.task.signals.success.connect(done); self.task.signals.failure.connect(fail); self.pool.start(self.task)
     def refresh_channels(self):
@@ -346,14 +349,23 @@ class MainWindow(QMainWindow):
         except ValueError as exc:self.error(str(exc))
     def play_file(self):
         job=self.selected_job()
-        if job and job.get('path') and Path(job['path']).is_file():self.play_url(str(Path(job['path']).resolve()))
-        elif job:self.error('This recording has no available local file')
+        if not job:return
+        paths=list(dict.fromkeys([s.get('path','') for s in job.get('segments',[])]+[job.get('path','')]))
+        paths=[p for p in paths if p and Path(p).is_file()]
+        if not paths:self.error('This recording has no available local file'); return
+        if len(paths)>1:
+            selected,ok=QInputDialog.getItem(self,'Play recording segment','An interrupted recording contains multiple preserved files',paths,0,False)
+            if not ok:return
+        else:selected=paths[0]
+        self.play_url(str(Path(selected).resolve()))
     def delete_file(self):
         job=self.selected_job()
         if not job or job['status'] in ('queued','starting','recording'):return
         if QMessageBox.question(self,'Delete recording','Delete this local recording file?')==QMessageBox.Yes:
             try:
-                if job.get('path'):Path(job['path']).unlink(missing_ok=True)
+                paths=[s.get('path','') for s in job.get('segments',[])]+[job.get('path','')]
+                for path in set(paths):
+                    if path:Path(path).unlink(missing_ok=True)
                 self.store.update(lambda s:s.update(jobs=[j for j in s['jobs'] if j['id']!=job['id']])); self.tick()
             except OSError as exc:self.error(str(exc))
     def backup(self):

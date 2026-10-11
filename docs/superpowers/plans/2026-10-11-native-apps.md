@@ -4,7 +4,7 @@
 
 **Architecture:** Python standard-library domain/storage/recorder core, native Qt desktop clients, and a Kotlin Android client with libVLC, Storage Access Framework, alarms and a foreground recorder. Both clients consume the same versioned JSON backup contract. Device timers store UTC seconds. No deployment to DizyServer is part of this work.
 
-**Tech stack:** Python 3.12, PySide6 6.11.2, python-vlc 3.0.21203, PyInstaller 6.22.3, tzdata 2026.2; Kotlin/JDK 17, Android Gradle Plugin 8.9.2, Gradle 8.11.1, Android API 35, native libVLC. Desktop VLC and the Ace Stream engine are separate installations. macOS initially connects to a configured compatible remote engine.
+**Tech stack:** Python 3.12, PySide6 6.11.2, python-vlc 3.0.21203, PyInstaller 6.22.3, tzdata 2026.2; Kotlin/JDK 17, Android Gradle Plugin 8.11.1, Gradle 8.13, Android compile API 36 (target 35), native libVLC. Desktop VLC and the Ace Stream engine are separate installations. macOS initially connects to a configured compatible remote engine.
 
 **Spec:** [Product design](../specs/2026-10-11-dizytv-design.md), extended by the user's requests for favourites, local backups and timezone detection/selection.
 

@@ -24,6 +24,8 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
             raise ValueError('Choose an available recording folder in Settings')
         if shutil.disk_usage(folder).free <= reserve:
             raise ValueError('Free space is below the configured reserve')
+        if cancel():
+            raise ValueError('Recording stopped by user')
         name = safe_filename(title, int(time.time()))
         outpath = folder/(Path(name).stem + '_' + uuid.uuid4().hex[:8] + '.ts.part')
         request = Request(url, headers={'User-Agent':'DizyTV/0.1'})
@@ -53,7 +55,7 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
         result['status'] = 'completed' if result['bytes'] else 'failed'
     except Exception as exc:
         result['error'] = str(exc)[:1024]
-        result['status'] = 'partial' if result['bytes'] else 'failed'
+        result['status'] = 'partial' if result['bytes'] else ('cancelled' if 'stopped by user' in result['error'] else 'failed')
     finally:
         if outpath and outpath.exists():
             if result['bytes']:
@@ -86,6 +88,43 @@ def update_job(store, job_id, values):
     store.update(change)
 
 
+def claim_job(store, job_id, now=None):
+    """Check and claim the current job in the same locked state transaction."""
+    now=int(time.time()) if now is None else now
+    accepted=[]
+    def change(state):
+        for job in state['jobs']:
+            if job['id']!=job_id or job['status'] not in ACTIVE or not job['start']<=now<job['end']:
+                continue
+            job['resume_late']=now-job['start']>5 or job['status'] in ('starting','recording')
+            previous=job.get('path','')
+            if previous and Path(previous).is_file():
+                segments=job.setdefault('segments',[])
+                if not any(s.get('path')==previous for s in segments):
+                    segments.append({'path':previous,'bytes':Path(previous).stat().st_size,'status':'partial'})
+            job.update(status='recording',path='',bytes=sum(s.get('bytes',0) for s in job.get('segments',[])),error='')
+            accepted.append(job['id'])
+    state=store.update(change)
+    if not accepted:
+        return None
+    return state, next(j for j in state['jobs'] if j['id']==job_id)
+
+
+def finish_job(store,job_id,result):
+    def change(state):
+        for job in state['jobs']:
+            if job['id']!=job_id:continue
+            prior=sum(s.get('bytes',0) for s in job.get('segments',[]))
+            finished=dict(result,bytes=prior+result.get('bytes',0))
+            if prior or job.get('resume_late') and finished['status']=='completed':
+                finished['status']='partial' if finished['bytes'] else finished['status']
+                finished['error']=finished.get('error') or 'Recording resumed after interruption or started late'
+            if job['status']=='cancelled' and not finished['bytes']:
+                finished.update(status='cancelled',error='Recording stopped by user')
+            job.update(finished)
+    store.update(change)
+
+
 def worker(directory=None):
     store = Store(directory)
     try:
@@ -93,23 +132,21 @@ def worker(directory=None):
             while True:
                 ready = due_jobs(store)
                 if ready:
-                    job = ready[0]
-                    state = store.read()
+                    claimed=claim_job(store,ready[0]['id'])
+                    if claimed is None:continue
+                    state,job=claimed
                     channel = next((c for c in state['channels'] if c['id'] == job['channel_id']),None)
                     if not channel:
-                        update_job(store,job['id'],{'status':'failed','error':'Channel is missing; refresh or restore the catalogue'})
+                        finish_job(store,job['id'],{'status':'failed','bytes':0,'path':'','error':'Channel is missing; refresh or restore the catalogue'})
                         continue
-                    late = time.time() - job['start'] > 5 or job['status'] in ('starting','recording')
-                    update_job(store,job['id'],{'status':'recording','error':''})
+                    prior=sum(s.get('bytes',0) for s in job.get('segments',[]))
                     def cancelled():
                         return not any(j['id']==job['id'] and j['status']=='recording' for j in store.read()['jobs'])
                     result = record_stream(stream_url(channel['stream'],state['settings']['engine_url']),
                                            state['settings']['recording_dir'],job['title'],job['end'],
                                            state['settings']['reserve_bytes'],cancelled,
-                                           lambda size,path:update_job(store,job['id'],{'bytes':size,'path':path}))
-                    if late and result['status']=='completed':
-                        result.update(status='partial',error='Recording started late or resumed after interruption')
-                    update_job(store,job['id'],result)
+                                           lambda size,path:update_job(store,job['id'],{'bytes':prior+size,'path':path}))
+                    finish_job(store,job['id'],result)
                 time.sleep(1)
     except (BlockingIOError, PermissionError):
         return

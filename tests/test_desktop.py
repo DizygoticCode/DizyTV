@@ -10,6 +10,16 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_preserved_segment_is_playable_after_failed_resume(self):
+        from pathlib import Path
+        from dizytv.core import make_job
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory); path=Path(directory)/'earlier.ts'; path.write_bytes(b'\x47'+bytes(187))
+            job=make_job('a'*40,'News',2000000000,2000000060,0,0); job.update(status='partial',path='',segments=[{'path':str(path),'bytes':188,'status':'partial'}])
+            store.update(lambda s:s.update(jobs=[job])); window=MainWindow(store,start_worker=False); window.jobs.selectRow(0)
+            played=[]; window.play_url=played.append; window.play_file()
+            self.assertEqual([str(path.resolve())],played); window.close()
+
     def test_country_genre_filter_also_filters_epg_rows(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as directory:

@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from dizytv.recorder import record_stream, due_jobs
+from dizytv.recorder import record_stream, due_jobs, claim_job, finish_job
 from dizytv.storage import Store, file_lock
 from dizytv.core import make_job
 
@@ -29,6 +29,36 @@ class Source(BaseHTTPRequestHandler):
 
 
 class RecorderTests(unittest.TestCase):
+    def test_atomic_claim_respects_cancellation_and_removal(self):
+        now=2000000000
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory); job=make_job('a'*40,'News',now-1,now+60,0,0)
+            store.update(lambda s:s.update(jobs=[job]))
+            candidate=due_jobs(store,now)[0]
+            store.update(lambda s:s['jobs'][0].update(status='cancelled'))
+            self.assertIsNone(claim_job(store,candidate['id'],now))
+            self.assertEqual('cancelled',store.read()['jobs'][0]['status'])
+            store.update(lambda s:s.update(jobs=[]))
+            self.assertIsNone(claim_job(store,candidate['id'],now))
+
+    def test_resume_failure_and_success_preserve_previous_segments(self):
+        now=2000000000
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory); original=Path(directory)/'old.ts.part'; original.write_bytes(PACKETS)
+            job=make_job('a'*40,'News',now-30,now+60,0,0); job.update(status='recording',path=str(original),bytes=len(PACKETS))
+            store.update(lambda s:s.update(jobs=[job]))
+            self.assertIsNotNone(claim_job(store,job['id'],now))
+            finish_job(store,job['id'],{'status':'failed','bytes':0,'path':'','error':'Engine unavailable'})
+            saved=store.read()['jobs'][0]
+            self.assertEqual('partial',saved['status']); self.assertEqual(len(PACKETS),saved['bytes'])
+            self.assertEqual(str(original),saved['segments'][0]['path']); self.assertTrue(original.exists())
+            saved['status']='queued'; store.update(lambda s:s.update(jobs=[saved]))
+            claim_job(store,job['id'],now)
+            second=Path(directory)/'new.ts'; second.write_bytes(PACKETS)
+            finish_job(store,job['id'],{'status':'completed','bytes':len(PACKETS),'path':str(second),'error':''})
+            saved=store.read()['jobs'][0]
+            self.assertEqual(2*len(PACKETS),saved['bytes']); self.assertEqual(str(original),saved['segments'][0]['path']); self.assertEqual(str(second),saved['path'])
+
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(('127.0.0.1',0), Source)

@@ -1,7 +1,7 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "dev.dizygotic.dizytv"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "dev.dizygotic.dizytv"
         minSdk = 26

@@ -1,6 +1,6 @@
 # Native Android alpha
 
-Build with JDK 17, Android SDK 35 and Gradle 8.11.1:
+Build with JDK 17, Android SDK 36 and Gradle 8.13:
 
 ```bash
 gradle -p android testDebugUnitTest lintDebug assembleDebug

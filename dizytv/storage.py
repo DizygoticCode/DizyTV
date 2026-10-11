@@ -40,13 +40,16 @@ def file_lock(path, blocking=True):
         handle.close()  # Closing releases an OS lock, including on process death.
 
 
-def atomic_json(path, value):
+def atomic_json(path, value, max_bytes=None):
+    payload=json.dumps(value,ensure_ascii=False).encode('utf-8')
+    if max_bytes is not None and len(payload)>max_bytes:
+        raise ValueError('Device state is too large; cached data was retained')
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix=path.name+'.', dir=path.parent)
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as out:
-            json.dump(value, out, ensure_ascii=False)
+        with os.fdopen(fd, 'wb') as out:
+            out.write(payload)
             out.flush(); os.fsync(out.fileno())
         os.replace(temp, path)
     finally:
@@ -77,7 +80,7 @@ class Store:
             state = self._read()
             change(state)
             validate_state(state)
-            atomic_json(self.path, state)
+            atomic_json(self.path, state, max_bytes=MAX_BACKUP)
             return copy.deepcopy(state)
 
     def replace(self, value):

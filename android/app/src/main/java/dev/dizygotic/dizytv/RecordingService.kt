@@ -11,6 +11,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.Handler
+import android.os.Looper
 import android.system.Os
 import androidx.documentfile.provider.DocumentFile
 import java.net.HttpURLConnection
@@ -21,8 +23,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 
 class RecordingService:Service() {
-    private val running=AtomicBoolean(false); private val stopping=AtomicBoolean(false)
-    private val executor=Executors.newSingleThreadExecutor(); private var current:String?=null
+    private val queue=RecordingQueue(); private val stopping=AtomicBoolean(false)
+    private val executor=Executors.newSingleThreadExecutor(); @Volatile private var current:String?=null
+    private val main=Handler(Looper.getMainLooper())
     private var wake:PowerManager.WakeLock?=null
     override fun onBind(intent:Intent?):IBinder?=null
     override fun onCreate() {
@@ -35,33 +38,34 @@ class RecordingService:Service() {
         return Notification.Builder(this,"recording").setSmallIcon(R.drawable.ic_record).setContentTitle("DizyTV is recording").setContentText(title).setOngoing(true).setContentIntent(open).addAction(Notification.Action.Builder(null,"Stop",stop).build()).build()
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
-        if(intent?.action=="stop") { stopping.set(true); return START_NOT_STICKY }
+        queue.observe(startId)
+        if(intent?.action=="stop") { stopping.set(true); if(queue.size()==0) stopSelfResult(startId); return START_NOT_STICKY }
         val id=intent?.getStringExtra("job_id")?:run { stopSelf(); return START_NOT_STICKY }
-        if(!running.compareAndSet(false,true)) {
-            if(current!=id) DeviceStore(this).job(id) { it.put("status","failed").put("error","Another recording is already running") }
-            return START_NOT_STICKY
-        }
-        current=id; stopping.set(false)
+        if(!queue.enqueue(id,startId)) return START_NOT_STICKY
         if(Build.VERSION.SDK_INT>=34) startForeground(1,notification("Starting…"),ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1,notification("Starting…"))
-        wake=getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"DizyTV:recording").also { it.acquire(24*60*60*1000L) }
-        executor.execute { try { record(id) } finally { if(wake?.isHeld==true) wake?.release(); running.set(false); current=null; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }
+        if(wake?.isHeld!=true) wake=getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"DizyTV:recording").also { it.acquire(24*60*60*1000L) }
+        executor.execute {
+            current=id; stopping.set(false)
+            try { record(id) } finally {
+                current=null; queue.finish(id)
+                main.post { if(queue.size()==0) { if(wake?.isHeld==true) wake?.release(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(queue.latestStartId) } }
+            }
+        }
         return START_NOT_STICKY
     }
     private fun record(id:String) {
         val store=DeviceStore(this); var bytes=0L; var document:DocumentFile?=null; var status="failed"; var error=""; var connection:HttpURLConnection?=null; var accepted=false
         try {
-            val state=store.read(); val job=Domain.objects(state.getJSONArray("jobs")).firstOrNull { it.getString("id")==id }?:return
-            if(job.getString("status") !in Domain.active) return
+            val claimed=store.claim(id,Instant.now().epochSecond)?:return; val state=claimed.first; val job=claimed.second
             accepted=true
             val now=Instant.now().epochSecond
             if(job.getLong("end")<=now) { status="missed"; error="Timer already expired"; return }
-            val late=now-job.getLong("start")>5 || job.getString("status")=="recording"
+            val late=job.optBoolean("resume_late"); val prior=Domain.segmentBytes(job)
             val settings=state.getJSONObject("settings"); val uri=Uri.parse(settings.getString("recording_dir"))
             require(uri.scheme=="content" && contentResolver.persistedUriPermissions.any { it.uri==uri && it.isWritePermission }) { "Choose a recording folder again; storage permission is unavailable" }
             val folder=DocumentFile.fromTreeUri(this,uri)?:throw IllegalArgumentException("Recording folder unavailable")
             require(folder.canWrite()) { "Recording folder is not writable" }
             val channel=Domain.objects(state.getJSONArray("channels")).firstOrNull { it.getString("id")==job.getString("channel_id") }?:throw IllegalArgumentException("Channel missing")
-            store.job(id) { it.put("status","recording").put("bytes",0).put("error","") }
             getSystemService(NotificationManager::class.java).notify(1,notification(job.getString("title")))
             document=folder.createFile("video/mp2t",Domain.filename(job.getString("title"),now))?:throw IllegalArgumentException("Could not create recording file")
             store.job(id) { it.put("uri",document.uri.toString()) }
@@ -82,7 +86,7 @@ class RecordingService:Service() {
                             val n=input.read(buffer); require(n>0) { "Stream ended before timer" }
                             if(first) { require(buffer[0]==0x47.toByte()) { "Engine did not return MPEG-TS" }; first=false }
                             output.write(buffer,0,n); bytes+=n
-                            if(Instant.now().epochSecond-last>=2) { store.job(id) { it.put("bytes",bytes) }; last=Instant.now().epochSecond }
+                            if(Instant.now().epochSecond-last>=2) { store.job(id) { it.put("bytes",prior+bytes) }; last=Instant.now().epochSecond }
                         }
                         output.flush()
                     }
@@ -94,7 +98,11 @@ class RecordingService:Service() {
         finally {
             connection?.disconnect()
             if(bytes==0L) document?.delete()
-            if(accepted) store.job(id) { it.put("status",status).put("bytes",bytes).put("error",error); if(bytes==0L) it.remove("uri") }
+            if(accepted) store.job(id) { job->
+                val result=JSONObject().put("status",status).put("bytes",bytes).put("error",error)
+                if(bytes>0 && document!=null) result.put("uri",document.uri.toString())
+                Domain.finish(job,result)
+            }
             sendBroadcast(Intent("dev.dizygotic.dizytv.STATE_CHANGED").setPackage(packageName))
         }
     }
