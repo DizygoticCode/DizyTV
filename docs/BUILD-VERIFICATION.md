@@ -61,3 +61,10 @@ A real 0.1.2 upgrade failed when background DizyTV.exe and libcrypto-3.dll remai
 - The 0.1.3 Windows installer preflight and end-to-end upgrade CI are retained; 0.1.4 gets new direct native assets and distinct checksums.
 
 These entries describe intended code coverage only. A real Windows/Android playback test and signed shipping workflow are still outstanding.
+
+## 0.1.5-alpha candidate: source naming and hierarchical browser
+
+- Preserve every original playlist channel name, stream URI, `tvg_id`, favourite/recording identity and manually assigned category/mapping. Use `display_channel_name` / `Domain.displayName` only for user-facing labels, removing provider circle glyphs and trailing technical `@HD/@UK` badges while retaining legitimate brand punctuation such as AT&T and Great! Movies.
+- Countries > categories > channels navigator in Windows/macOS and Android. Category fallback derives from genre or safe channel-name/group hints; nothing is silently relabelled in original metadata.
+- Optional (unchecked) Windows setup task opens the **official** Ace Stream download site. We do **not** redistribute, download or execute their installer, and normal HLS/HTTP playback never depends on Ace Stream. Installed Windows engine auto-launch is retained; users accept third-party terms themselves.
+- CI coverage: Qt country tree, EPG and identity preservation; Android domain naming and categories; explicit external provider setup link; Inno installer upgrade integration. Real video playback and provider engine setup still require device validation.
