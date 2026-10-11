@@ -11,7 +11,14 @@ class DeviceStore(context:Context) {
     fun read():JSONObject=synchronized(lock) {
         if(!file.baseFile.exists()) Domain.defaults() else {
             require(file.baseFile.length()<=Domain.MAX_BACKUP) { "Device state exceeds 16 MiB" }
-            Domain.validate(JSONObject(file.openRead().use { it.readBytes().toString(Charsets.UTF_8) }))
+            val state=Domain.validate(JSONObject(file.openRead().use { it.readBytes().toString(Charsets.UTF_8) }))
+            val settings=state.getJSONObject("settings")
+            if(!settings.has("playlist_urls")) {
+                settings.put("playlist_urls",org.json.JSONArray(Sources.urls(settings)))
+                if(settings.getJSONArray("xmltv_urls").length()==0)
+                    settings.put("xmltv_urls",org.json.JSONArray(Sources.guides))
+            }
+            state
         }
     }
     fun update(change:(JSONObject)->Unit):JSONObject=synchronized(lock) {

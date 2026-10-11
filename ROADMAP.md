@@ -40,3 +40,7 @@ Desktop sleep/wake and automatic recorder startup after reboot are not implement
 - Deploy only when requested; retain local recording and keep existing Dizy services separate.
 
 Simultaneous multi-channel recording, series recording, timeshift and catch-up/VOD are later work. A self-contained Mac Ace Stream engine also requires a separate feasibility and redistribution check.
+
+## Free playlist and XMLTV import (0.1.1-alpha)
+
+Implemented for Windows, macOS and Android: selectable public playlist URLs, source-aware refresh with last-good fallback, UK/US/free international preset sources, UK/US XMLTV guide presets and conservative EPG matching. Streams are user-accessed on-device without redistributing feeds. Stream validation, licensing review, stable Android release signing, Ace engine integration, Xtream Codes accounts, broader EPG guide collection and the self-hosted metadata service remain separate work.

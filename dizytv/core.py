@@ -65,8 +65,10 @@ def catalogue(state):
 
 
 def default_state():
+    from .sources import DEFAULT_PLAYLIST_URLS, DEFAULT_GUIDE_URLS
     return {'settings': {'playlist_url': 'https://search-ace.stream/playlist',
-                         'xmltv_urls': [], 'engine_url': 'http://127.0.0.1:6878',
+                         'playlist_urls': list(DEFAULT_PLAYLIST_URLS),
+                         'xmltv_urls': list(DEFAULT_GUIDE_URLS), 'engine_url': 'http://127.0.0.1:6878',
                          'timezone': 'auto', 'epg_offset_minutes': 0,
                          'padding_before': 2, 'padding_after': 5,
                          'reserve_bytes': 1073741824, 'recording_dir': ''},
@@ -190,6 +192,28 @@ def format_time(utc_seconds, selected='auto', day=True, detected=None):
     return value.strftime('%a %d %b %H:%M %Z' if day else '%H:%M %Z')
 
 
+def _guide_name(value):
+    # Exact name only after removing quality suffixes. Regional ambiguity is rejected.
+    value = re.sub(r'\s*\((?:\d{3,4}p|HD|SD)\)', '', value, flags=re.I)
+    value = re.sub(r'\s+(?:HD|SD|FHD)$', '', value, flags=re.I)
+    return re.sub(r'\s+', ' ', value).strip().casefold()
+
+
+def match_guide(channel, mappings, guide_names):
+    if channel['id'] in mappings:
+        return mappings[channel['id']]
+    cid = channel.get('tvg_id', '')
+    if cid in guide_names:
+        return cid
+    if cid:
+        matches = [key for key in guide_names if key.casefold() == cid.casefold()]
+        if len(matches) == 1:
+            return matches[0]
+    name = _guide_name(channel['name'])
+    matches = [key for key, label in guide_names.items() if _guide_name(label) == name]
+    return matches[0] if len(matches) == 1 else cid
+
+
 def make_job(channel_id, title, start, end, before=2, after=5):
     if end <= start or before < 0 or after < 0:
         raise ValueError('A recording must end after its start')
@@ -220,7 +244,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -228,6 +252,11 @@ def validate_state(state):
         raise ValueError('Use at most 20 guide sources')
     for url in settings['xmltv_urls']:
         http_url(url)
+    if 'playlist_urls' in settings:
+        if not isinstance(settings['playlist_urls'], list) or not 1 <= len(settings['playlist_urls']) <= 16:
+            raise ValueError('Use 1 to 16 playlist URLs')
+        for url in settings['playlist_urls']:
+            http_url(url)
     try:
         if settings['timezone'] != 'auto':
             ZoneInfo(settings['timezone'])
@@ -249,6 +278,8 @@ def validate_state(state):
         if not re.fullmatch('[a-f0-9]{40}', ch['id']) or ch['id'] in ids:
             raise ValueError('Duplicate or invalid channel identifier')
         ids.add(ch['id'])
+        if 'source' in ch:
+            http_url(ch['source'])
         for key in ('country','genre','kind','transport'):
             if key in ch and (not isinstance(ch[key],str) or len(ch[key])>512):
                 raise ValueError('Invalid channel category')
@@ -290,8 +321,12 @@ def export_backup(state):
     for key in ('playlist_url', 'engine_url'):
         data['settings'][key] = _redact_url(data['settings'][key])
     data['settings']['xmltv_urls'] = [_redact_url(u) for u in data['settings']['xmltv_urls']]
+    if 'playlist_urls' in data['settings']:
+        data['settings']['playlist_urls'] = [_redact_url(u) for u in data['settings']['playlist_urls']]
     for ch in data['channels']:
         ch['stream'] = _redact_url(ch['stream'])
+        if 'source' in ch:
+            ch['source'] = _redact_url(ch['source'])
     payload = json.dumps({'app':'DizyTV', 'version':1, 'data':data}, ensure_ascii=False, indent=2)
     if len(payload.encode('utf-8')) > MAX_BACKUP:
         raise ValueError('Backup is too large')

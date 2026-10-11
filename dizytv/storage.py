@@ -69,7 +69,15 @@ class Store:
         if self.path.stat().st_size > MAX_BACKUP:
             raise ValueError('Device state is too large')
         with self.path.open(encoding='utf-8') as source:
-            return validate_state(json.load(source))
+            state = validate_state(json.load(source))
+        # Upgrade 0.1.0 data without overwriting existing custom guide choices.
+        settings = state['settings']
+        if 'playlist_urls' not in settings:
+            from .sources import configured_playlists, DEFAULT_GUIDE_URLS
+            settings['playlist_urls'] = configured_playlists(settings)
+            if not settings['xmltv_urls']:
+                settings['xmltv_urls'] = list(DEFAULT_GUIDE_URLS)
+        return state
 
     def read(self):
         with _mutex, file_lock(self.directory/'state.lock'):

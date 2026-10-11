@@ -28,7 +28,9 @@ object Domain {
         val explicitGenre=(attrs["tvg-genre"]?:attrs["genre"]).orEmpty(); val genre=if(explicitGenre.isNotEmpty()) normaliseGenre(explicitGenre) else normaliseGenre(group).takeIf { g->genres.any { it.first==g } }?:"Unspecified"
         return JSONObject().put("country",country).put("genre",genre).put("kind",if(attrs["radio"].orEmpty().lowercase() in listOf("true","1","yes")) "Radio" else "TV").put("transport",if(aceId(stream)!=null) "Ace Stream" else "HTTP")
     }
-    fun defaults()=JSONObject("""{"settings":{"playlist_url":"https://search-ace.stream/playlist","xmltv_urls":[],"engine_url":"http://127.0.0.1:6878","timezone":"auto","epg_offset_minutes":0,"padding_before":2,"padding_after":5,"reserve_bytes":1073741824,"recording_dir":""},"channels":[],"favourites":[],"mappings":{},"jobs":[]}""")
+    fun defaults()=JSONObject("""{"settings":{"playlist_url":"https://search-ace.stream/playlist","xmltv_urls":[],"engine_url":"http://127.0.0.1:6878","timezone":"auto","epg_offset_minutes":0,"padding_before":2,"padding_after":5,"reserve_bytes":1073741824,"recording_dir":""},"channels":[],"favourites":[],"mappings":{},"jobs":[]}""").apply {
+        getJSONObject("settings").put("playlist_urls",JSONArray(Sources.presets)).put("xmltv_urls",JSONArray(Sources.guides))
+    }
     fun catalogue(state:JSONObject)=objects(state.getJSONArray("channels")).map { original->
         val channel=JSONObject(original.toString()); val saved=state.optJSONObject("category_overrides")?.optJSONObject(channel.getString("id"))
         saved?.keys()?.forEach { channel.put(it,saved.get(it)) }; channel
@@ -79,6 +81,22 @@ object Domain {
         val offset=m.groupValues[2].takeIf { it.isNotEmpty() && it !in listOf("Z","UTC","GMT") }?:"+0000"
         return OffsetDateTime.parse(m.groupValues[1]+" "+offset,DateTimeFormatter.ofPattern("uuuuMMddHHmmss XX").withResolverStyle(ResolverStyle.STRICT)).toEpochSecond()
     }
+    private fun guideName(raw:String):String = raw
+        .replace(Regex("\\s*\\((?:\\d{3,4}p|HD|SD)\\)",RegexOption.IGNORE_CASE),"")
+        .replace(Regex("\\s+(?:HD|SD|FHD)$",RegexOption.IGNORE_CASE),"")
+        .trim().replace(Regex("\\s+")," ").lowercase(Locale.ROOT)
+
+    fun matchGuide(ch:JSONObject,mappings:JSONObject,names:JSONObject):String {
+        val id=ch.getString("id")
+        if(mappings.has(id)) return mappings.getString(id) // Respect explicit No mapping.
+        val tvg=ch.optString("tvg_id")
+        if(names.has(tvg)) return tvg
+        val keys=names.keys().asSequence().toList()
+        if(tvg.isNotEmpty()) keys.filter { it.equals(tvg,true) }.singleOrNull()?.let { return it }
+        val normalized=guideName(ch.getString("name"))
+        return keys.filter { guideName(names.optString(it))==normalized }.singleOrNull()?:tvg
+    }
+
     fun zone(value:String)=if(value=="auto") ZoneId.systemDefault() else ZoneId.of(value)
     fun time(seconds:Long,timezone:String,short:Boolean=false)=DateTimeFormatter.ofPattern(if(short) "HH:mm z" else "EEE dd MMM HH:mm z",Locale.UK).withZone(zone(timezone)).format(Instant.ofEpochSecond(seconds))
     fun job(channel:String,title:String,start:Long,end:Long,before:Int=2,after:Int=5):JSONObject {
@@ -119,6 +137,11 @@ object Domain {
             val settings=s.getJSONObject("settings")
             http(settings.getString("playlist_url")); http(settings.getString("engine_url"))
             val urls=settings.getJSONArray("xmltv_urls"); require(urls.length()<=20); strings(urls).forEach { http(it) }
+            if(settings.has("playlist_urls")) {
+                val playlistUrls=settings.getJSONArray("playlist_urls")
+                require(playlistUrls.length() in 1..16) { "Configure between 1 and 16 playlist URLs" }
+                strings(playlistUrls).forEach { http(it) }
+            }
             zone(settings.getString("timezone")); number(settings,"epg_offset_minutes",-1440,1440)
             number(settings,"padding_before",0,240); number(settings,"padding_after",0,240); number(settings,"reserve_bytes",0,1125899906842624)
             require(settings.getString("recording_dir").length<=4096)
@@ -126,6 +149,7 @@ object Domain {
             for(ch in objects(channels)) {
                 require(ch.getString("id").matches(Regex("[a-f0-9]{40}")) && ids.add(ch.getString("id")))
                 for(k in listOf("name","group","tvg_id","stream")) require(ch.get(k) is String)
+                if(ch.has("source")) http(ch.getString("source"))
                 for(k in listOf("country","genre","kind","transport")) if(ch.has(k)) require(ch.get(k) is String && ch.getString(k).length<=512)
                 if(aceId(ch.getString("stream"))==null) http(ch.getString("stream"))
             }
@@ -158,7 +182,8 @@ object Domain {
         val data=JSONObject(validate(state).toString()); val settings=data.getJSONObject("settings"); settings.put("recording_dir","")
         for(k in listOf("playlist_url","engine_url")) settings.put(k,redact(settings.getString(k)))
         settings.put("xmltv_urls",JSONArray(strings(settings.getJSONArray("xmltv_urls")).map { redact(it) }))
-        objects(data.getJSONArray("channels")).forEach { it.put("stream",redact(it.getString("stream"))) }
+        if(settings.has("playlist_urls")) settings.put("playlist_urls",JSONArray(strings(settings.getJSONArray("playlist_urls")).map { redact(it) }))
+        objects(data.getJSONArray("channels")).forEach { it.put("stream",redact(it.getString("stream"))); if(it.has("source")) it.put("source",redact(it.getString("source"))) }
         val jobs=JSONArray(); for(j in objects(data.getJSONArray("jobs"))) { val clean=JSONObject(); for(k in listOf("id","channel_id","title","start","end","status")) clean.put(k,j.get(k)); jobs.put(clean) }
         data.put("jobs",jobs)
         val text=JSONObject().put("app","DizyTV").put("version",1).put("data",data).toString(2)

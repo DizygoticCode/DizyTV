@@ -55,6 +55,7 @@ class MainActivity:Activity() {
         runCatching { val file=File(filesDir,"guide.json"); if(file.exists() && file.length()<=100*1024*1024) guide=JSONObject(file.readText()) }
         render(); if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),20)
         if(store.read().getJSONArray("channels").length()==0) refreshChannels()
+        else if(guide.getJSONArray("programmes").length()==0) refreshGuide()
     }
     override fun onResume() { super.onResume(); attempt { Scheduler.recover(this) }; handler.post(ticker) }
     override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
@@ -69,7 +70,7 @@ class MainActivity:Activity() {
     private fun filteredChannels(state:JSONObject):List<JSONObject> {
         val fav=Domain.strings(state.getJSONArray("favourites")); val programmeGenres=Domain.objects(guide.getJSONArray("programmes")).groupBy { it.getString("channel") }.mapValues { entry->entry.value.flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }.toSet() }
         return Domain.catalogue(state).filter { ch->
-            val key=state.getJSONObject("mappings").optString(ch.getString("id"),ch.getString("tvg_id"))
+            val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names"))
             (ch.getString("name")+" "+ch.getString("group")).contains(search,true) && (!onlyFavourites || ch.getString("id") in fav) &&
             (countryFilter.isEmpty() || ch.optString("country","Unspecified")==countryFilter) &&
             (genreFilter.isEmpty() || ch.optString("genre","Unspecified")==genreFilter || genreFilter in programmeGenres[key].orEmpty()) &&
@@ -166,7 +167,7 @@ class MainActivity:Activity() {
         for(ch in catalogue) {
             val r=row(); r.addView(text(ch.getString("name")),LinearLayout.LayoutParams(dp(140),dp(68)))
             val timeline=android.widget.FrameLayout(this); r.addView(timeline,LinearLayout.LayoutParams(dp(1080),dp(68)))
-            val key=s.getJSONObject("mappings").optString(ch.getString("id"),ch.getString("tvg_id"))
+            val key=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
             val programmes=all.filter { it.getString("channel")==key && it.getLong("end")>start && it.getLong("start")<start+21600 && (genreFilter.isEmpty() || ch.optString("genre","Unspecified")==genreFilter || genreFilter in Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre)) }
             if(programmes.isEmpty()) timeline.addView(text("No guide match — choose Map EPG"))
             for(p in programmes) {
@@ -198,7 +199,7 @@ class MainActivity:Activity() {
         AlertDialog.Builder(this).setTitle("Record now").setItems(options) { _,index->attempt {
             val now=Instant.now().epochSecond; var end=now+listOf(1800L,3600L,7200L,86400L,86400L)[index]; var title=ch.getString("name")
             if(index==3) {
-                val s=store.read(); val key=s.getJSONObject("mappings").optString(ch.getString("id"),ch.getString("tvg_id"))
+                val s=store.read(); val key=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
                 val p=Domain.objects(guide.getJSONArray("programmes")).firstOrNull { it.getString("channel")==key && it.getLong("start")<=now && now<it.getLong("end") }?:throw IllegalArgumentException("No current programme mapped")
                 end=p.getLong("end")+s.getJSONObject("settings").getInt("padding_after")*60; title=p.getString("title")
             }
@@ -241,8 +242,8 @@ class MainActivity:Activity() {
     }
     private fun settingsPage() {
         val list=scroller(); val original=store.read().getJSONObject("settings"); val fields=mutableMapOf<String,EditText>()
-        fun field(key:String,label:String,value:String) { list.addView(text(label)); val input=EditText(this).apply { setText(value); maxLines=if(key=="xmltv_urls") 8 else 1 }; fields[key]=input; list.addView(input) }
-        field("playlist_url","Channel playlist",original.getString("playlist_url")); field("engine_url","Ace engine URL",original.getString("engine_url"))
+        fun field(key:String,label:String,value:String) { list.addView(text(label)); val input=EditText(this).apply { setText(value); maxLines=if(key=="xmltv_urls" || key=="playlist_urls") 8 else 1 }; fields[key]=input; list.addView(input) }
+        field("playlist_urls","Channel playlists (one URL per line; remove to disable)",Sources.urls(original).joinToString("\n")); field("engine_url","Ace engine URL",original.getString("engine_url"))
         field("xmltv_urls","XMLTV URLs — one per line",Domain.strings(original.getJSONArray("xmltv_urls")).joinToString("\n"))
         field("timezone","Timezone — auto or IANA name",original.getString("timezone")); list.addView(button("Choose timezone") { val zones=(listOf("auto")+ZoneId.getAvailableZoneIds().sorted()).toTypedArray(); AlertDialog.Builder(this).setTitle("Display timezone").setItems(zones) { _,i->fields["timezone"]!!.setText(zones[i]) }.show() })
         field("epg_offset_minutes","EPG correction in minutes (new imports only)",original.getInt("epg_offset_minutes").toString())
@@ -251,7 +252,11 @@ class MainActivity:Activity() {
         list.addView(text("Recording folder: "+original.getString("recording_dir").ifEmpty { "Not selected" })); list.addView(button("Choose recording folder") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),100) })
         list.addView(button("Save settings") {
             store.update { state->val settings=state.getJSONObject("settings"); for((key,input) in fields) when(key) {
-                "xmltv_urls"->settings.put(key,JSONArray(input.text.lines().map { it.trim() }.filter { it.isNotEmpty() }))
+                "xmltv_urls","playlist_urls"-> {
+                    val urls=input.text.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    settings.put(key,JSONArray(urls))
+                    if(key=="playlist_urls" && urls.isNotEmpty()) settings.put("playlist_url",urls.first())
+                }
                 "epg_offset_minutes","padding_before","padding_after"->settings.put(key,input.text.toString().toInt())
                 "reserve_bytes"->settings.put(key,input.text.toString().toLong())
                 else->settings.put(key,input.text.toString().trim())
@@ -261,17 +266,49 @@ class MainActivity:Activity() {
         list.addView(text("Recording needs an available engine and storage grant. Free space may be unknown for some Android storage providers. Automatic timezone uses the device setting; saved timers stay in UTC.",13f))
     }
     private fun refreshChannels() {
-        if(refreshing) return; refreshing=true; status.text="Importing channels…"; val url=store.read().getJSONObject("settings").getString("playlist_url")
-        executor.execute { val result=runCatching { Domain.playlist(Feeds.download(url)) }; handler.post { refreshing=false; result.onSuccess { channels->attempt { store.update { it.put("channels",channels) }; status.text="Imported ${channels.length()} channels"; render() } }.onFailure { status.text="Refresh failed; cached channels retained: ${it.message}" } } }
+        if(refreshing) return
+        val previous=store.read(); refreshing=true; status.text="Importing free channel sources…"
+        executor.execute {
+            val result=runCatching { Sources.refresh(previous.getJSONObject("settings"),previous.getJSONArray("channels"),Feeds::download) }
+            handler.post {
+                refreshing=false
+                result.onSuccess { refreshed->attempt {
+                    if(refreshed.succeeded>0) store.update { it.put("channels",refreshed.channels) }
+                    status.text="${refreshed.channels.length()} channels • ${refreshed.succeeded} sources updated • ${refreshed.errors.size} failed (cached)"
+                    render()
+                    if(guide.getJSONArray("programmes").length()==0) refreshGuide()
+                } }.onFailure { status.text="Refresh failed; cached channels retained: ${it.message}" }
+            }
+        }
     }
     private fun refreshGuide() {
         if(refreshing) return; val settings=store.read().getJSONObject("settings"); val urls=Domain.strings(settings.getJSONArray("xmltv_urls")); require(urls.isNotEmpty()) { "Add XMLTV source URLs in Settings" }
         refreshing=true; status.text="Importing XMLTV…"
-        executor.execute { val result=runCatching {
-            val names=JSONObject(); val programmes=JSONArray()
-            for(url in urls) { val data=Feeds.xmltv(Feeds.download(url),settings.getInt("epg_offset_minutes")); data.getJSONObject("names").keys().forEach { names.put(it,data.getJSONObject("names").get(it)) }; Domain.objects(data.getJSONArray("programmes")).forEach { programmes.put(it) } }
-            JSONObject().put("names",names).put("programmes",programmes)
-        }; handler.post { refreshing=false; result.onSuccess { fresh->attempt { JsonCache.write(File(filesDir,"guide.json"),fresh.toString()); guide=fresh; status.text="Imported ${fresh.getJSONArray("programmes").length()} programmes • saved UTC timers unchanged"; render() } }.onFailure { status.text="Guide refresh failed; cache retained: ${it.message}" } } }
+        executor.execute {
+            val result=runCatching {
+                val names=JSONObject(); val programmes=JSONArray(); var ok=0; var failed=0
+                for(url in urls) {
+                    try {
+                        val data=Feeds.xmltv(Feeds.download(url),settings.getInt("epg_offset_minutes"))
+                        val sourceNames=data.getJSONObject("names")
+                        sourceNames.keys().forEach { names.put(it,sourceNames.get(it)) }
+                        Domain.objects(data.getJSONArray("programmes")).forEach { programmes.put(it) }
+                        ok++
+                    } catch(_:Exception) { failed++ }
+                }
+                require(ok>0) { "All ${urls.size} guide sources failed; cached guide retained" }
+                Pair(JSONObject().put("names",names).put("programmes",programmes),failed)
+            }
+            handler.post {
+                refreshing=false
+                result.onSuccess { (fresh,failed)->attempt {
+                    JsonCache.write(File(filesDir,"guide.json"),fresh.toString())
+                    guide=fresh
+                    status.text="Imported ${fresh.getJSONArray("programmes").length()} programmes • ${failed} source(s) failed • UTC timers unchanged"
+                    render()
+                } }.onFailure { status.text="Guide refresh failed; cache retained: ${it.message}" }
+            }
+        }
     }
     @Deprecated("Native document picker compatibility")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
