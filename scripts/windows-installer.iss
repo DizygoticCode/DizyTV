@@ -1,4 +1,4 @@
-#define AppVersion "0.1.2-alpha"
+#define AppVersion "0.1.3-alpha"
 [Setup]
 AppId={{3F1997BD-12C5-4C17-B013-09C82DA8BAF6}
 AppName=DizyTV
@@ -9,7 +9,7 @@ DefaultDirName={localappdata}\Programs\DizyTV
 DefaultGroupName=DizyTV
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=DizyTV-Setup-0.1.2-alpha-windows-x64
+OutputBaseFilename=DizyTV-Setup-0.1.3-alpha-windows-x64
 SetupIconFile=..\assets\branding\dizytv.ico
 UninstallDisplayIcon={app}\DizyTV.exe
 ArchitecturesAllowed=x64compatible
@@ -20,6 +20,7 @@ CloseApplications=yes
 RestartApplications=no
 
 [Files]
+Source: "windows-stop-worker.ps1"; Flags: dontcopy
 Source: "..\dist\DizyTV\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"
 
@@ -39,15 +40,20 @@ var
   ExitCode: Integer;
 begin
   Result := '';
-  ExistingExe := ExpandConstant('{app}\\DizyTV.exe');
+  ExistingExe := ExpandConstant('{app}\DizyTV.exe');
   if not FileExists(ExistingExe) then Exit;
 
-  ExtractTemporaryFile('windows-stop-worker.ps1');
-  StopScript := ExpandConstant('{tmp}\\windows-stop-worker.ps1');
-  PowerShell := ExpandConstant('{sys}\\WindowsPowerShell\\v1.0\\powershell.exe');
+  try
+    ExtractTemporaryFile('windows-stop-worker.ps1');
+  except
+    Result := 'The embedded DizyTV updater check is unavailable. No application files were replaced.';
+    Exit;
+  end;
+  StopScript := ExpandConstant('{tmp}\windows-stop-worker.ps1');
+  PowerShell := ExpandConstant('{sys}\WindowsPowerShell\\v1.0\\powershell.exe');
   Args := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + StopScript +
     '" -InstalledExePath "' + ExistingExe +
-    '" -DataDirectory "' + ExpandConstant('{localappdata}\\DizyTV') + '"';
+    '" -DataDirectory "' + ExpandConstant('{localappdata}\DizyTV') + '"';
 
   if not Exec(PowerShell, Args, '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
   begin
