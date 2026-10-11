@@ -16,8 +16,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, COUNTRIES, GENRES)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, COUNTRIES, GENRES)
 from .network import download
+from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 
@@ -103,7 +104,9 @@ class Settings(QDialog):
     def __init__(self,state,parent):
         super().__init__(parent); self.setWindowTitle('DizyTV settings'); self.resize(690,640)
         self.original=state['settings'].copy(); form=QFormLayout(self)
-        self.playlist=QLineEdit(self.original['playlist_url']); form.addRow('Channel playlist',self.playlist)
+        self.playlists=QPlainTextEdit('\n'.join(configured_playlists(self.original)))
+        self.playlists.setPlaceholderText('One M3U playlist URL per line; remove a line to disable that source')
+        self.playlists.setMaximumHeight(125); form.addRow('Channel playlists',self.playlists)
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
@@ -123,7 +126,9 @@ class Settings(QDialog):
         folder=QFileDialog.getExistingDirectory(self,'Recording destination',self.folder.text())
         if folder:self.folder.setText(folder)
     def values(self):
-        return dict(self.original,playlist_url=self.playlist.text().strip(),engine_url=self.engine.text().strip(),
+        urls=list(dict.fromkeys(u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()))
+        if not urls:raise ValueError('Add at least one channel playlist URL')
+        return dict(self.original,playlist_url=urls[0],playlist_urls=urls,engine_url=self.engine.text().strip(),
                     xmltv_urls=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()],timezone=self.zone.currentData(),
                     epg_offset_minutes=self.offset.value(),padding_before=self.before.value(),padding_after=self.after.value(),
                     reserve_bytes=int(self.reserve.value()*1024**3),recording_dir=self.folder.text())
@@ -177,6 +182,9 @@ class MainWindow(QMainWindow):
         self.load_guide(); self.render_channels(); self.tick()
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
+        self.guide_clock=QTimer(self); self.guide_clock.timeout.connect(self.refresh_guide); self.guide_clock.start(12*3600*1000)
+        if start_worker and self.state['channels'] and not self.guide['programmes']:
+            QTimer.singleShot(500,self.refresh_guide)
         if start_worker:ensure_worker(self.store.directory)
         if start_worker and not self.state['channels']:QTimer.singleShot(200,self.refresh_channels)
     def error(self,message):
@@ -205,7 +213,7 @@ class MainWindow(QMainWindow):
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
             if kind and kind not in (ch.get('kind','TV'),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
-            key=self.state['mappings'].get(ch['id'],ch['tvg_id'])
+            key=match_guide(ch,self.state['mappings'],self.guide['names'])
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
             item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+ch['name']); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
@@ -214,15 +222,16 @@ class MainWindow(QMainWindow):
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
     def render_now(self):
         if not self.selected:return
-        cid=self.state['mappings'].get(self.selected['id'],self.selected['tvg_id']); now=time.time()
+        cid=match_guide(self.selected,self.state['mappings'],self.guide['names']); now=time.time()
         items=[p for p in self.guide['programmes'] if p['channel']==cid and p['end']>now][:2]
         self.now.setText(self.selected['name']+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else self.selected['name']+' — no guide match')
     def render_guide(self):
         channels=[self.channels.item(i).data(Qt.UserRole) for i in range(self.channels.count())]
         genre=self.genre_filter.currentData()
-        source_genre_ids={self.state['mappings'].get(ch['id'],ch['tvg_id']) for ch in channels if ch.get('genre','Unspecified')==genre}
+        source_genre_ids={match_guide(ch,self.state['mappings'],self.guide['names']) for ch in channels if ch.get('genre','Unspecified')==genre}
         programmes=[p for p in self.guide['programmes'] if not genre or p['channel'] in source_genre_ids or genre in {normalise_genre(c) for c in p.get('categories',[])}]
-        self.grid.set_data(channels,programmes,self.state['mappings'],self.state['settings']['timezone'],self.guide_start)
+        resolved={ch['id']:match_guide(ch,self.state['mappings'],self.guide['names']) for ch in channels}
+        self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
     def move_guide(self,delta):
         self.guide_start=self.guide_start+delta if delta else int(time.time()/3600)*3600; self.render_guide()
@@ -247,10 +256,15 @@ class MainWindow(QMainWindow):
         def fail(message):self.task=None; self.status.setText('Refresh failed — cached data retained: '+message)
         self.task.signals.success.connect(done); self.task.signals.failure.connect(fail); self.pool.start(self.task)
     def refresh_channels(self):
-        url=self.store.read()['settings']['playlist_url']; self.status.setText('Importing channel playlist…')
-        def done(channels):
-            self.store.update(lambda s:s.update(channels=channels)); self.render_channels(); self.status.setText(f'Imported {len(channels)} channels • '+format_time(time.time(),self.state['settings']['timezone'],detected=detected_zone()))
-        self.async_task(lambda:parse_playlist(download(url)),done)
+        current=self.store.read(); self.status.setText('Importing free channel sources…')
+        def done(result):
+            channels,success,errors=result
+            if success:self.store.update(lambda s:s.update(channels=channels))
+            self.render_channels()
+            self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (cached entries kept)' if errors else ''))
+            if not self.guide['programmes'] and self.state['settings']['xmltv_urls']:
+                QTimer.singleShot(300,self.refresh_guide)
+        self.async_task(lambda:refresh_catalogue(current['settings'],current['channels'],download),done)
     def refresh_guide(self):
         settings=self.store.read()['settings']
         if not settings['xmltv_urls']:self.error('Add one or more XMLTV URLs in Settings'); return
@@ -340,7 +354,7 @@ class MainWindow(QMainWindow):
         if not ok:return
         now=int(time.time()); title=self.selected['name']; end=now+{'30 minutes':1800,'60 minutes':3600,'120 minutes':7200}.get(value,86400)
         if value.startswith('Until current'):
-            key=self.state['mappings'].get(self.selected['id'],self.selected['tvg_id']); programme=next((p for p in self.guide['programmes'] if p['channel']==key and p['start']<=now<p['end']),None)
+            key=match_guide(self.selected,self.state['mappings'],self.guide['names']); programme=next((p for p in self.guide['programmes'] if p['channel']==key and p['start']<=now<p['end']),None)
             if not programme:self.error('No current programme is mapped for this channel'); return
             end=programme['end']+self.state['settings']['padding_after']*60; title=programme['title']
         self.add_job(make_job(self.selected['id'],title,now,end,0,0))
