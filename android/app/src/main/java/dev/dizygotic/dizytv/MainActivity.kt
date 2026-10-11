@@ -15,6 +15,7 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import android.view.WindowManager
 import android.widget.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -31,6 +32,22 @@ class MainActivity:Activity() {
     private lateinit var store:DeviceStore; private lateinit var body:LinearLayout; private lateinit var status:TextView
     private lateinit var zoneLabel:TextView; private lateinit var lib:LibVLC; private lateinit var player:MediaPlayer
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
+    private lateinit var brandRow:LinearLayout; private lateinit var mainNav:HorizontalScrollView
+    private var cinemaMode=false; private var screenMode=false
+    private var seekBar:SeekBar?=null; private var seekInfo:TextView?=null
+    private val playbackTicker=object:Runnable {
+        override fun run() {
+            if(page=="Live") {
+                val length=player.length
+                val current=player.time
+                seekBar?.isEnabled=player.isSeekable && length>0
+                if(length>0 && current>=0) seekBar?.progress=((current.coerceAtMost(length)*1000L)/length).toInt()
+                seekInfo?.text=if(player.isSeekable) "DVR position: ${current.coerceAtLeast(0)/1000}s / ${length.coerceAtLeast(0)/1000}s"
+                                   else "LIVE • No rewind buffer available for this stream"
+            }
+            handler.postDelayed(this,1200)
+        }
+    }
     private var search=""; private var onlyFavourites=false; private var refreshing=false; private var guide=JSONObject().put("names",JSONObject()).put("programmes",JSONArray())
     private var countryFilter=""; private var sectionFilter=""; private var genreFilter=""; private var typeFilter=""
     private val collapsedCountries=mutableSetOf<String>()
@@ -62,13 +79,14 @@ class MainActivity:Activity() {
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState); store=DeviceStore(this); lib=LibVLC(this,arrayListOf("--no-video-title-show","--network-caching=1500")); player=MediaPlayer(lib)
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(21,32,25)); setPadding(dp(8),dp(8),dp(8),dp(8)) }
-        val brand=row(); val image=ImageView(this); image.setImageResource(R.drawable.dizytv_logo); brand.addView(image,LinearLayout.LayoutParams(dp(64),dp(64))); brand.addView(text("DizyTV",28f)); root.addView(brand)
+        val brand=row(); brandRow=brand; val image=ImageView(this); image.setImageResource(R.drawable.dizytv_logo); brand.addView(image,LinearLayout.LayoutParams(dp(64),dp(64))); brand.addView(text("DizyTV",28f)); root.addView(brand)
         zoneLabel=text(""); root.addView(zoneLabel)
-        val nav=HorizontalScrollView(this); val buttons=row()
+        val nav=HorizontalScrollView(this); mainNav=nav; val buttons=row()
         for(name in listOf("Channels","Live","Guide","Recordings","Backup","Settings")) buttons.addView(button(name) { page=name; render() })
         nav.addView(buttons); root.addView(nav)
         body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; root.addView(body,LinearLayout.LayoutParams(-1,0,1f))
         status=text("Native alpha • Install/open Ace Stream, configure XMLTV and choose recording storage",12f); root.addView(status); setContentView(root)
+        handler.post(playbackTicker)
         runCatching { val file=File(filesDir,"guide.json"); if(file.exists() && file.length()<=100*1024*1024) guide=JSONObject(file.readText()) }
         render(); if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),20)
         // Import newly added free playlists on upgrades even if old Ace entries were cached.
@@ -76,7 +94,7 @@ class MainActivity:Activity() {
     }
     override fun onResume() { super.onResume(); attempt { Scheduler.recover(this) }; handler.post(ticker) }
     override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
-    override fun onDestroy() { handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); super.onDestroy() }
+    override fun onDestroy() { handler.removeCallbacks(playbackTicker); handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); super.onDestroy() }
     private fun updateZone():Boolean {
         val zone=store.read().getJSONObject("settings").getString("timezone")
         val effective=Domain.zone(zone); val key=effective.id+effective.rules.getOffset(Instant.now()).id; val changed=key!=displayedZone; displayedZone=key
@@ -125,7 +143,10 @@ class MainActivity:Activity() {
         }; return column
     }
     private fun render() {
-        player.detachViews(); video=null; body.removeAllViews(); updateZone()
+        player.detachViews(); video=null; seekBar=null; seekInfo=null; body.removeAllViews(); updateZone()
+        brandRow.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
+        mainNav.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
+        zoneLabel.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         when(page) { "Channels"->channels(); "Live"->live(); "Guide"->guidePage(); "Recordings"->recordings(); "Backup"->backupPage(); "Settings"->settingsPage() }
     }
     private fun channels() {
@@ -202,17 +223,132 @@ class MainActivity:Activity() {
         populate()
     }
     private fun live() {
-        body.addView(text(selected?.getString("name")?:"Choose a channel first",20f))
-        selected?.let { ch->
-            val state=store.read(); val key=state.getJSONObject("mappings").optString(ch.getString("id"),ch.getString("tvg_id")); val now=Instant.now().epochSecond
-            indexGuide()
-            val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
-            body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
+        val compact=cinemaMode || screenMode
+        if(!compact) {
+            body.addView(text(selected?.let { Domain.displayName(it.getString("name")) }?:"Choose a channel first",20f))
+            selected?.let { ch->
+                val state=store.read(); val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names")); val now=Instant.now().epochSecond
+                indexGuide()
+                val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
+                body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
+            }
         }
-        val layout=VLCVideoLayout(this); video=layout; body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
-        val controls=row(); controls.addView(button("Play") { play() }); controls.addView(button("Stop playback") { player.stop() }); controls.addView(button("Record now") { recordNow() }); body.addView(controls)
-        val more=row(); more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } }); more.addView(button("Map EPG") { mapChannel() }); body.addView(more)
-        body.addView(button("Edit categories") { editCategories() })
+        val layout=VLCVideoLayout(this); video=layout
+        body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
+        val controls=row()
+        controls.addView(button("▶ Play") { play() })
+        controls.addView(button("⏯ Pause") { pauseLive() })
+        controls.addView(button("↶ 30s") { rewindLive() })
+        controls.addView(button("● LIVE") { jumpLive() })
+        body.addView(HorizontalScrollView(this).apply { addView(controls) })
+        val navigation=row()
+        navigation.addView(button("☷ Guide") { quickGuide() })
+        navigation.addView(button("Info") { tvInfo() })
+        navigation.addView(button(if(cinemaMode) "Normal" else "Cinema") { setTvMode(!cinemaMode,false) })
+        navigation.addView(button(if(screenMode) "Exit Screen" else "Full Screen") { setTvMode(!screenMode,!screenMode) })
+        body.addView(HorizontalScrollView(this).apply { addView(navigation) })
+        seekInfo=text("LIVE • DVR availability depends on the channel",12f);body.addView(seekInfo)
+        val scrub=SeekBar(this); scrub.max=1000; seekBar=scrub
+        scrub.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(seekBar:SeekBar?){}
+            override fun onStopTrackingTouch(seekBar:SeekBar?) {
+                if(player.isSeekable && player.length>0 && seekBar!=null) player.time=player.length*seekBar.progress/1000L
+            }
+            override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean){}
+        })
+        body.addView(scrub)
+        val volumeBar=row()
+        volumeBar.addView(text("Volume",12f))
+        val volume=SeekBar(this);volume.max=100;volume.progress=player.volume.coerceIn(0,100)
+        volume.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(seekBar:SeekBar?){}
+            override fun onStopTrackingTouch(seekBar:SeekBar?){}
+            override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean) { if(fromUser)player.volume=progress }
+        })
+        volumeBar.addView(volume,LinearLayout.LayoutParams(0,dp(44),1f));body.addView(volumeBar)
+        if(!compact) {
+            val more=row()
+            more.addView(button("■ Stop") { player.stop() })
+            more.addView(button("● Record now") { recordNow() })
+            more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } })
+            more.addView(button("Map EPG") { mapChannel() })
+            body.addView(HorizontalScrollView(this).apply { addView(more) })
+            body.addView(button("Edit categories") { editCategories() })
+        }
+    }
+    private fun setTvMode(cinema:Boolean,fullscreen:Boolean) {
+        cinemaMode=cinema
+        screenMode=fullscreen
+        @Suppress("DEPRECATION")
+        if(screenMode) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_VISIBLE
+        }
+        page="Live";render()
+    }
+    private fun pauseLive() {
+        if(!player.isSeekable) {
+            status.text="Live pause unavailable on this stream: no DVR buffer"
+            return
+        }
+        if(player.isPlaying)player.pause() else player.play()
+    }
+    private fun rewindLive() {
+        if(!player.isSeekable || player.time<0) { status.text="This live stream has no rewindable DVR window"; return }
+        player.time=(player.time-30000L).coerceAtLeast(0L)
+    }
+    private fun jumpLive() {
+        if(player.isSeekable && player.length>0L) {
+            player.time=(player.length-1000L).coerceAtLeast(0L);player.play()
+        } else play()
+    }
+    private fun tvInfo() {
+        val ch=selected?:return
+        val key=Domain.matchGuide(ch,store.read().getJSONObject("mappings"),guide.getJSONObject("names"))
+        indexGuide()
+        val now=Instant.now().epochSecond
+        val entries=indexedProgrammes[key].orEmpty()
+        val current=entries.firstOrNull { it.getLong("start")<=now && it.getLong("end")>now }
+        val next=entries.firstOrNull { it.getLong("start")>now }
+        val info=Domain.displayName(ch.getString("name"))+"\n"+
+            "Now: "+(current?.optString("title")?:"No guide match")+"\n"+
+            "Next: "+(next?.optString("title")?:"No guide match")
+        AlertDialog.Builder(this).setTitle("Channel information").setMessage(info).setPositiveButton("OK",null).show()
+    }
+    private fun quickGuide() {
+        val dialogView=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(12),dp(8),dp(12),dp(8)) }
+        val searchBox=EditText(this).apply { hint="Search channels";setSingleLine(true) }
+        val list=ListView(this)
+        dialogView.addView(searchBox);dialogView.addView(list,LinearLayout.LayoutParams(-1,dp(380)))
+        val all=Domain.catalogue(store.read())
+        var displayed=listOf<JSONObject>()
+        fun populate() {
+            val q=searchBox.text.toString()
+            displayed=all.asSequence().filter {
+                (Domain.displayName(it.optString("name"))+" "+it.optString("country")).contains(q,true)
+            }.take(100).toList()
+            list.adapter=ArrayAdapter(this,android.R.layout.simple_list_item_1,displayed.map {
+                Domain.displayName(it.getString("name"))+" · "+it.optString("country")
+            })
+        }
+        val dialog=AlertDialog.Builder(this).setTitle("Quick TV guide")
+            .setView(dialogView).setNegativeButton("Close",null).create()
+        list.setOnItemClickListener { _,_,position,_->
+            selected=displayed[position];dialog.dismiss();page="Live";render();play()
+        }
+        searchBox.addTextChangedListener(object:TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){populate()}
+            override fun afterTextChanged(s:Editable?){}
+        })
+        populate();dialog.show()
+    }
+    @Deprecated("Use Android system back callback on future versions")
+    override fun onBackPressed() {
+        if(screenMode || cinemaMode) setTvMode(false,false) else super.onBackPressed()
     }
     private fun isLocalEngineAvailable(address:String):Boolean {
         val uri=Uri.parse(address)
