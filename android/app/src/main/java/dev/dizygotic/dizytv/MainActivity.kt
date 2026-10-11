@@ -153,11 +153,40 @@ class MainActivity:Activity() {
         val more=row(); more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } }); more.addView(button("Map EPG") { mapChannel() }); body.addView(more)
         body.addView(button("Edit categories") { editCategories() })
     }
+    private fun isLocalEngineAvailable(address:String):Boolean {
+        val uri=Uri.parse(address)
+        if(uri.host !in listOf("localhost","127.0.0.1","::1")) return true
+        return runCatching {
+            java.net.Socket().use { socket ->
+                socket.connect(java.net.InetSocketAddress(uri.host,if(uri.port>0) uri.port else 6878),500)
+            }
+            true
+        }.getOrDefault(false)
+    }
     private fun play()=attempt {
         val ch=selected?:return@attempt; val s=store.read()
         require(Domain.objects(s.getJSONArray("jobs")).none { it.getString("status")=="recording" && it.getString("channel_id")!=ch.getString("id") }) { "Another channel is recording. Finish or stop it before changing playback." }
-        val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings")))); player.media=media; media.release(); player.play()
-        status.text=if(ch.getString("stream").startsWith("acestream:")) "Connecting to Ace engine…" else "Connecting to HTTP/HLS stream…"
+        val isAce=Domain.aceId(ch.getString("stream"))!=null
+        if(isAce && !isLocalEngineAvailable(s.getJSONObject("settings").getString("engine_url"))) {
+            val installed=listOf("org.acestream.media","org.acestream.core")
+                .firstNotNullOfOrNull { packageManager.getLaunchIntentForPackage(it) }
+            if(installed!=null) {
+                AlertDialog.Builder(this).setTitle("Ace Stream engine is stopped")
+                    .setMessage("This channel needs your installed Ace Stream engine. Open it, then return to DizyTV and press Play. Ordinary HTTP/HLS channels work without it.")
+                    .setPositiveButton("Open engine") { _,_-> startActivity(installed) }
+                    .setNegativeButton("Cancel",null).show()
+            } else {
+                error("Ace Stream is not installed on this device. Install the official engine to play Ace channels; HTTP/HLS channels work without it.")
+            }
+            return@attempt
+        }
+        val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings"))))
+        player.media=media; media.release(); player.play()
+        status.text=if(isAce) "Connecting to Ace engine…" else "Connecting to HTTP/HLS stream…"
+        handler.postDelayed({
+            if(page=="Live" && player.isPlaying.not())
+                status.text="Stream still buffering or unavailable. Try a different channel if it does not play."
+        },20000)
     }
     private fun toggleFavourite(ch:JSONObject) {
         store.update { s->val fav=Domain.strings(s.getJSONArray("favourites")).toMutableList(); if(!fav.remove(ch.getString("id"))) fav.add(ch.getString("id")); s.put("favourites",JSONArray(fav)) }

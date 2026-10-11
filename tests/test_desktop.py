@@ -33,6 +33,19 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(['On now'],[p['title'] for p in window.grid.programmes])
             window.close()
 
+    def test_non_ace_playback_bypasses_engine_check(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda s:s.update(channels=parse_playlist('#EXTM3U\n#EXTINF:-1,Free news\nhttps://example.com/live.m3u8')))
+            window=MainWindow(store,start_worker=False)
+            window.selected=store.read()['channels'][0]
+            shown=[]; window.play_url=shown.append
+            window.play()
+            self.assertEqual(['https://example.com/live.m3u8'],shown)
+            self.assertIsNone(window.engine_task)
+            window.close()
+
     def test_epg_left_click_watches_and_right_click_offers_recording(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:

@@ -82,8 +82,9 @@ object Domain {
         return OffsetDateTime.parse(m.groupValues[1]+" "+offset,DateTimeFormatter.ofPattern("uuuuMMddHHmmss XX").withResolverStyle(ResolverStyle.STRICT)).toEpochSecond()
     }
     private fun guideName(raw:String):String = raw
-        .replace(Regex("\\s*\\((?:\\d{3,4}p|HD|SD)\\)",RegexOption.IGNORE_CASE),"")
-        .replace(Regex("\\s+(?:HD|SD|FHD)$",RegexOption.IGNORE_CASE),"")
+        .replace(Regex("[ⒼⓈⓎⓐ-ⓩ]"),"")
+        .replace(Regex("\\s*\\((?:\\d{3,4}p|HD|SD|FHD|4K)\\)",RegexOption.IGNORE_CASE),"")
+        .replace(Regex("\\s+(?:HD|SD|FHD|4K)$",RegexOption.IGNORE_CASE),"")
         .trim().replace(Regex("\\s+")," ").lowercase(Locale.ROOT)
 
     fun matchGuide(ch:JSONObject,mappings:JSONObject,names:JSONObject):String {
