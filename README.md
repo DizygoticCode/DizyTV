@@ -1,65 +1,134 @@
-# DizyTV
+<p align="center">
+  <img src="assets/branding/dizytv-logo.png" alt="DizyTV retro television logo" width="280" />
+</p>
 
-DizyTV is a planned Windows, Android and macOS television application with an imported channel catalogue, an XMLTV programme guide, integrated playback, and recordings saved to the storage location chosen on each device.
+<h1 align="center">DizyTV</h1>
 
-## Project status
+<p align="center">
+  <strong>Live channels. A proper TV guide. Recordings on your own storage.</strong>
+</p>
 
-This repository starts with the product scope, architecture and development roadmap. It does not yet contain a working application, installer, APK or deployed backend. Playlist import, playback, recording and EPG coverage still require implementation and device validation.
+<p align="center">
+  Native television apps planned for Windows, Android and macOS, with Ace Stream playback and an XMLTV guide.
+</p>
 
-DizyTV is a separate project alongside DizyTrades and DizyChat. DizyServer is the intended host for its catalogue and guide backend. Creating this repository does not modify those applications or the live server.
+<p align="center">
+  <img alt="Status: planning and documentation" src="https://img.shields.io/badge/status-planning%20%26%20documentation-f59e0b?style=for-the-badge" />
+  <a href="#platforms-and-installers"><img alt="Windows EXE planned" src="https://img.shields.io/badge/Windows-EXE%20planned-0078d4?style=for-the-badge" /></a>
+  <a href="#platforms-and-installers"><img alt="Android APK planned" src="https://img.shields.io/badge/Android-APK%20planned-3ddc84?style=for-the-badge&amp;logo=android&amp;logoColor=white" /></a>
+  <a href="#platforms-and-installers"><img alt="macOS PKG planned" src="https://img.shields.io/badge/macOS-PKG%20planned-374151?style=for-the-badge&amp;logo=apple&amp;logoColor=white" /></a>
+</p>
 
-## Agreed scope
+<p align="center">
+  <a href="#planned-features"><img alt="Explore planned features" src="https://img.shields.io/badge/Explore-Features-699769?style=for-the-badge" /></a>
+  <a href="ROADMAP.md"><img alt="Read the roadmap" src="https://img.shields.io/badge/Read-Roadmap-5865f2?style=for-the-badge" /></a>
+  <a href="docs/superpowers/specs/2026-10-11-dizytv-design.md"><img alt="Read the design" src="https://img.shields.io/badge/Read-Design-374151?style=for-the-badge" /></a>
+  <a href="docs/DISTRIBUTION.md"><img alt="View the installer plan" src="https://img.shields.io/badge/View-Installer%20Plan-699769?style=for-the-badge" /></a>
+</p>
 
-- Native Windows, Android and macOS applications with a DizyTV interface and integrated video playback.
-- Downloadable Windows `.exe` installer, Android `.apk` and Mac `.pkg` containing the DizyTV `.app`.
-- Automatically refreshed channel import from the playlist documented by search-ace.stream.
-- Channel search, categories and favourites.
-- XMLTV guide with now/next listings and a programme grid.
-- Multiple guide sources and editable channel-to-guide mappings.
-- Instant recording, with manual stop, a duration, or the scheduled programme end.
-- EPG scheduled recording with configurable start and end padding.
-- Direct recording to a selected Windows or Mac folder/drive, or an accessible Android storage folder.
-- A recordings screen with playback, deletion, storage information and clear recording status.
-- Persistent recording timers, free-space checks and interruption reporting.
+> [!IMPORTANT]
+> **Current stage: design and documentation.** This repository contains the product scope, recording design, platform roadmap and distribution plan. It does not yet contain working app code, an installer, an APK or a deployed backend. Every application feature below is planned; playback, channel import, EPG coverage and recording still need implementation and device testing.
 
-Optional recording on DizyServer is a later capability for jobs that should run while the viewing device is off. Local recording remains the default design.
+## Planned features
 
-## Components
+| Feature | DizyTV plan |
+| --- | --- |
+| 📺 **Live television** | A DizyTV interface with embedded video playback and clear stream/buffering status |
+| 🔎 **Channel browser** | Automatically refreshed catalogue import, search, categories and favourites |
+| 🗓️ **TV guide** | XMLTV now/next listings and a programme grid, multiple guide sources and editable channel mappings |
+| ⏺️ **Record now** | Start recording immediately; stop manually, after a chosen duration or at the current programme's scheduled end |
+| ⏰ **Scheduled recording** | Select an EPG programme, save a timer and adjust the start/end padding |
+| 💾 **Your storage** | Save directly to a selected Windows/Mac folder or drive, or an accessible Android storage folder |
+| 🎞️ **Recording library** | Play and delete recordings; see file sizes, storage information and completed/partial/failed status |
+| 🔄 **Persistent timers** | Keep jobs across restarts, check storage space and report missed or interrupted recordings |
+
+The first release targets **one recording at a time per device**. Same-channel viewing may share a session where supported; viewing another channel while recording needs engine validation. Instant recording starts from the available live stream and does not provide retrospective recording.
+
+## Platforms and installers
+
+| Platform | Planned download | Playback and recording approach |
+| --- | --- | --- |
+| **Windows** | `DizyTV-Setup-<version>-<arch>.exe` | Native application, installed Ace Stream engine, embedded playback and selected-folder recordings |
+| **Android** | `DizyTV-<version>-<abi>.apk` | Native application, supported engine startup, Android folder permissions and a background recording service |
+| **macOS / MacBook** | `DizyTV-<version>-<arch>.pkg` containing `DizyTV.app` | Native Mac application, an explicitly configured compatible engine connection and recordings saved locally on the Mac |
+
+**Downloads are not available yet.** The badges above link to this platform plan, not to installers. Supported OS versions and CPU architectures will be listed after the dependency builds and device tests pass; Apple Silicon and Intel Macs are validated separately.
+
+Public releases will use a signed Windows application/installer, a release-signed Android APK with a retained update key, and a Developer ID-signed, notarized Mac app/package. The repository is currently private; downloads intended for everyone need a public release location. Full details are in the [installer and distribution plan](docs/DISTRIBUTION.md).
+
+### Mac playback dependency
+
+The official [Ace Stream downloads](https://docs.acestream.media/products/) list Windows, Android and Linux, with no native macOS engine listed. The initial Mac design therefore connects to a reachable Windows/Linux engine while keeping the player and recording storage on the Mac. A self-contained Mac engine or local helper needs a separate feasibility check before it can be included in the package.
+
+## Channels and the programme guide
+
+Channel import starts with the playlist export documented by [search-ace.stream](https://search-ace.stream/doc), rather than HTML scraping. The catalogue service will cache the last successful import and preserve favourites and manual EPG mappings during refreshes.
+
+EPG data comes from configured **XMLTV sources**. Multiple feeds and manual mapping are part of the design because one global feed is not guaranteed to cover every imported channel or regional variant. Programme times are stored in UTC and displayed in the selected local timezone. A channel without a guide match remains playable.
+
+A listing does not guarantee a working stream or permission to redistribute it. This repository does not bundle a channel/guide dataset or third-party engine binaries.
+
+## Recording on your device
+
+The recorder will save the original stream without re-encoding where supported, starting with MPEG-TS output. Recordings use the selected destination, with write-access checks, free-space monitoring where available and clear partial/failed outcomes. Existing recordings are not automatically deleted.
+
+| Platform | Scheduled recording requirement |
+| --- | --- |
+| **Windows** | A validated background recorder; optional wake from sleep where hardware and system settings support it. A powered-off PC cannot record locally. |
+| **Android** | Native timers, storage permission and an appropriate foreground service with a visible recording notification. Battery restrictions, reboot and force-stop behaviour need device testing. |
+| **macOS** | A validated per-user background recorder. Initial scheduling requires an awake Mac and a signed-in user; wake from sleep is not yet promised. |
+
+Closing the main UI must not silently cancel an active recording once the platform's background mechanism is implemented and validated. Overlapping timers and stream-session conflicts will be shown clearly.
+
+**Optional DizyServer recording** is planned later for jobs that should run while the viewing device is off. Those recordings stay on the server until downloaded; local recording remains the default.
+
+## How the parts fit together
 
 | Component | Responsibility |
 | --- | --- |
-| DizyServer backend | Refresh and cache the channel catalogue and XMLTV feeds; serve channel and guide data |
-| Windows application | Guide, playback, local storage selection, background recorder and Windows scheduling |
-| Android application | Guide, playback, storage selection, native scheduling and background recording |
-| macOS application | Native Mac client, guide, playback, local storage selection and Mac background recorder |
-| Ace Stream engine | Receive the selected P2P stream and expose it to the application through its documented API |
-| libVLC | Embedded playback; recording output is validated separately on each platform |
+| **DizyTV clients** | Channel browsing, guide display, embedded playback, local storage, timers and recording library |
+| **DizyServer metadata backend** | Refresh/cache the catalogue and XMLTV feeds; serve channel and programme data |
+| **Ace Stream engine** | Receive the selected P2P stream and expose it through the supported session API |
+| **libVLC** | Embedded playback; recording output must be validated on each platform |
+| **Optional server recorder** | A later worker for jobs explicitly assigned to server storage |
 
-The application owns the user interface. Windows and Android integration starts with a separately installed Ace Stream engine. The official engine downloads currently list Windows, Android and Linux, with no macOS build listed. The initial Mac integration therefore targets an explicitly configured, reachable Windows/Linux engine while recording the resulting stream locally on the Mac. A self-contained Mac engine remains a feasibility question, not an included capability. Bundling or modifying third-party components requires checking the licences of the exact components and binaries used.
+The app owns the DizyTV interface. Windows and Android start with a separately installed engine; third-party bundling depends on the exact component licences and distribution permissions. UI frameworks and dependency versions are chosen after the early platform integration tests.
 
-## Planned downloads
+DizyTV is a separate project alongside DizyTrades and DizyChat. DizyServer is the intended metadata host; this repository setup does not deploy anything or change those existing services.
 
-| Platform | Release artifact | Release requirement |
-| --- | --- | --- |
-| Windows | `DizyTV-Setup-<version>-<arch>.exe` | Install, playback, recording and upgrade validation; signed application and installer for the public release |
-| Android | `DizyTV-<version>-<abi>.apk` | Release signing with a retained update key; native storage and background recording validation |
-| macOS | `DizyTV-<version>-<arch>.pkg` containing `DizyTV.app` | Native Mac build, a documented engine connection, Developer ID signing and Apple notarization |
+## Development roadmap
 
-These are release targets; no downloadable builds exist yet. Supported OS versions and processor architectures will be published after the native dependencies and device tests pass. Public downloads will use a public release location; releases in a private GitHub repository are not available to everyone. See the [distribution plan](docs/DISTRIBUTION.md).
+1. **Prove the integrations** — inspect the playlist, measure XMLTV coverage and test playback/local recording early on Windows, Android and Mac.
+2. **Build Windows and the metadata backend** — add the channel browser, guide, favourites and playback controls.
+3. **Deliver local recording** — add instant recording, EPG timers, storage selection, job persistence and failure handling.
+4. **Deliver Android** — integrate native storage, notifications, timers and background recording.
+5. **Deliver macOS** — build the native Mac client, engine setup and local recorder; package the `.app` inside a `.pkg`.
+6. **Prepare public downloads** — validate installation/upgrades, configure signing, and publish versioned EXE/APK/PKG artifacts with checksums and notices.
+7. **Add optional server recording** — introduce explicitly selected server jobs, authenticated downloads and quotas.
+
+See [ROADMAP.md](ROADMAP.md) for the acceptance work at each stage. Simultaneous multi-channel recording, series recording, timeshift and catch-up/VOD are outside the first release.
 
 ## Project documents
 
-- [Design and acceptance criteria](docs/superpowers/specs/2026-10-11-dizytv-design.md)
+- [Product design and acceptance criteria](docs/superpowers/specs/2026-10-11-dizytv-design.md)
 - [Development roadmap](ROADMAP.md)
 - [Installers and public distribution](docs/DISTRIBUTION.md)
+- [Logo and branding](docs/BRANDING.md)
 
 ## Integration references
 
 - [search-ace.stream playlist documentation](https://search-ace.stream/doc)
 - [Ace Stream playback API](https://docs.acestream.media/developers/start-playback/)
 - [Ace Stream Android integration](https://docs.acestream.media/developers/running-engine-android/)
-- [Ace Stream engine download platforms](https://docs.acestream.media/products/)
+- [Ace Stream engine platforms](https://docs.acestream.media/products/)
 - [libVLC](https://www.videolan.org/vlc/libvlc.html)
 - [XMLTV format](https://github.com/XMLTV/xmltv/blob/master/xmltv.dtd)
 
-A directory listing does not establish that a stream is currently working or permitted for redistribution. No stream collection, guide dataset or third-party binary is bundled in this documentation foundation. Source coverage and availability will be measured during the first development milestone.
+---
+
+<p align="center">
+  <strong>Part of the Dizy family</strong><br />
+  <a href="https://github.com/DizygoticCode/DizyTrades">DizyTrades</a> ·
+  <a href="https://github.com/DizygoticCode/dizychat-server">DizyChat</a> ·
+  <strong>DizyTV</strong>
+</p>
