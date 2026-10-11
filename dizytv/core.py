@@ -37,15 +37,18 @@ def normalise_genre(value):
     return value.strip()[:512] or 'Unspecified'
 
 
-def channel_categories(attrs, stream):
+def channel_categories(attrs, stream, name=''):
     group = attrs.get('group-title','')
     explicit = attrs.get('tvg-country',attrs.get('country','')).strip()
     country = COUNTRIES.get(explicit.upper(), explicit) if explicit else 'Unspecified'
     if not explicit:
         aliases = {**COUNTRIES, **{name:name for name in COUNTRIES.values()}}
-        for alias, name in sorted(aliases.items(),key=lambda pair:-len(pair[0])):
+        for alias, country_name in sorted(aliases.items(),key=lambda pair:-len(pair[0])):
             if re.search(r'(?<!\w)'+re.escape(alias)+r'(?!\w)',group,re.I):
-                country = name; break
+                country = country_name; break
+        if country == 'Unspecified':
+            # Only recognised source tags, not guesses from words in a channel name.
+            country = next((COUNTRIES[tag.upper()] for tag in re.findall(r'\[([A-Za-z]{2,3})\]', name or attrs.get('tvg-name','')) if tag.upper() in COUNTRIES), 'Unspecified')
     genre = attrs.get('tvg-genre',attrs.get('genre','')).strip()
     if not genre:
         candidate = normalise_genre(group)
@@ -54,6 +57,11 @@ def channel_categories(attrs, stream):
         genre = normalise_genre(genre)
     return {'country':country,'genre':genre,'kind':'Radio' if attrs.get('radio','').lower() in ('true','1','yes') else 'TV',
             'transport':'Ace Stream' if ace_id(stream) else 'HTTP'}
+
+
+def catalogue(state):
+    overrides = state.get('category_overrides', {})
+    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']]
 
 
 def default_state():
@@ -117,7 +125,7 @@ def parse_playlist(text):
                                  'group': attrs.get('group-title', '')[:512],
                                  'tvg_id': attrs.get('tvg-id', '')[:512],
                                  'stream': 'acestream://' + aid if aid else line,
-                                 **channel_categories(attrs,line)})
+                                 **channel_categories(attrs,line,name)})
             attrs, name = {}, ''
     if not channels:
         raise ValueError('No supported channels found; cached catalogue was retained')
@@ -250,6 +258,14 @@ def validate_state(state):
         raise ValueError('Invalid favourites')
     if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
         raise ValueError('Invalid guide mappings')
+    overrides = state.get('category_overrides', {})
+    if not isinstance(overrides, dict) or len(overrides) > 100000:
+        raise ValueError('Invalid saved categories')
+    for cid, values in overrides.items():
+        if not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid) or not isinstance(values,dict) or set(values)-{'country','genre','kind'}:
+            raise ValueError('Invalid saved categories')
+        if any(not isinstance(v,str) or not v.strip() or len(v)>512 for v in values.values()) or values.get('kind','TV') not in ('TV','Radio'):
+            raise ValueError('Invalid saved categories')
     job_ids = set()
     for job in state['jobs']:
         if not isinstance(job, dict) or not isinstance(job.get('id'), str) or job['id'] in job_ids or len(job['id']) > 100:

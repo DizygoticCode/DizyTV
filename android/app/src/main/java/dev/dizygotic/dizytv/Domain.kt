@@ -21,14 +21,18 @@ object Domain {
     private val countries=mapOf("GB" to "United Kingdom","UK" to "United Kingdom","US" to "United States","USA" to "United States","CA" to "Canada","AU" to "Australia","NZ" to "New Zealand","IE" to "Ireland","FR" to "France","DE" to "Germany","ES" to "Spain","IT" to "Italy","PT" to "Portugal","NL" to "Netherlands","BE" to "Belgium","CH" to "Switzerland","AT" to "Austria","PL" to "Poland","CZ" to "Czechia","SE" to "Sweden","NO" to "Norway","DK" to "Denmark","FI" to "Finland","GR" to "Greece","TR" to "Turkey","UA" to "Ukraine","RU" to "Russia","IN" to "India","PK" to "Pakistan","BR" to "Brazil","MX" to "Mexico","AR" to "Argentina","JP" to "Japan","CN" to "China","KR" to "South Korea","ZA" to "South Africa","IL" to "Israel","AE" to "United Arab Emirates")
     private val genres=listOf("Sport" to "sports?","News" to "news|current affairs","Movies" to "movies?|films?|cinema","Kids" to "kids|children|cartoons?","Music" to "music","Documentary" to "documentar(?:y|ies)|factual","Entertainment" to "entertainment","Education" to "education","General" to "general")
     fun normaliseGenre(value:String)=genres.firstOrNull { Regex("\\b(?:${it.second})\\b",RegexOption.IGNORE_CASE).containsMatchIn(value) }?.first?:value.trim().take(512).ifEmpty { "Unspecified" }
-    private fun categories(attrs:Map<String,String>,stream:String):JSONObject {
+    private fun categories(attrs:Map<String,String>,stream:String,name:String):JSONObject {
         val group=attrs["group-title"].orEmpty(); val explicit=(attrs["tvg-country"]?:attrs["country"]).orEmpty().trim()
         val aliases=countries+countries.values.associateWith { it }
-        val country=if(explicit.isNotEmpty()) countries[explicit.uppercase()]?:explicit else aliases.entries.sortedByDescending { it.key.length }.firstOrNull { Regex("(?<!\\w)"+Regex.escape(it.key)+"(?!\\w)",RegexOption.IGNORE_CASE).containsMatchIn(group) }?.value?:"Unspecified"
+        val country=if(explicit.isNotEmpty()) countries[explicit.uppercase()]?:explicit else aliases.entries.sortedByDescending { it.key.length }.firstOrNull { Regex("(?<!\\w)"+Regex.escape(it.key)+"(?!\\w)",RegexOption.IGNORE_CASE).containsMatchIn(group) }?.value?:Regex("\\[([A-Za-z]{2,3})\\]").findAll(name.ifEmpty { attrs["tvg-name"].orEmpty() }).firstNotNullOfOrNull { countries[it.groupValues[1].uppercase()] }?:"Unspecified"
         val explicitGenre=(attrs["tvg-genre"]?:attrs["genre"]).orEmpty(); val genre=if(explicitGenre.isNotEmpty()) normaliseGenre(explicitGenre) else normaliseGenre(group).takeIf { g->genres.any { it.first==g } }?:"Unspecified"
         return JSONObject().put("country",country).put("genre",genre).put("kind",if(attrs["radio"].orEmpty().lowercase() in listOf("true","1","yes")) "Radio" else "TV").put("transport",if(aceId(stream)!=null) "Ace Stream" else "HTTP")
     }
     fun defaults()=JSONObject("""{"settings":{"playlist_url":"https://search-ace.stream/playlist","xmltv_urls":[],"engine_url":"http://127.0.0.1:6878","timezone":"auto","epg_offset_minutes":0,"padding_before":2,"padding_after":5,"reserve_bytes":1073741824,"recording_dir":""},"channels":[],"favourites":[],"mappings":{},"jobs":[]}""")
+    fun catalogue(state:JSONObject)=objects(state.getJSONArray("channels")).map { original->
+        val channel=JSONObject(original.toString()); val saved=state.optJSONObject("category_overrides")?.optJSONObject(channel.getString("id"))
+        saved?.keys()?.forEach { channel.put(it,saved.get(it)) }; channel
+    }
     fun objects(array:JSONArray)=(0 until array.length()).map { array.getJSONObject(it) }
     fun strings(array:JSONArray)=(0 until array.length()).map { array.getString(it) }
     fun http(value:String):String {
@@ -62,7 +66,7 @@ object Domain {
                 val id=aid?:MessageDigest.getInstance("SHA-256").digest(line.toByteArray()).joinToString("") { "%02x".format(it) }.take(40)
                 if(seen.add(id)) {
                     val ch=JSONObject().put("id",id).put("name",name.ifEmpty { attrs["tvg-name"]?:id }.take(512)).put("group",attrs["group-title"].orEmpty().take(512)).put("tvg_id",attrs["tvg-id"].orEmpty().take(512)).put("stream",if(aid!=null) "acestream://$aid" else line)
-                    val c=categories(attrs,line); c.keys().forEach { ch.put(it,c.get(it)) }; result.put(ch)
+                    val c=categories(attrs,line,name); c.keys().forEach { ch.put(it,c.get(it)) }; result.put(ch)
                 }
                 attrs=emptyMap(); name=""
             }
@@ -127,6 +131,14 @@ object Domain {
             }
             val favourites=s.getJSONArray("favourites"); require(favourites.length()<=100000); strings(favourites).forEach { require(it.matches(Regex("[a-f0-9]{40}"))) }
             val maps=s.getJSONObject("mappings"); require(maps.length()<=100000); maps.keys().forEach { require(maps.get(it) is String && maps.getString(it).length<=512) }
+            if(s.has("category_overrides")) {
+                val overrides=s.getJSONObject("category_overrides"); require(overrides.length()<=100000)
+                overrides.keys().forEach { cid->
+                    require(cid.matches(Regex("[a-f0-9]{40}"))); val values=overrides.getJSONObject(cid)
+                    values.keys().forEach { key->require(key in listOf("country","genre","kind") && values.get(key) is String && values.getString(key).isNotBlank() && values.getString(key).length<=512) }
+                    require(values.optString("kind","TV") in listOf("TV","Radio"))
+                }
+            }
             val jobs=s.getJSONArray("jobs"); require(jobs.length()<=10000); val jobIds=mutableSetOf<String>()
             for(j in objects(jobs)) {
                 require(j.get("id") is String && j.getString("id").length<=100 && jobIds.add(j.getString("id")))

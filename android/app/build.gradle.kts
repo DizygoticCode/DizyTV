@@ -14,7 +14,13 @@ android {
     buildFeatures { buildConfig = true }
     packaging { jniLibs { useLegacyPackaging = false } }
     lint { abortOnError = true; checkReleaseBuilds = true }
+    sourceSets.getByName("main").assets.srcDirs("../../assets/licenses",layout.buildDirectory.dir("licence-assets"))
 }
+val copyLicenceNotice by tasks.registering(Copy::class) {
+    from("../../THIRD-PARTY-NOTICES.md") { rename { "NOTICES.md" } }
+    into(layout.buildDirectory.dir("licence-assets"))
+}
+tasks.named("preBuild") { dependsOn(copyLicenceNotice) }
 dependencies {
     implementation("org.videolan.android:libvlc-all:3.7.5")
     implementation("androidx.documentfile:documentfile:1.0.1")

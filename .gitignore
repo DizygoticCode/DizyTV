@@ -51,3 +51,5 @@ assets/branding/*.ico
 assets/branding/*.icns
 smoke-data/
 smoke-packaged/
+assets/licenses/NOTICES.md
+assets/licenses/components/

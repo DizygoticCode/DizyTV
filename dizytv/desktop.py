@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, COUNTRIES, GENRES)
 from .network import download
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
             widget.addItem(label,''); widget.currentIndexChanged.connect(self.render_channels); side.addWidget(widget)
         self.favourites_only=QCheckBox('★ Favourites only'); self.favourites_only.toggled.connect(self.render_channels); side.addWidget(self.favourites_only)
         self.channels=QListWidget(); self.channels.currentItemChanged.connect(self.choose_channel); self.channels.itemDoubleClicked.connect(lambda:self.play()); side.addWidget(self.channels,1)
-        for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel)]:
+        for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
             b=QPushButton(label); b.clicked.connect(handler); side.addWidget(b)
         split.addWidget(sidebar); self.tabs=QTabWidget(); split.addWidget(self.tabs); split.setSizes([300,1000])
         live=QWidget(); live_layout=QVBoxLayout(live); self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
@@ -188,19 +188,19 @@ class MainWindow(QMainWindow):
                 self.guide=json.loads(path.read_text(encoding='utf-8'))
         except (OSError,ValueError):pass
     def render_channels(self,*_):
-        previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); self.channels.blockSignals(True); self.channels.clear()
+        previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
         genre_by_id={}
         for p in self.guide['programmes']:
             genre_by_id.setdefault(p['channel'],set()).update(normalise_genre(v) for v in p.get('categories',[]))
         for widget,key,label in ((self.country_filter,'country','All countries'),(self.genre_filter,'genre','All genres'),(self.kind_filter,'kind','All stream types')):
-            chosen=widget.currentData(); values={c.get(key,'TV' if key=='kind' else 'Unspecified') for c in self.state['channels']}
+            chosen=widget.currentData(); values={c.get(key,'TV' if key=='kind' else 'Unspecified') for c in source}
             if key=='genre':values.update(g for genres in genre_by_id.values() for g in genres)
-            if key=='kind':values.update(c.get('transport','Ace Stream' if c['stream'].startswith('acestream:') else 'HTTP') for c in self.state['channels'])
+            if key=='kind':values.update(c.get('transport','Ace Stream' if c['stream'].startswith('acestream:') else 'HTTP') for c in source)
             widget.blockSignals(True); widget.clear(); widget.addItem(label,'')
             for value in sorted(values):widget.addItem(value,value)
             widget.setCurrentIndex(max(0,widget.findData(chosen))); widget.blockSignals(False)
         query=self.search.text().casefold(); favs=set(self.state['favourites'])
-        for ch in self.state['channels']:
+        for ch in source:
             if query not in (ch['name']+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
@@ -208,7 +208,7 @@ class MainWindow(QMainWindow):
             key=self.state['mappings'].get(ch['id'],ch['tvg_id'])
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
             item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+ch['name']); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
-            if ch['id']==previous:self.channels.setCurrentItem(item)
+            if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
         self.channels.blockSignals(False); self.render_guide()
     def choose_channel(self,item,*_):
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
@@ -273,6 +273,24 @@ class MainWindow(QMainWindow):
             if cid in s['favourites']:s['favourites'].remove(cid)
             else:s['favourites'].append(cid)
         self.store.update(change); self.render_channels()
+    def edit_categories(self):
+        if not self.selected:return
+        channel=self.selected; dialog=QDialog(self); dialog.setWindowTitle('Categories — '+channel['name']); layout=QFormLayout(dialog)
+        country=QComboBox(); country.setEditable(True); country.addItems(['Unspecified']+sorted(set(COUNTRIES.values()))); country.setCurrentText(channel.get('country','Unspecified'))
+        genre=QComboBox(); genre.setEditable(True); genre.addItems(['Unspecified']+[g for g,_ in GENRES]); genre.setCurrentText(channel.get('genre','Unspecified'))
+        kind=QComboBox(); kind.addItems(['TV','Radio']); kind.setCurrentText(channel.get('kind','TV'))
+        layout.addRow('Country',country); layout.addRow('Genre',genre); layout.addRow('Stream type',kind)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel|QDialogButtonBox.Reset); layout.addRow(buttons)
+        reset=[False]
+        def source_categories():reset[0]=True; dialog.accept()
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); buttons.button(QDialogButtonBox.Reset).setText('Use source categories'); buttons.button(QDialogButtonBox.Reset).clicked.connect(source_categories)
+        if dialog.exec()==QDialog.Accepted:
+            def change(s):
+                overrides=s.setdefault('category_overrides',{})
+                if reset[0]:overrides.pop(channel['id'],None)
+                else:overrides[channel['id']]={'country':country.currentText().strip() or 'Unspecified','genre':normalise_genre(genre.currentText()),'kind':kind.currentText()}
+            try:self.store.update(change); self.render_channels(); self.status.setText('Categories saved • kept across refresh and backup')
+            except ValueError as exc:self.error(str(exc))
     def map_channel(self):
         if not self.selected:return
         options=['No mapping']+[key+' — '+name for key,name in sorted(self.guide['names'].items())]

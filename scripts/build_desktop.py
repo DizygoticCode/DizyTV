@@ -1,7 +1,9 @@
 """Build on the target OS: a native EXE or macOS app, never cross-compile."""
 import hashlib
+from importlib.metadata import distribution
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +11,15 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 os.chdir(ROOT)
 from PIL import Image
+licences=ROOT/'assets'/'licenses'
+shutil.copyfile(ROOT/'THIRD-PARTY-NOTICES.md',licences/'NOTICES.md')
+for package in ('python-vlc','tzdata','pyinstaller'):
+    wheel=distribution(package)
+    for entry in wheel.files or []:
+        if any(word in entry.name.lower() for word in ('license','licence','copying')):
+            target=licences/'components'/package/entry.name
+            target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(wheel.locate_file(entry),target)
 image=Image.open('assets/branding/dizytv-logo.png')
 image.save('assets/branding/dizytv.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
 image.save('assets/branding/dizytv.icns')

@@ -23,6 +23,23 @@ XML = '''<?xml version="1.0"?><tv>
 
 
 class CoreTests(unittest.TestCase):
+    def test_source_country_tags_do_not_treat_quality_tags_as_countries(self):
+        source = '#EXTM3U\n#EXTINF:-1,Channel [HD] [RU]\nhttps://example.com/a.ts\n#EXTINF:-1 tvg-country="GB",Channel [RU]\nhttps://example.com/b.ts\n#EXTINF:-1,Channel [FHD]\nhttps://example.com/c.ts'
+        self.assertEqual(['Russia','United Kingdom','Unspecified'], [c['country'] for c in parse_playlist(source)])
+
+    def test_saved_categories_survive_refresh_and_portable_backup(self):
+        from dizytv.core import catalogue
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory)
+            store.update(lambda s:s.update(channels=parse_playlist(PLAYLIST),category_overrides={ACE:{'country':'Ireland','genre':'News','kind':'Radio'}}))
+            store.update(lambda s:s.update(channels=parse_playlist(PLAYLIST.replace('BBC One','Updated name'))))
+            restored=restore_backup(export_backup(store.read()))
+            channel=catalogue(restored)[0]
+            self.assertEqual(('Updated name','Ireland','News','Radio','Ace Stream'),tuple(channel[k] for k in ('name','country','genre','kind','transport')))
+            self.assertEqual('United Kingdom',restored['channels'][0]['country'])
+            bad=default_state(); bad['category_overrides']={ACE:{'stream':'https://example.com/changed'}}
+            with self.assertRaises(ValueError):validate_state(bad)
+
     def test_oversized_state_update_preserves_previous_file(self):
         with tempfile.TemporaryDirectory() as directory:
             store=Store(directory); store.update(lambda s:s.update(favourites=['a'*40])); before=store.path.read_bytes()

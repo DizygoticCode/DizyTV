@@ -5,6 +5,20 @@ import org.junit.Test
 import org.json.JSONObject
 
 class DomainTest {
+    @Test fun sourceCountryTagsIgnoreQualityAndRespectExplicitMetadata() {
+        val source="#EXTM3U\n#EXTINF:-1,Channel [HD] [RU]\nhttps://example.com/a.ts\n#EXTINF:-1 tvg-country=\"GB\",Channel [RU]\nhttps://example.com/b.ts\n#EXTINF:-1,Channel [FHD]\nhttps://example.com/c.ts"
+        assertEquals(listOf("Russia","United Kingdom","Unspecified"),Domain.objects(Domain.playlist(source)).map { it.getString("country") })
+    }
+    @Test fun savedCategoriesSurviveRefreshAndBackup() {
+        val s=Domain.defaults(); val hash="a".repeat(40)
+        s.put("channels",Domain.playlist("#EXTM3U\n#EXTINF:-1 group-title=\"UK\",Updated name\nacestream://$hash"))
+        s.put("category_overrides",JSONObject().put(hash,JSONObject().put("country","Ireland").put("genre","News").put("kind","Radio")))
+        val restored=Domain.restore(Domain.backup(s)); val channel=Domain.catalogue(restored).single()
+        assertEquals("Ireland",channel.getString("country")); assertEquals("News",channel.getString("genre")); assertEquals("Radio",channel.getString("kind"))
+        assertEquals("Updated name",channel.getString("name")); assertEquals("United Kingdom",restored.getJSONArray("channels").getJSONObject(0).getString("country"))
+        s.getJSONObject("category_overrides").getJSONObject(hash).put("stream","https://example.com/changed")
+        try { Domain.validate(s); fail("Invalid override accepted") } catch(_:IllegalArgumentException) {}
+    }
     @Test fun countryGenreAndTypeCategories() {
         val text="#EXTM3U\n#EXTINF:-1 tvg-country=\"GB\" group-title=\"Sports\",Sport\nacestream://"+"a".repeat(40)+"\n#EXTINF:-1 tvg-country=\"US\" radio=\"true\" group-title=\"Music\",Radio\nhttps://example.com/live.ts"
         val channels=Domain.playlist(text)

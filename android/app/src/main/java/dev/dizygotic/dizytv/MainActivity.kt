@@ -65,7 +65,7 @@ class MainActivity:Activity() {
     private fun scroller():LinearLayout { val scroll=ScrollView(this); val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; scroll.addView(column); body.addView(scroll,LinearLayout.LayoutParams(-1,-1)); return column }
     private fun filteredChannels(state:JSONObject):List<JSONObject> {
         val fav=Domain.strings(state.getJSONArray("favourites")); val programmeGenres=Domain.objects(guide.getJSONArray("programmes")).groupBy { it.getString("channel") }.mapValues { entry->entry.value.flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }.toSet() }
-        return Domain.objects(state.getJSONArray("channels")).filter { ch->
+        return Domain.catalogue(state).filter { ch->
             val key=state.getJSONObject("mappings").optString(ch.getString("id"),ch.getString("tvg_id"))
             (ch.getString("name")+" "+ch.getString("group")).contains(search,true) && (!onlyFavourites || ch.getString("id") in fav) &&
             (countryFilter.isEmpty() || ch.optString("country","Unspecified")==countryFilter) &&
@@ -74,7 +74,7 @@ class MainActivity:Activity() {
         }
     }
     private fun categoryFilters(onChange:()->Unit):LinearLayout {
-        val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val channels=Domain.objects(store.read().getJSONArray("channels"))
+        val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val channels=Domain.catalogue(store.read())
         val guideGenres=Domain.objects(guide.getJSONArray("programmes")).flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }
         for(key in listOf("country","genre","kind")) {
             val values=(channels.map { it.optString(key,if(key=="kind") "TV" else "Unspecified") }+if(key=="genre") guideGenres else if(key=="kind") channels.map { it.optString("transport",if(it.getString("stream").startsWith("acestream:")) "Ace Stream" else "HTTP") } else emptyList()).distinct().sorted()
@@ -118,9 +118,10 @@ class MainActivity:Activity() {
             val programmes=Domain.objects(guide.getJSONArray("programmes")).filter { it.getString("channel")==key && it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
             body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
         }
-        video=VLCVideoLayout(this); body.addView(video,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(video,null,false,false)
+        val layout=VLCVideoLayout(this); video=layout; body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
         val controls=row(); controls.addView(button("Play") { play() }); controls.addView(button("Stop playback") { player.stop() }); controls.addView(button("Record now") { recordNow() }); body.addView(controls)
         val more=row(); more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } }); more.addView(button("Map EPG") { mapChannel() }); body.addView(more)
+        body.addView(button("Edit categories") { editCategories() })
     }
     private fun play()=attempt {
         val ch=selected?:return@attempt; val s=store.read()
@@ -130,6 +131,18 @@ class MainActivity:Activity() {
     private fun toggleFavourite(ch:JSONObject) {
         store.update { s->val fav=Domain.strings(s.getJSONArray("favourites")).toMutableList(); if(!fav.remove(ch.getString("id"))) fav.add(ch.getString("id")); s.put("favourites",JSONArray(fav)) }
         status.text="Favourite list updated"
+    }
+    private fun editCategories() {
+        val ch=selected?:return; val fields=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),0,dp(16),0) }
+        val country=EditText(this).apply { hint="Country"; setText(ch.optString("country","Unspecified")); setSingleLine(true) }
+        val genre=EditText(this).apply { hint="Genre"; setText(ch.optString("genre","Unspecified")); setSingleLine(true) }
+        val kind=Spinner(this); val kinds=listOf("TV","Radio"); kind.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,kinds); kind.setSelection(maxOf(0,kinds.indexOf(ch.optString("kind","TV"))))
+        fields.addView(country); fields.addView(genre); fields.addView(kind)
+        fun save(values:JSONObject?)=attempt {
+            store.update { s->val overrides=s.optJSONObject("category_overrides")?:JSONObject(); if(values==null) overrides.remove(ch.getString("id")) else overrides.put(ch.getString("id"),values); s.put("category_overrides",overrides) }
+            selected=Domain.catalogue(store.read()).firstOrNull { it.getString("id")==ch.getString("id") }; render(); status.text="Categories saved • kept across refresh and backup"
+        }
+        AlertDialog.Builder(this).setTitle("Edit categories").setView(fields).setNegativeButton("Cancel",null).setNeutralButton("Use source") { _,_->save(null) }.setPositiveButton("Save") { _,_->save(JSONObject().put("country",country.text.toString().trim().ifEmpty { "Unspecified" }).put("genre",Domain.normaliseGenre(genre.text.toString())).put("kind",kinds[kind.selectedItemPosition])) }.show()
     }
     private fun mapChannel() {
         val ch=selected?:return; val names=guide.getJSONObject("names"); val keys=names.keys().asSequence().sorted().toList()

@@ -10,6 +10,17 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_saved_category_edit_filters_channels_and_guide(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory)
+            store.update(lambda s:s.update(channels=parse_playlist('#EXTM3U\n#EXTINF:-1,Uncategorised\nacestream://'+'a'*40),category_overrides={'a'*40:{'country':'Ireland','genre':'News'}}))
+            window=MainWindow(store,start_worker=False)
+            self.assertGreater(window.country_filter.findData('Ireland'),0)
+            window.country_filter.setCurrentIndex(window.country_filter.findData('Ireland'))
+            window.genre_filter.setCurrentIndex(window.genre_filter.findData('News'))
+            self.assertEqual(['Uncategorised'],[c['name'] for c in window.grid.rows]); window.close()
+
     def test_preserved_segment_is_playable_after_failed_resume(self):
         from pathlib import Path
         from dizytv.core import make_job
