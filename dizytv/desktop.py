@@ -173,7 +173,7 @@ class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None
+        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None
         self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
@@ -486,6 +486,10 @@ class MainWindow(QMainWindow):
             self.seek_slider.setEnabled(seekable and length>0)
             if seekable and length>0 and position>=0 and not self.seek_slider.isSliderDown():
                 self.seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
+            if self.screen_seek_slider is not None:
+                self.screen_seek_slider.setEnabled(seekable and length>0)
+                if seekable and length>0 and position>=0 and not self.screen_seek_slider.isSliderDown():
+                    self.screen_seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
             self.rewind_button.setEnabled(seekable)
             self.pause_button.setEnabled(seekable)
             self.seek_notice.setText('DVR window available — pause, rewind or scrub' if seekable else 'LIVE — no time-shift window reported by this stream')
@@ -750,16 +754,32 @@ class MainWindow(QMainWindow):
                                ('Info',self.show_tv_info),('⛶ Exit Fullscreen',self.exit_screen_fullscreen)):
             b=QPushButton(title,screen);b.clicked.connect(callback);bar.addWidget(b)
         vbox.addLayout(bar)
+        screen_seek=QSlider(Qt.Horizontal,screen)
+        screen_seek.setRange(0,1000)
+        screen_seek.sliderReleased.connect(lambda:self.seek_screen_slider())
+        self.screen_seek_slider=screen_seek
+        vbox.addWidget(screen_seek)
+        volume=QSlider(Qt.Horizontal,screen)
+        volume.setRange(0,100)
+        volume.setValue(self.volume_slider.value())
+        volume.valueChanged.connect(self.volume_slider.setValue)
+        self.volume_slider.valueChanged.connect(volume.setValue)
+        vbox.addWidget(volume)
         self.screen_dialog=screen
         screen.finished.connect(self.exit_screen_fullscreen)
         screen.showFullScreen()
         self.video.show()
         self._rebind_video()
 
+    def seek_screen_slider(self):
+        if self.screen_seek_slider and self.player and self.player.is_seekable() and self.player.get_length()>0:
+            self.player.set_time(self.player.get_length()*self.screen_seek_slider.value()//1000)
+
     def exit_screen_fullscreen(self):
         screen=self.screen_dialog
         if screen is None:return
         self.screen_dialog=None
+        self.screen_seek_slider=None
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
