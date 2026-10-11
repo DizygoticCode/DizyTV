@@ -6,6 +6,7 @@ Use only streams the viewer is authorised to access; geoblocking and DRM are not
 from __future__ import annotations
 
 from .core import http_url, parse_playlist
+from urllib.parse import urlparse
 
 LEGACY_URL = "https://search-ace.stream/playlist"
 FREE_PLAYLISTS = (
@@ -68,7 +69,7 @@ def refresh_catalogue(settings, old_channels, fetch):
             success += 1
             append(channels)
         except Exception as exc:
-            errors.append(url + ": " + str(exc))
+            errors.append((urlparse(url).hostname or "unknown source") + ": " + type(exc).__name__)
             append(existing.get(url, []))
     if not success:
         if old_channels:
