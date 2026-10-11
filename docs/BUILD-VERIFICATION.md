@@ -48,3 +48,7 @@ The Windows installer and Mac PKGs are unsigned development packages; the Mac ap
 ## 0.1.2-alpha upgrade validation (pending CI and device confirmation)
 
 The 0.1.2 Windows upgrade preflight adds an isolated native Windows CI scenario: start the packaged detached worker, check that an active job blocks the upgrade helper without killing the worker, clear the job, and verify that the helper terminates the now-idle worker before installer creation. The existing 0.1.0 checks above are historical, not evidence for 0.1.2. Native CI and real install-over-0.1.1 still need confirmation. Mac and Android installers continue to be versioned independently; Windows and Android package signing limitations remain.
+
+## 0.1.3-alpha Windows upgrade regression (CI pending)
+
+A real 0.1.2 upgrade failed when background DizyTV.exe and libcrypto-3.dll remained loaded. The previous CI tested a PowerShell helper in isolation but did not bundle it in the compiled installer. 0.1.3 adds an explicit Inno Setup [Files] dontcopy entry to embed the preflight helper, normalizes installer path delimiters, and adds a Windows end-to-end regression: create existing installation, start detached worker, launch compiled Setup over it, confirm files were replaced, DLL exists, worker exited, and packaged app launches. Real-device upgrade still must be confirmed.

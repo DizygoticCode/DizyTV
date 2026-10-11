@@ -48,3 +48,7 @@ Implemented for Windows, macOS and Android: selectable public playlist URLs, sou
 ## Windows upgrade repair (0.1.2-alpha)
 
 Added Windows installer preflight for hidden DizyTV background recorder processes after the UI closes. Only exactly matched idle workers are terminated; active or near-due recordings prevent installation. Native Windows CI exercises this upgrade helper against a running packaged worker; physical-machine upgrade confirmation is still pending. Bundled Ace Stream engine, VLC binary distribution and Xtream credentials are **not** part of this installer-focused change.
+
+## Installer regression (0.1.3-alpha)
+
+Embed the previously omitted pre-install PowerShell safety helper; verify an actual compiled Windows Setup updating an installation with a running idle detached recorder. This fixes installation failure due to locked DizyTV.exe/libcrypto-3.dll. End-user verification still required.
