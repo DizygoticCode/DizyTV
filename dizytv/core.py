@@ -193,10 +193,10 @@ def format_time(utc_seconds, selected='auto', day=True, detected=None):
 
 
 def _guide_name(value):
-    # Conservative exact-name fallback. Never silently map two regional variants.
-    value = re.sub(r'\\s*\\((?:\\d{3,4}p|HD|SD)\\)', '', value, flags=re.I)
-    value = re.sub(r'\\s+(?:HD|SD|FHD)$', '', value, flags=re.I)
-    return re.sub(r'\\s+', ' ', value).strip().casefold()
+    # Exact name only after removing quality suffixes. Regional ambiguity is rejected.
+    value = re.sub(r'\s*\((?:\d{3,4}p|HD|SD)\)', '', value, flags=re.I)
+    value = re.sub(r'\s+(?:HD|SD|FHD)$', '', value, flags=re.I)
+    return re.sub(r'\s+', ' ', value).strip().casefold()
 
 
 def match_guide(channel, mappings, guide_names):
