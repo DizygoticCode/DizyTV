@@ -52,3 +52,9 @@ Added Windows installer preflight for hidden DizyTV background recorder processe
 ## Installer regression (0.1.3-alpha)
 
 Embed the previously omitted pre-install PowerShell safety helper; verify an actual compiled Windows Setup updating an installation with a running idle detached recorder. This fixes installation failure due to locked DizyTV.exe/libcrypto-3.dll. End-user verification still required.
+
+## 0.1.4 alpha playback and EPG follow-up
+
+- Safe Freeview EPG name/ID aliases and manual regional mapping for BBC One/ITV1.
+- Better HTTP/HLS playback and failure statuses, background Windows Ace engine launch if engine is separately installed. Android detects a stopped engine without UI-thread networking.
+- Native CI must pass before a new tagged release; streaming availability, geoblocks, DRM and proprietary engine redistribution remain external limitations.

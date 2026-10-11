@@ -157,6 +157,7 @@ class MainActivity:Activity() {
         val uri=Uri.parse(address)
         if(uri.host !in listOf("localhost","127.0.0.1","::1")) return true
         return runCatching {
+            // Run on the executor only: Android forbids socket operations on its UI thread.
             java.net.Socket().use { socket ->
                 socket.connect(java.net.InetSocketAddress(uri.host,if(uri.port>0) uri.port else 6878),500)
             }
@@ -164,29 +165,46 @@ class MainActivity:Activity() {
         }.getOrDefault(false)
     }
     private fun play()=attempt {
-        val ch=selected?:return@attempt; val s=store.read()
+        val ch=selected?:return@attempt
+        val s=store.read()
         require(Domain.objects(s.getJSONArray("jobs")).none { it.getString("status")=="recording" && it.getString("channel_id")!=ch.getString("id") }) { "Another channel is recording. Finish or stop it before changing playback." }
+        val engine=s.getJSONObject("settings").getString("engine_url")
         val isAce=Domain.aceId(ch.getString("stream"))!=null
-        if(isAce && !isLocalEngineAvailable(s.getJSONObject("settings").getString("engine_url"))) {
-            val installed=listOf("org.acestream.media","org.acestream.core")
-                .firstNotNullOfOrNull { packageManager.getLaunchIntentForPackage(it) }
-            if(installed!=null) {
-                AlertDialog.Builder(this).setTitle("Ace Stream engine is stopped")
-                    .setMessage("This channel needs your installed Ace Stream engine. Open it, then return to DizyTV and press Play. Ordinary HTTP/HLS channels work without it.")
-                    .setPositiveButton("Open engine") { _,_-> startActivity(installed) }
-                    .setNegativeButton("Cancel",null).show()
-            } else {
-                error("Ace Stream is not installed on this device. Install the official engine to play Ace channels; HTTP/HLS channels work without it.")
+        if(isAce) {
+            status.text="Checking installed Ace Stream engine…"
+            executor.execute {
+                val ready=isLocalEngineAvailable(engine)
+                handler.post {
+                    if(selected?.optString("id")!=ch.getString("id") || page!="Live") return@post
+                    if(!ready) {
+                        val installed=listOf("org.acestream.media","org.acestream.core")
+                            .firstNotNullOfOrNull { packageManager.getLaunchIntentForPackage(it) }
+                        if(installed!=null) {
+                            AlertDialog.Builder(this).setTitle("Ace Stream engine is stopped")
+                                .setMessage("Start your installed Ace Stream engine and return to DizyTV. HTTP/HLS channels can play without it.")
+                                .setPositiveButton("Open engine") { _,_->startActivity(installed) }
+                                .setNegativeButton("Cancel",null).show()
+                        } else {
+                            error("Ace Stream engine isn't installed. Install the official engine for Ace channels; HTTP/HLS streams don't need it.")
+                        }
+                    } else {
+                        startMedia(ch,s,isAce=true)
+                    }
+                }
             }
-            return@attempt
+        } else {
+            startMedia(ch,s,isAce=false)
         }
+    }
+    private fun startMedia(ch:JSONObject,s:JSONObject,isAce:Boolean) {
         val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings"))))
         player.media=media; media.release(); player.play()
-        status.text=if(isAce) "Connecting to Ace engine…" else "Connecting to HTTP/HLS stream…"
+        status.text=if(isAce) "Connecting to Ace Stream…" else "Connecting to HTTP/HLS stream…"
+        val channelId=ch.getString("id")
         handler.postDelayed({
-            if(page=="Live" && player.isPlaying.not())
-                status.text="Stream still buffering or unavailable. Try a different channel if it does not play."
-        },20000)
+            if(selected?.optString("id")==channelId && page=="Live" && !player.isPlaying)
+                status.text="Still buffering or unavailable. This stream may be offline, geoblocked or DRM-protected."
+        },25000)
     }
     private fun toggleFavourite(ch:JSONObject) {
         store.update { s->val fav=Domain.strings(s.getJSONArray("favourites")).toMutableList(); if(!fav.remove(ch.getString("id"))) fav.add(ch.getString("id")); s.put("favourites",JSONArray(fav)) }
