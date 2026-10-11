@@ -276,10 +276,10 @@ class MainActivity:Activity() {
             body.addView(button("Edit categories") { editCategories() })
         }
     }
+    @Suppress("DEPRECATION")
     private fun setTvMode(cinema:Boolean,fullscreen:Boolean) {
         cinemaMode=cinema
         screenMode=fullscreen
-        @Suppress("DEPRECATION")
         if(screenMode) {
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
@@ -396,6 +396,12 @@ class MainActivity:Activity() {
     private fun startMedia(ch:JSONObject,s:JSONObject,isAce:Boolean) {
         val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings"))))
         player.media=media; media.release(); player.play()
+        val guideKey=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
+        indexGuide()
+        val now=Instant.now().epochSecond
+        val current=indexedProgrammes[guideKey].orEmpty().firstOrNull { it.getLong("start")<=now && it.getLong("end")>now }
+        android.widget.Toast.makeText(this,Domain.displayName(ch.getString("name"))+
+            (current?.let { " — Now: "+it.getString("title") }?:" — LIVE"),android.widget.Toast.LENGTH_LONG).show()
         status.text=if(isAce) "Connecting to Ace Stream…" else "Connecting to HTTP/HLS stream…"
         val channelId=ch.getString("id")
         handler.postDelayed({

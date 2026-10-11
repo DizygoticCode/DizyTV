@@ -208,6 +208,11 @@ class MainWindow(QMainWindow):
         self.sidebar=sidebar
         split.addWidget(sidebar); self.tabs=QTabWidget(); split.addWidget(self.tabs); split.setSizes([300,1000])
         live=QWidget(); live_layout=QVBoxLayout(live); self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
+        self.channel_banner=QLabel('')
+        self.channel_banner.setStyleSheet('background:#304d36; color:white; padding:8px;')
+        self.channel_banner.setWordWrap(True)
+        self.channel_banner.hide()
+        live_layout.addWidget(self.channel_banner)
         self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
         controls=QHBoxLayout()
         for label,handler in [('▶ Play',self.play),('■ Stop',self.stop_playback),('● Record',self.record_now)]:
@@ -597,6 +602,14 @@ class MainWindow(QMainWindow):
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.playback_started=time.monotonic(); self.playback_reported=False
             self.pause_button.setText('⏸ Pause')
+            if self.selected:
+                key=self.matched_guide(self.selected)
+                now=int(time.time())
+                current=next((p for p in self.guide_index()[0].get(key,[]) if p['start']<=now<p['end']),None)
+                self.channel_banner.setText(display_channel_name(self.selected['name'])+
+                                            ('  •  Now: '+current['title'] if current else '  •  LIVE'))
+                self.channel_banner.show()
+                QTimer.singleShot(5000,self.channel_banner.hide)
             self.tabs.setCurrentIndex(0)
             self.status.setText('Connecting to stream…')
         except Exception as exc:
@@ -748,7 +761,7 @@ class MainWindow(QMainWindow):
         if screen is None:return
         self.screen_dialog=None
         self.video.setParent(None)
-        self.live_layout.insertWidget(1,self.video,1)
+        self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
         self._rebind_video()
         screen.close()
