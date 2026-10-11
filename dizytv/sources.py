@@ -21,7 +21,7 @@ FREE_GUIDES = (
     ("UK Freeview (seven days)", "https://raw.githubusercontent.com/dp247/Freeview-EPG/master/epg.xml"),
     ("US lightweight XMLTV", "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_lite.xml.gz"),
 )
-DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS]
+DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]  # Worldwide mega-index optional on low-memory phones
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
 
