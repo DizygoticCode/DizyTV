@@ -5,6 +5,18 @@ import org.junit.Test
 import org.json.JSONObject
 
 class DomainTest {
+    @Test fun freeviewGuideAliasesKeepRegionalVariantsUnambiguous() {
+        val names=JSONObject().put("BBCTwoHD.uk","BBC Two HD").put("BBCFourHD.uk","BBC Four HD")
+            .put("5.uk","5 HD").put("BBCOneSouth.uk","BBC One South HD")
+            .put("BBCOneLondonHD.uk","BBC One London HD")
+        fun channel(tvg:String,name:String)=JSONObject().put("id","id").put("tvg_id",tvg).put("name",name)
+        assertEquals("BBCTwoHD.uk",Domain.matchGuide(channel("BBCTwo.uk","BBC Two Ⓖ"),JSONObject(),names))
+        assertEquals("BBCFourHD.uk",Domain.matchGuide(channel("BBCFour.uk","BBC Four Ⓖ"),JSONObject(),names))
+        assertEquals("5.uk",Domain.matchGuide(channel("Channel5.uk","Channel 5 Ⓢ"),JSONObject(),names))
+        assertEquals("BBCOne.uk",Domain.matchGuide(channel("BBCOne.uk","BBC One Ⓖ"),JSONObject(),names))
+        assertEquals("BBCOneSouth.uk",Domain.matchGuide(channel("BBCOne.uk","BBC One"),JSONObject().put("id","BBCOneSouth.uk"),names))
+    }
+
     @Test fun sourceCountryTagsIgnoreQualityAndRespectExplicitMetadata() {
         val source="#EXTM3U\n#EXTINF:-1,Channel [HD] [RU]\nhttps://example.com/a.ts\n#EXTINF:-1 tvg-country=\"GB\",Channel [RU]\nhttps://example.com/b.ts\n#EXTINF:-1,Channel [FHD]\nhttps://example.com/c.ts"
         assertEquals(listOf("Russia","United Kingdom","Unspecified"),Domain.objects(Domain.playlist(source)).map { it.getString("country") })

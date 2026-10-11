@@ -93,6 +93,13 @@ object Domain {
         if(names.has(tvg)) return tvg
         val keys=names.keys().asSequence().toList()
         if(tvg.isNotEmpty()) keys.filter { it.equals(tvg,true) }.singleOrNull()?.let { return it }
+        val base=tvg.substringBefore('@')
+        if(base!=tvg) keys.filter { it.equals(base,true) }.singleOrNull()?.let { return it }
+        // Only aliases with one correct guide target. BBC One / ITV1 are regional.
+        val aliases=mapOf("bbctwo.uk" to "BBCTwoHD.uk","bbcfour.uk" to "BBCFourHD.uk","channel5.uk" to "5.uk")
+        aliases[base.lowercase()]?.let { alias->
+            keys.filter { it.equals(alias,true) }.singleOrNull()?.let { return it }
+        }
         val normalized=guideName(ch.getString("name"))
         return keys.filter { guideName(names.optString(it))==normalized }.singleOrNull()?:tvg
     }
