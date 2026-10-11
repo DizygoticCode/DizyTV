@@ -138,6 +138,28 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual('Sport',window.grid.rows[0]['name'])
             window.close()
 
+    def test_country_tree_and_category_navigation_keeps_source_values(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            source='#EXTM3U\n#EXTINF:-1 tvg-id="BBCOne.uk" tvg-country="GB" group-title="News",BBC One @ HD Ⓖ\nhttps://example.com/one.m3u8\n#EXTINF:-1 tvg-country="US" group-title="Sports",AT&T SportsNet\nhttps://example.com/two.m3u8'
+            store.update(lambda s:s.update(channels=parse_playlist(source)))
+            window=MainWindow(store,start_worker=False)
+            self.assertEqual(2,window.country_tree.topLevelItemCount())
+            uk=next(window.country_tree.topLevelItem(i) for i in range(2) if 'United Kingdom' in window.country_tree.topLevelItem(i).text(0))
+            self.assertEqual(('country','United Kingdom','',''),uk.data(0,Qt.UserRole))
+            news=uk.child(0)
+            self.assertIn('News',news.text(0))
+            leaf=news.child(0)
+            self.assertEqual('BBC One',leaf.text(0))
+            window.country_tree_clicked(news)
+            self.assertEqual(['BBC One'],[window.channels.item(i).text() for i in range(window.channels.count())])
+            window.country_tree_clicked(leaf)
+            self.assertEqual('BBC One @ HD Ⓖ',window.selected['name'])
+            self.assertEqual('BBCOne.uk',window.selected['tvg_id'])
+            self.assertEqual('https://example.com/one.m3u8',window.selected['stream'])
+            window.close()
+
     def test_source_filter_separates_free_http_from_ace_and_preserves_all(self):
         from dizytv.core import parse_playlist
         from dizytv.sources import DEFAULT_PLAYLIST_URLS

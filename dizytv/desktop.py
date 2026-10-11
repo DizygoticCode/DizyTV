@@ -10,13 +10,13 @@ from zoneinfo import available_timezones
 from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QCheckBox, QSplitter,
+    QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, COUNTRIES, GENRES)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, COUNTRIES, GENRES)
 from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
@@ -82,7 +82,7 @@ class GuideGrid(QWidget):
         for row,ch in enumerate(self.rows):
             y=48+row*rowheight
             p.fillRect(0,y,left,rowheight-3,QColor('#253b2b'))
-            p.setPen(QColor('#f3ead5')); p.drawText(QRectF(12,y+4,left-20,rowheight-8),Qt.AlignVCenter|Qt.TextWordWrap,ch['name'])
+            p.setPen(QColor('#f3ead5')); p.drawText(QRectF(12,y+4,left-20,rowheight-8),Qt.AlignVCenter|Qt.TextWordWrap,display_channel_name(ch['name']))
             key=self.mappings.get(ch['id'],ch['tvg_id'])
             entries=by_channel.get(key,[])
             if not entries:
@@ -188,7 +188,17 @@ class MainWindow(QMainWindow):
         self.source_filter.addItem('All playlists','')
         self.source_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.source_filter)
         for widget,label in ((self.country_filter,'All countries'),(self.genre_filter,'All genres'),(self.kind_filter,'All stream types')):
+
             widget.addItem(label,''); widget.currentIndexChanged.connect(self.render_channels); side.addWidget(widget)
+        self.section_filter=QComboBox(); self.section_filter.addItem('All categories','')
+        self.section_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.section_filter)
+        browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
+        self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
+        self.country_tree.setMaximumHeight(240)
+        self.country_tree.itemClicked.connect(self.country_tree_clicked)
+        self.country_tree.itemDoubleClicked.connect(self.country_tree_double_clicked)
+        side.addWidget(self.country_tree)
+        self._tree_dirty=True
         self.favourites_only=QCheckBox('★ Favourites only'); self.favourites_only.toggled.connect(self.render_channels); side.addWidget(self.favourites_only)
         self.channels=QListWidget(); self.channels.currentItemChanged.connect(self.choose_channel); self.channels.itemDoubleClicked.connect(lambda:self.play()); side.addWidget(self.channels,1)
         for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
@@ -274,10 +284,64 @@ class MainWindow(QMainWindow):
         self.guide_index()
         return match_guide(ch,self.state['mappings'],self.guide['names'],self._guide_name_lookup)
 
+    def build_country_tree(self,channels):
+        if not self._tree_dirty:return
+        self.country_tree.blockSignals(True)
+        self.country_tree.clear()
+        groups={}
+        for ch in channels:
+            country=ch.get('country') or 'Unspecified'
+            section=channel_section(ch)
+            groups.setdefault(country,{}).setdefault(section,[]).append(ch)
+        for country in sorted(groups,key=lambda c:(c=='Unspecified',c.casefold())):
+            sections=groups[country]
+            total=sum(len(values) for values in sections.values())
+            country_item=QTreeWidgetItem([f'{country} ({total})'])
+            country_item.setData(0,Qt.UserRole,('country',country,'',''))
+            self.country_tree.addTopLevelItem(country_item)
+            for section in sorted(sections):
+                values=sorted(sections[section],key=lambda ch:display_channel_name(ch['name']).casefold())
+                section_item=QTreeWidgetItem([f'{section} ({len(values)})'])
+                section_item.setData(0,Qt.UserRole,('section',country,section,''))
+                country_item.addChild(section_item)
+                for ch in values:
+                    channel_item=QTreeWidgetItem([display_channel_name(ch['name'])])
+                    channel_item.setData(0,Qt.UserRole,('channel',country,section,ch['id']))
+                    section_item.addChild(channel_item)
+            country_item.setExpanded(country in ('United Kingdom','United States'))
+        self.country_tree.blockSignals(False)
+        self._tree_dirty=False
+
+    def country_tree_clicked(self,item,*_):
+        item_data=item.data(0,Qt.UserRole)
+        if not item_data:return
+        kind,country,section,cid=item_data
+        self.country_filter.blockSignals(True)
+        self.country_filter.setCurrentIndex(max(0,self.country_filter.findData(country)))
+        self.country_filter.blockSignals(False)
+        self.section_filter.blockSignals(True)
+        self.section_filter.setCurrentIndex(max(0,self.section_filter.findData(section if kind!='country' else '')))
+        self.section_filter.blockSignals(False)
+        self.render_channels()
+        if kind=='channel':
+            for idx in range(self.channels.count()):
+                candidate=self.channels.item(idx)
+                if candidate.data(Qt.UserRole)['id']==cid:
+                    self.channels.setCurrentItem(candidate)
+                    self.channels.scrollToItem(candidate)
+                    break
+
+    def country_tree_double_clicked(self,item,*_):
+        data=item.data(0,Qt.UserRole)
+        if data and data[0]=='channel':
+            self.country_tree_clicked(item)
+            self.play()
+
     def render_channels(self,*_):
         previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
         # Give free HTTP/HLS channels prominence, without removing Ace streams.
-        source.sort(key=lambda ch:(ch.get('transport')=='Ace Stream',ch.get('country')!='United Kingdom',ch['name'].casefold()))
+        source.sort(key=lambda ch:(ch.get('transport')=='Ace Stream',ch.get('country')!='United Kingdom',display_channel_name(ch['name']).casefold()))
+        self.build_country_tree(source)
         selected_source=self.source_filter.currentData()
         urls=configured_playlists(self.state['settings'])
         counts={}
@@ -300,6 +364,15 @@ class MainWindow(QMainWindow):
             widget.blockSignals(True); widget.clear(); widget.addItem(label,'')
             for value in sorted(values):widget.addItem(value,value)
             widget.setCurrentIndex(max(0,widget.findData(chosen))); widget.blockSignals(False)
+        selected_country=self.country_filter.currentData()
+        selected_section=self.section_filter.currentData()
+        sections={channel_section(ch) for ch in source if not selected_country or ch.get('country','Unspecified')==selected_country}
+        self.section_filter.blockSignals(True); self.section_filter.clear()
+        self.section_filter.addItem('All categories','')
+        for section in sorted(sections):
+            self.section_filter.addItem(section,section)
+        self.section_filter.setCurrentIndex(max(0,self.section_filter.findData(selected_section)))
+        self.section_filter.blockSignals(False)
         query=self.search.text().casefold(); favs=set(self.state['favourites'])
         active_source=self.source_filter.currentData()
         for ch in source:
@@ -308,13 +381,14 @@ class MainWindow(QMainWindow):
             if active_source=='<http>' and transport=='Ace Stream': continue
             if active_source=='<ace>' and transport!='Ace Stream': continue
             if active_source not in ('','<http>','<ace>') and active_source!=source_url: continue
-            if query not in (ch['name']+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
+            if query not in (ch['name']+' '+display_channel_name(ch['name'])+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
+            if self.section_filter.currentData() and channel_section(ch)!=self.section_filter.currentData():continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
             if kind and kind not in (ch.get('kind','TV'),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
             key=self.matched_guide(ch)
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
-            item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+ch['name']); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
+            item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+display_channel_name(ch['name'])); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
         self.channels.blockSignals(False); self.render_guide()
     def choose_channel(self,item,*_):
@@ -324,7 +398,7 @@ class MainWindow(QMainWindow):
         cid=self.matched_guide(self.selected); now=time.time()
         by_channel,_=self.guide_index()
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
-        self.now.setText(self.selected['name']+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else self.selected['name']+' — no guide match')
+        self.now.setText(display_channel_name(self.selected['name'])+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else display_channel_name(self.selected['name'])+' — no guide match')
     def render_guide(self):
         # The grid only paints 250 visible channels within a six-hour window;
         # never pass the complete XMLTV cache to its paintEvent.
@@ -383,7 +457,9 @@ class MainWindow(QMainWindow):
         def done(result):
             channels,success,errors=result
             self.source_errors=errors
-            if success:self.store.update(lambda s:s.update(channels=channels))
+            if success:
+                self.store.update(lambda s:s.update(channels=channels))
+                self._tree_dirty=True
             self.render_channels()
             self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (open Source status)' if errors else '')+' • use playlist filter to view free HTTP/HLS')
             if not self.guide['programmes'] and self.state['settings']['xmltv_urls']:
@@ -437,7 +513,7 @@ class MainWindow(QMainWindow):
                 overrides=s.setdefault('category_overrides',{})
                 if reset[0]:overrides.pop(channel['id'],None)
                 else:overrides[channel['id']]={'country':country.currentText().strip() or 'Unspecified','genre':normalise_genre(genre.currentText()),'kind':kind.currentText()}
-            try:self.store.update(change); self.render_channels(); self.status.setText('Categories saved • kept across refresh and backup')
+            try:self.store.update(change); self._tree_dirty=True; self.render_channels(); self.status.setText('Categories saved • kept across refresh and backup')
             except ValueError as exc:self.error(str(exc))
     def map_channel(self):
         if not self.selected:return
