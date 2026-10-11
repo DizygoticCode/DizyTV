@@ -52,3 +52,12 @@ The 0.1.2 Windows upgrade preflight adds an isolated native Windows CI scenario:
 ## 0.1.3-alpha Windows upgrade regression (CI pending)
 
 A real 0.1.2 upgrade failed when background DizyTV.exe and libcrypto-3.dll remained loaded. The previous CI tested a PowerShell helper in isolation but did not bundle it in the compiled installer. 0.1.3 adds an explicit Inno Setup [Files] dontcopy entry to embed the preflight helper, normalizes installer path delimiters, and adds a Windows end-to-end regression: create existing installation, start detached worker, launch compiled Setup over it, confirm files were replaced, DLL exists, worker exited, and packaged app launches. Real-device upgrade still must be confirmed.
+
+## 0.1.4-alpha candidate (native CI pending)
+
+- Added conservatively verified Free-TV UK vs Freeview XMLTV channel aliases (BBC Two, BBC Four and 5). BBC One/ITV1 remain region-specific: the correct region must be chosen using Map EPG. The public M3U list includes circled stream metadata symbols; the guide matcher removes these and selects only unique results. Explicit user mappings override matching.
+- Playback now differentiates HTTP/HLS from Ace streams, reports failed/timed-out streams instead of hanging indefinitely, and starts an existing Windows Ace engine in the background for default loopback configuration. No external engine or VLC binary is bundled with the native installer.
+- Android engine availability is checked on a background worker, never the UI thread; if installed but stopped, it offers to open it.
+- The 0.1.3 Windows installer preflight and end-to-end upgrade CI are retained; 0.1.4 gets new direct native assets and distinct checksums.
+
+These entries describe intended code coverage only. A real Windows/Android playback test and signed shipping workflow are still outstanding.

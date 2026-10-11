@@ -1,4 +1,4 @@
-#define AppVersion "0.1.3-alpha"
+#define AppVersion "0.1.4-alpha"
 [Setup]
 AppId={{3F1997BD-12C5-4C17-B013-09C82DA8BAF6}
 AppName=DizyTV
@@ -9,7 +9,7 @@ DefaultDirName={localappdata}\Programs\DizyTV
 DefaultGroupName=DizyTV
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=DizyTV-Setup-0.1.3-alpha-windows-x64
+OutputBaseFilename=DizyTV-Setup-0.1.4-alpha-windows-x64
 SetupIconFile=..\assets\branding\dizytv.ico
 UninstallDisplayIcon={app}\DizyTV.exe
 ArchitecturesAllowed=x64compatible
@@ -50,7 +50,7 @@ begin
     Exit;
   end;
   StopScript := ExpandConstant('{tmp}\windows-stop-worker.ps1');
-  PowerShell := ExpandConstant('{sys}\WindowsPowerShell\\v1.0\\powershell.exe');
+  PowerShell := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   Args := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + StopScript +
     '" -InstalledExePath "' + ExistingExe +
     '" -DataDirectory "' + ExpandConstant('{localappdata}\DizyTV') + '"';
@@ -60,7 +60,9 @@ begin
     Result := 'DizyTV Setup could not check the existing background recorder. Close DizyTV and retry.';
     Exit;
   end;
-  if ExitCode = 2 then
+  if ExitCode = 4 then
+    Result := 'Close the open DizyTV application before upgrading. No files were replaced.'
+  else if ExitCode = 2 then
     Result := 'A DizyTV recording is active or due soon. Let it finish (or stop it in the app) and run Setup again.'
   else if ExitCode <> 0 then
     Result := 'The DizyTV background recorder could not be closed safely. Please check Task Manager and retry.';

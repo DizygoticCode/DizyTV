@@ -16,11 +16,12 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, COUNTRIES, GENRES)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, COUNTRIES, GENRES)
 from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
+from .engine import ensure_ready
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -172,7 +173,7 @@ class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]
+        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False
         self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
@@ -261,8 +262,13 @@ class MainWindow(QMainWindow):
                     genres.setdefault(cid,set()).update(normalise_genre(c) for c in categories)
             self._programme_by_channel=by_channel
             self._genre_by_channel=genres
+            self._guide_name_lookup=guide_lookup(self.guide['names'])
             self._indexed_guide=self.guide
         return self._programme_by_channel,self._genre_by_channel
+
+    def matched_guide(self,ch):
+        self.guide_index()
+        return match_guide(ch,self.state['mappings'],self.guide['names'],self._guide_name_lookup)
 
     def render_channels(self,*_):
         previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
@@ -302,7 +308,7 @@ class MainWindow(QMainWindow):
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
             if kind and kind not in (ch.get('kind','TV'),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
-            key=match_guide(ch,self.state['mappings'],self.guide['names'])
+            key=self.matched_guide(ch)
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
             item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+ch['name']); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
@@ -311,7 +317,7 @@ class MainWindow(QMainWindow):
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
     def render_now(self):
         if not self.selected:return
-        cid=match_guide(self.selected,self.state['mappings'],self.guide['names']); now=time.time()
+        cid=self.matched_guide(self.selected); now=time.time()
         by_channel,_=self.guide_index()
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(self.selected['name']+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else self.selected['name']+' — no guide match')
@@ -325,7 +331,7 @@ class MainWindow(QMainWindow):
         programmes=[]
         end=self.guide_start+6*3600
         for ch in channels:
-            key=match_guide(ch,self.state['mappings'],self.guide['names'])
+            key=self.matched_guide(ch)
             resolved[ch['id']]=key
             for p in by_channel.get(key,()):
                 if not (p['start']<end and p['end']>self.guide_start):
@@ -348,6 +354,17 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
+        if self.player and self.playback_started and not self.playback_reported:
+            state=str(self.player.get_state())
+            if state.endswith('.Playing'):
+                self.playback_reported=True
+                self.status.setText('Now playing inside DizyTV')
+            elif state.endswith('.Error') or state.endswith('.Ended'):
+                self.playback_reported=True
+                self.status.setText('This stream did not play. It may be offline, geoblocked, DRM-protected, or need a different source.')
+            elif time.monotonic()-self.playback_started>25:
+                self.playback_reported=True
+                self.status.setText('Playback timed out. Try another channel or check the stream/engine.')
     def async_task(self,function,success):
         if self.task:self.status.setText('A refresh is already running'); return
         self.task=Task(function)
@@ -440,10 +457,17 @@ class MainWindow(QMainWindow):
         else:self.player.set_xwindow(win)
     def play_url(self,url):
         try:
-            self.init_player(); media=self.vlc_instance.media_new(url); self.player.set_media(media); media.release()
+            self.init_player()
+            self.player.stop()
+            media=self.vlc_instance.media_new(url)
+            self.player.set_media(media); media.release()
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
-            self.tabs.setCurrentIndex(0); self.status.setText('Connecting… engine availability and peers may affect playback')
-        except Exception as exc:self.error('Playback could not start. Install VLC 3 for this app architecture and check the Ace engine. '+str(exc))
+            self.playback_started=time.monotonic(); self.playback_reported=False
+            self.tabs.setCurrentIndex(0)
+            self.status.setText('Connecting to stream…')
+        except Exception as exc:
+            self.playback_started=0
+            self.error('Playback could not start. Check that VLC 3 is installed and the stream is available. '+str(exc))
     def select_guide_channel(self,ch):
         self.selected=ch
         # Keep the sidebar and Now/Next label in step with the programme grid.
@@ -467,8 +491,28 @@ class MainWindow(QMainWindow):
         if not self.selected:return
         active=[j for j in self.store.read()['jobs'] if j['status']=='recording' and j['channel_id']!=self.selected['id']]
         if active:self.error('A different channel is recording. Stop or finish that recording before switching playback.'); return
-        self.play_url(stream_url(self.selected['stream'],self.state['settings']['engine_url']))
+        ch=self.selected
+        url=stream_url(ch['stream'],self.state['settings']['engine_url'])
+        if ch['stream'].startswith('acestream:'):
+            if self.engine_task is not None:
+                self.status.setText('Ace Stream engine startup is already in progress…'); return
+            self.status.setText('Checking/starting your installed Ace Stream engine…')
+            task=Task(lambda:ensure_ready(self.state['settings']['engine_url']))
+            self.engine_task=task
+            def ready(_):
+                self.engine_task=None
+                if self.selected and self.selected['id']==ch['id']:
+                    self.play_url(url)
+            def failed(message):
+                self.engine_task=None
+                self.status.setText('Ace Stream unavailable: '+message)
+            task.signals.success.connect(ready); task.signals.failure.connect(failed)
+            self.pool.start(task)
+        else:
+            # Ordinary HTTP/HLS streams play without the Ace Stream engine.
+            self.play_url(url)
     def stop_playback(self):
+        self.playback_started=0
         if self.player:self.player.stop()
     def add_job(self,job):
         def change(s):
@@ -484,7 +528,7 @@ class MainWindow(QMainWindow):
         if not ok:return
         now=int(time.time()); title=self.selected['name']; end=now+{'30 minutes':1800,'60 minutes':3600,'120 minutes':7200}.get(value,86400)
         if value.startswith('Until current'):
-            key=match_guide(self.selected,self.state['mappings'],self.guide['names']); programme=next((p for p in self.guide['programmes'] if p['channel']==key and p['start']<=now<p['end']),None)
+            key=self.matched_guide(self.selected); programme=next((p for p in self.guide['programmes'] if p['channel']==key and p['start']<=now<p['end']),None)
             if not programme:self.error('No current programme is mapped for this channel'); return
             end=programme['end']+self.state['settings']['padding_after']*60; title=programme['title']
         self.add_job(make_job(self.selected['id'],title,now,end,0,0))

@@ -60,6 +60,34 @@ class CoreTests(unittest.TestCase):
         self.assertEqual('Radio', channels[1]['kind'])
         self.assertEqual('Unspecified', parse_playlist(PLAYLIST.replace('group-title="UK"',''))[0]['country'])
 
+
+    def test_guide_lookup_is_equivalent_and_rejects_ambiguous_labels(self):
+        from dizytv.core import guide_lookup, match_guide
+        names={'bbc-north':'BBC One','bbc-south':'BBC One','bbc-two':'BBC Two HD'}
+        lookup=guide_lookup(names)
+        channel={'id':'a'*40,'tvg_id':'','name':'BBC One Ⓖ'}
+        self.assertEqual('',match_guide(channel,{},names,lookup))
+        channel['tvg_id']='bbc-two'
+        self.assertEqual('bbc-two',match_guide(channel,{},names,lookup))
+
+    def test_freeview_uk_aliases_markers_and_regional_ambiguity(self):
+        from dizytv.core import match_guide
+        names={
+            'BBCTwoHD.uk':'BBC Two HD','BBCFourHD.uk':'BBC Four HD',
+            '5.uk':'5 HD','BBCOneSouth.uk':'BBC One South HD',
+            'BBCOneLondonHD.uk':'BBC One London HD',
+            'ITV1London.uk':'ITV1 London HD',
+        }
+        make=lambda key,name,cid='a'*40:{'id':cid,'tvg_id':key,'name':name}
+        self.assertEqual('BBCTwoHD.uk',match_guide(make('BBCTwo.uk','BBC Two Ⓖ'),{},names))
+        self.assertEqual('BBCFourHD.uk',match_guide(make('BBCFour.uk','BBC Four Ⓖ'),{},names))
+        self.assertEqual('5.uk',match_guide(make('Channel5.uk','Channel 5 Ⓢ'),{},names))
+        self.assertEqual('BBCTwoHD.uk',match_guide(make('BBCTwoHD.uk@HD','BBC Two'),{},names))
+        self.assertEqual('BBCOne.uk',match_guide(make('BBCOne.uk','BBC One Ⓖ'),{},names))
+        self.assertEqual('BBCOneSouth.uk',match_guide(make('BBCOne.uk','BBC One Ⓖ'),{'a'*40:'BBCOneSouth.uk'},names))
+        self.assertEqual('',match_guide(make('BBCOne.uk','BBC One Ⓖ'),{'a'*40:''},names))
+        self.assertEqual('ITV1.uk',match_guide(make('ITV1.uk','ITV 1'),{},names))
+
     def test_xmltv_preserves_programme_genres(self):
         xml = XML.replace('<title>Clock change</title>','<title>Clock change</title><category>News</category><category>Current affairs</category>')
         self.assertEqual(['News','Current affairs'], parse_xmltv(xml)[1][0]['categories'])

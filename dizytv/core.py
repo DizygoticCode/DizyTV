@@ -192,26 +192,57 @@ def format_time(utc_seconds, selected='auto', day=True, detected=None):
     return value.strftime('%a %d %b %H:%M %Z' if day else '%H:%M %Z')
 
 
+# Use only unambiguous aliases between the published UK playlist and Freeview EPG.
+# BBC One/ITV1 regional listings deliberately require explicit user selection.
+UK_EPG_ALIASES = {
+    'bbctwo.uk': 'BBCTwoHD.uk',
+    'bbcfour.uk': 'BBCFourHD.uk',
+    'channel5.uk': '5.uk',
+}
+
+
 def _guide_name(value):
-    # Exact name only after removing quality suffixes. Regional ambiguity is rejected.
-    value = re.sub(r'\s*\((?:\d{3,4}p|HD|SD)\)', '', value, flags=re.I)
-    value = re.sub(r'\s+(?:HD|SD|FHD)$', '', value, flags=re.I)
+    value = re.sub(r'[ⒼⓈⓎⓐ-ⓩ]', '', value)
+    value = re.sub(r'\s*\((?:\d{3,4}p|HD|SD|FHD|4K)\)', '', value, flags=re.I)
+    value = re.sub(r'\s*\[(?:\d{3,4}p|HD|SD|FHD|4K)\]', '', value, flags=re.I)
+    value = re.sub(r'\s+(?:HD|SD|FHD|4K)$', '', value, flags=re.I)
     return re.sub(r'\s+', ' ', value).strip().casefold()
 
 
-def match_guide(channel, mappings, guide_names):
+def guide_lookup(guide_names):
+    """Pre-index names once: thousands of channel filters remain O(1) each."""
+    ids, labels = {}, {}
+    for key, name in guide_names.items():
+        for table, normalized in ((ids, key.casefold()), (labels, _guide_name(name))):
+            if normalized in table:
+                table[normalized] = None  # Ambiguous; require explicit mapping.
+            else:
+                table[normalized] = key
+    return ids, labels
+
+
+def match_guide(channel, mappings, guide_names, lookup=None):
     if channel['id'] in mappings:
         return mappings[channel['id']]
     cid = channel.get('tvg_id', '')
     if cid in guide_names:
         return cid
+    ids, labels = lookup if lookup is not None else guide_lookup(guide_names)
     if cid:
-        matches = [key for key in guide_names if key.casefold() == cid.casefold()]
-        if len(matches) == 1:
-            return matches[0]
-    name = _guide_name(channel['name'])
-    matches = [key for key, label in guide_names.items() if _guide_name(label) == name]
-    return matches[0] if len(matches) == 1 else cid
+        match = ids.get(cid.casefold())
+        if match:
+            return match
+        base = cid.partition('@')[0]
+        if base != cid:
+            match = ids.get(base.casefold())
+            if match:
+                return match
+        alias = UK_EPG_ALIASES.get(base.casefold())
+        if alias:
+            match = ids.get(alias.casefold())
+            if match:
+                return match
+    return labels.get(_guide_name(channel['name'])) or cid
 
 
 def make_job(channel_id, title, start, end, before=2, after=5):

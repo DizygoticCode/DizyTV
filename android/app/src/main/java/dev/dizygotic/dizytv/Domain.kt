@@ -82,8 +82,9 @@ object Domain {
         return OffsetDateTime.parse(m.groupValues[1]+" "+offset,DateTimeFormatter.ofPattern("uuuuMMddHHmmss XX").withResolverStyle(ResolverStyle.STRICT)).toEpochSecond()
     }
     private fun guideName(raw:String):String = raw
-        .replace(Regex("\\s*\\((?:\\d{3,4}p|HD|SD)\\)",RegexOption.IGNORE_CASE),"")
-        .replace(Regex("\\s+(?:HD|SD|FHD)$",RegexOption.IGNORE_CASE),"")
+        .replace(Regex("[ⒼⓈⓎⓐ-ⓩ]"),"")
+        .replace(Regex("\\s*\\((?:\\d{3,4}p|HD|SD|FHD|4K)\\)",RegexOption.IGNORE_CASE),"")
+        .replace(Regex("\\s+(?:HD|SD|FHD|4K)$",RegexOption.IGNORE_CASE),"")
         .trim().replace(Regex("\\s+")," ").lowercase(Locale.ROOT)
 
     fun matchGuide(ch:JSONObject,mappings:JSONObject,names:JSONObject):String {
@@ -93,6 +94,13 @@ object Domain {
         if(names.has(tvg)) return tvg
         val keys=names.keys().asSequence().toList()
         if(tvg.isNotEmpty()) keys.filter { it.equals(tvg,true) }.singleOrNull()?.let { return it }
+        val base=tvg.substringBefore('@')
+        if(base!=tvg) keys.filter { it.equals(base,true) }.singleOrNull()?.let { return it }
+        // Only aliases with one correct guide target. BBC One / ITV1 are regional.
+        val aliases=mapOf("bbctwo.uk" to "BBCTwoHD.uk","bbcfour.uk" to "BBCFourHD.uk","channel5.uk" to "5.uk")
+        aliases[base.lowercase()]?.let { alias->
+            keys.filter { it.equals(alias,true) }.singleOrNull()?.let { return it }
+        }
         val normalized=guideName(ch.getString("name"))
         return keys.filter { guideName(names.optString(it))==normalized }.singleOrNull()?:tvg
     }
