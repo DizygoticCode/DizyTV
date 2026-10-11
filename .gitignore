@@ -41,3 +41,13 @@ obj/
 .vs/
 .DS_Store
 Thumbs.db
+
+.venv/
+__pycache__/
+.superpowers/
+*.spec
+*.egg-info/
+assets/branding/*.ico
+assets/branding/*.icns
+smoke-data/
+smoke-packaged/

@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  Native television apps planned for Windows, Android and macOS, with Ace Stream playback and an XMLTV guide.
+  Native television apps for Windows, Android and macOS — alpha implementation in progress.
 </p>
 
 <p align="center">
-  <img alt="Status: planning and documentation" src="https://img.shields.io/badge/status-planning%20%26%20documentation-f59e0b?style=for-the-badge" />
+  <img alt="Status: alpha development" src="https://img.shields.io/badge/status-alpha%20development-f59e0b?style=for-the-badge" />
   <a href="#platforms-and-installers"><img alt="Windows EXE planned" src="https://img.shields.io/badge/Windows-EXE%20planned-0078d4?style=for-the-badge" /></a>
   <a href="#platforms-and-installers"><img alt="Android APK planned" src="https://img.shields.io/badge/Android-APK%20planned-3ddc84?style=for-the-badge&amp;logo=android&amp;logoColor=white" /></a>
   <a href="#platforms-and-installers"><img alt="macOS PKG planned" src="https://img.shields.io/badge/macOS-PKG%20planned-374151?style=for-the-badge&amp;logo=apple&amp;logoColor=white" /></a>
@@ -27,7 +27,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Current stage: design and documentation.** This repository contains the product scope, recording design, platform roadmap and distribution plan. It does not yet contain working app code, an installer, an APK or a deployed backend. Every application feature below is planned; playback, channel import, EPG coverage and recording still need implementation and device testing.
+> **Current stage: native alpha development.** The repository now includes the Python catalogue/XMLTV core, native Qt desktop client, detached local recorder, portable backup format and automated tests. Android implementation and platform packaging are underway. No signed public release or deployed backend is claimed. Live engine playback, storage permissions and unattended recording still require real-device validation.
 
 ## Planned features
 
@@ -41,6 +41,9 @@
 | 💾 **Your storage** | Save directly to a selected Windows/Mac folder or drive, or an accessible Android storage folder |
 | 🎞️ **Recording library** | Play and delete recordings; see file sizes, storage information and completed/partial/failed status |
 | 🔄 **Persistent timers** | Keep jobs across restarts, check storage space and report missed or interrupted recordings |
+| ⭐ **Favourites** | A persistent favourites list and favourites-only channel browser, preserved during catalogue refresh |
+| 📦 **Local backup / restore** | Save settings, channels, favourites, guide mappings and timers as a local JSON file; reselect storage and rearm restored timers |
+| 🌍 **Your timezone** | Automatic device detection, manual IANA timezone selection and an EPG offset; UTC timers stay fixed through daylight-saving changes |
 
 The first release targets **one recording at a time per device**. Same-channel viewing may share a session where supported; viewing another channel while recording needs engine validation. Instant recording starts from the available live stream and does not provide retrospective recording.
 
@@ -54,7 +57,7 @@ The first release targets **one recording at a time per device**. Same-channel v
 
 **Downloads are not available yet.** The badges above link to this platform plan, not to installers. Supported OS versions and CPU architectures will be listed after the dependency builds and device tests pass; Apple Silicon and Intel Macs are validated separately.
 
-Public releases will use a signed Windows application/installer, a release-signed Android APK with a retained update key, and a Developer ID-signed, notarized Mac app/package. The repository is currently private; downloads intended for everyone need a public release location. Full details are in the [installer and distribution plan](docs/DISTRIBUTION.md).
+Public releases will use a signed Windows application/installer, a release-signed Android APK with a retained update key, and a Developer ID-signed, notarized Mac app/package. Public visibility has been requested; the owner must change the visibility setting because this connector cannot edit repository settings. See [repository setup](docs/REPOSITORY-SETUP.md). Full details are in the [installer and distribution plan](docs/DISTRIBUTION.md).
 
 ### Mac playback dependency
 
@@ -92,7 +95,7 @@ Closing the main UI must not silently cancel an active recording once the platfo
 | **libVLC** | Embedded playback; recording output must be validated on each platform |
 | **Optional server recorder** | A later worker for jobs explicitly assigned to server storage |
 
-The app owns the DizyTV interface. Windows and Android start with a separately installed engine; third-party bundling depends on the exact component licences and distribution permissions. UI frameworks and dependency versions are chosen after the early platform integration tests.
+The app owns the DizyTV interface. Windows and Android start with a separately installed engine; third-party bundling depends on the exact component licences and distribution permissions. The desktop alpha uses Python 3.12 and PySide6 6.11.2 for native Qt interfaces, with python-vlc bindings. Android uses Kotlin and native libVLC. See [the implementation plan](docs/superpowers/plans/2026-10-11-native-apps.md).
 
 DizyTV is a separate project alongside DizyTrades and DizyChat. DizyServer is the intended metadata host; this repository setup does not deploy anything or change those existing services.
 
@@ -107,6 +110,20 @@ DizyTV is a separate project alongside DizyTrades and DizyChat. DizyServer is th
 7. **Add optional server recording** — introduce explicitly selected server jobs, authenticated downloads and quotas.
 
 See [ROADMAP.md](ROADMAP.md) for the acceptance work at each stage. Simultaneous multi-channel recording, series recording, timeshift and catch-up/VOD are outside the first release.
+
+## Development
+
+```bash
+python -m venv .venv
+# Activate the virtual environment, then:
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+python -m dizytv
+```
+
+Install VLC 3 for the app CPU architecture and install/configure the Ace Stream engine separately. Configure XMLTV URLs and choose a recording folder in Settings. No guide feed is preselected because coverage and regional channel mapping must be verified.
+
+[Native build workflow](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Backup format](docs/BACKUP-FORMAT.md) · [Repository visibility/About setup](docs/REPOSITORY-SETUP.md)
 
 ## Project documents
 

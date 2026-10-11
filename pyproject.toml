@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dizytv"
+version = "0.1.0a1"
+description = "Native television guide and local recorder"
+requires-python = ">=3.12"
+dependencies = ["PySide6==6.11.2", "python-vlc==3.0.21203", "tzdata==2026.2"]
+
+[project.scripts]
+dizytv = "dizytv.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["dizytv*"]

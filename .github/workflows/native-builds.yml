@@ -1,0 +1,64 @@
+name: Native alpha builds
+on:
+  push:
+    branches: [main, build/native-apps]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    name: Desktop / ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: windows-x64
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Core, recorder and native UI tests
+        run: python -m unittest discover -s tests -v
+      - name: Native source startup
+        run: python -m dizytv --smoke-test --data-dir smoke-data
+      - name: Package native application
+        run: python scripts/build_desktop.py
+      - name: Windows packaged startup and installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $process = Start-Process dist/DizyTV/DizyTV.exe -ArgumentList '--smoke-test','--data-dir','smoke-packaged' -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw 'Packaged app failed to launch' }
+          & 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' scripts/windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+          Get-FileHash dist/*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS.txt
+      - name: macOS packaged startup and package inspection
+        if: runner.os == 'macOS'
+        run: |
+          dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
+          pkgutil --payload-files dist/*.pkg
+          codesign --verify --deep --strict dist/DizyTV.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DizyTV-0.1.0-alpha-${{ matrix.target }}
+          path: |
+            dist/*.exe
+            dist/*.pkg
+            dist/*.sha256
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30

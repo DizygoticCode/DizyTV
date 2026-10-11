@@ -2,7 +2,7 @@
 
 Date: 2026-10-11
 
-Status: product scope approved in conversation; proposed implementation design prepared for review. No product implementation or device validation has been performed.
+Status: product scope approved in conversation; native alpha implementation underway. Automated core and desktop checks are running; platform builds and device validation remain separate gates.
 
 ## Intent
 
@@ -20,7 +20,7 @@ The native applications use the Ace Stream engine's supported session APIs and a
 
 The official Ace Stream product and desktop-engine documentation does not list a native macOS engine. The initial Mac client therefore uses an explicitly configured, reachable Windows/Linux engine through the session API. The Mac application and video playback are native, and its recorder saves the received stream to the selected Mac storage. A remote engine does not make the recording a server recording. Engine hosting on DizyServer is not added or deployed by this repository setup. A self-contained Mac engine, including any container/helper approach, needs a separate feasibility and distribution decision before inclusion.
 
-Client UI frameworks and exact dependency versions are selected at the integration milestone after proving playback, local storage and recording on all three platforms. Native means an installed application with embedded playback and native storage/lifecycle integration; no browser-only client or renamed Ace Player is assumed. The Mac build must execute natively for each advertised CPU architecture. This is an explicit sequencing decision: no client framework is required to create the documentation repository.
+The alpha uses Python 3.12 / PySide6 6.11.2 for native Windows and macOS interfaces and Kotlin / libVLC for Android. Desktop packaging uses PyInstaller; VLC 3 and the Ace engine are separate installations. Native playback and recording still require platform device verification. Native means an installed application with embedded playback and native storage/lifecycle integration; no browser-only client or renamed Ace Player is assumed. The Mac build must execute natively for each advertised CPU architecture. This is an explicit sequencing decision: no client framework is required to create the documentation repository.
 
 The shared data contracts cover channels, stream candidates, guide sources, channel mappings and programme listings. Recording jobs and storage permissions are owned by the device performing the recording. A later server worker owns jobs explicitly assigned to DizyServer.
 
@@ -99,3 +99,11 @@ The [XMLTV specification](https://github.com/XMLTV/xmltv/blob/master/xmltv.dtd) 
 The [Ace Stream product list](https://docs.acestream.media/products/) and [desktop-engine guide](https://docs.acestream.media/developers/running-engine-desktop/) list Windows, Android and Linux routes without a native Mac engine. Apple documents [Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates) and [notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution); Android documents [release signing](https://developer.android.com/studio/publish/app-signing), and Microsoft documents [SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool).
 
 These references establish an integration route, not a completed prototype. Actual playlist contents, guide-source coverage, exact dependency builds, Mac engine connectivity, Android recording compatibility and unattended recording behaviour remain validation work in milestone 1. Supported OS versions and CPU architectures are recorded from that evidence before application implementation and public packaging.
+
+## Favourites, backups and timezone additions
+
+Each client has a persistent favourites list and a favourites-only channel filter. Catalogue refreshes preserve saved favourites by stable stream identifier. Local versioned JSON backups cover channel listings, favourites, settings, manual XMLTV mappings and timers. Video files and device storage permissions are excluded. Restore validates the whole file before replacing state, resets recording storage, marks expired timers missed and pauses other restored timers until rearmed. See [backup format](../../BACKUP-FORMAT.md).
+
+Automatic device timezone is the default, with manual IANA timezone selection. An EPG offset in minutes corrects newly imported listings. Programme and timer instants remain UTC; DST, travel and display changes do not shift accepted recordings. Guide labels include the local timezone abbreviation so repeated clock-change hours are distinguishable.
+
+The desktop alpha uses a detached recording worker: closing the UI leaves it running. After a reboot users must reopen the app to restart it. Per-user auto-start/wake integration is a later validation gate. Android uses native exact-alarm permission and a visible foreground recording service; reboot recovery rechecks destination grants.
