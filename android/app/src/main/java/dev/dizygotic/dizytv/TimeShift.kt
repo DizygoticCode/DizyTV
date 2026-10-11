@@ -228,16 +228,26 @@ internal class DeviceTimeshift(
                         data.write(block,0,n)
                         val duration=(System.nanoTime()-started)/1e9
                         if(duration>=4.0 || data.size()>=8*1024*1024) {
-                            ring.append(data.toByteArray(),max(0.1,duration))
-                            ready.countDown()
-                            data.reset();started=System.nanoTime()
+                            // HTTP InputStream.read() can split a TS packet at
+                            // any byte. Keep the partial packet for next segment.
+                            val payload=data.toByteArray()
+                            val usable=payload.size/188*188
+                            if(usable>0) {
+                                ring.append(payload.copyOfRange(0,usable),max(0.1,duration))
+                                ready.countDown()
+                            }
+                            data.reset()
+                            if(usable<payload.size)data.write(payload,usable,payload.size-usable)
+                            started=System.nanoTime()
                         }
                     }
-                    // Reconnecting live TS sources may close before a full
-                    // 4-second segment: keep their complete tail fragment.
                     if(data.size()>0 && !stopped.get()) {
-                        ring.append(data.toByteArray(),max(0.1,(System.nanoTime()-started)/1e9))
-                        ready.countDown()
+                        val payload=data.toByteArray()
+                        val usable=payload.size/188*188
+                        if(usable>0) {
+                            ring.append(payload.copyOfRange(0,usable),max(0.1,(System.nanoTime()-started)/1e9))
+                            ready.countDown()
+                        }
                     }
                 }
             } catch(e:Exception) {

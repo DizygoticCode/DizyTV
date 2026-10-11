@@ -273,20 +273,28 @@ class RollingTimeshift:
                         block = response.read(PACKET*1024)
                         if not block:
                             break
-                        if block[0] != 0x47:
+                        if not pieces and block[0] != 0x47:
                             raise ValueError('Stream is not a direct MPEG-TS feed')
                         pieces.append(block)
                         size += len(block)
                         elapsed = time.monotonic() - started
                         if elapsed >= SEGMENT_SECONDS or size>=8*1024*1024:
-                            self.window.append(b''.join(pieces), max(.1, elapsed))
-                            self.ready.set()
-                            pieces=[]; size=0; started=time.monotonic()
-                    # Some live TS sources reconnect every few seconds. Preserve
-                    # the final complete fragment instead of waiting forever.
+                            payload=b''.join(pieces)
+                            usable=len(payload)//PACKET*PACKET
+                            if usable:
+                                self.window.append(payload[:usable],max(.1,elapsed))
+                                self.ready.set()
+                            remainder=payload[usable:]
+                            pieces=[remainder] if remainder else []
+                            size=len(remainder)
+                            started=time.monotonic()
+                    # Short reconnecting TS streams still commit complete packets.
                     if pieces and not self.stop_event.is_set():
-                        self.window.append(b''.join(pieces), max(.1, time.monotonic()-started))
-                        self.ready.set()
+                        payload=b''.join(pieces)
+                        usable=len(payload)//PACKET*PACKET
+                        if usable:
+                            self.window.append(payload[:usable],max(.1,time.monotonic()-started))
+                            self.ready.set()
             except (OSError, ValueError) as exc:
                 self.error = str(exc)[:250]
                 if not self.ready.is_set():
