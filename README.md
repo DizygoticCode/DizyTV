@@ -126,3 +126,7 @@ DizyTV currently imports feeds and records locally. A DizyServer metadata servic
   <a href="https://github.com/DizygoticCode/dizychat-server">DizyChat</a> ·
   <strong>DizyTV</strong>
 </p>
+
+## Ace Stream installation (Windows)
+
+The optional **Ace Stream engine** is a separate, proprietary P2P component; it is not bundled into the DizyTV EXE. The Windows installer can offer an **unchecked** choice to open the [official Ace Stream Windows downloads page](https://docs.acestream.net/products/) after DizyTV finishes installing. The DizyTV Live TV page also offers **Set up Ace Stream engine**. Users install the provider's genuine software themselves, accepting that provider's terms; the setup never silently downloads or executes another installer. Once installed, DizyTV can automatically start the Windows engine in the background for supported Ace streams. Ordinary HTTP/HLS streams do not use the Ace engine. Use only sources you are entitled to watch; P2P software may consume upload bandwidth and display provider advertisements.

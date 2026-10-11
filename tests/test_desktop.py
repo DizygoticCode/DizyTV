@@ -2,6 +2,7 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import tempfile
 import unittest
+from unittest.mock import patch
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -12,6 +13,14 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_ace_setup_opens_verified_official_provider_without_download(self):
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            with patch('dizytv.desktop.QDesktopServices.openUrl',return_value=True) as open_url:
+                window.open_ace_stream_setup()
+                self.assertEqual('https://docs.acestream.net/products/',open_url.call_args.args[0].toString())
+            window.close()
+
     def test_guide_index_reuses_programmes_and_limits_painting_to_visible_window(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:

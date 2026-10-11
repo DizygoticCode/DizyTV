@@ -61,3 +61,7 @@ The workflow uses Windows 2022 x64, macOS 15 Apple Silicon, macOS 15 Intel and U
 - [Apple Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates)
 - [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 - [Microsoft SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool)
+
+## Optional third-party Ace Stream setup (next Windows alpha)
+
+DizyTV Setup offers an **unchecked** task, "Open the official Ace Stream download page after installing DizyTV." If selected, it opens https://docs.acestream.net/products/ in the default browser; **no Ace executable is embedded, downloaded or silently executed** by DizyTV. Users may obtain the unchanged installer from the publisher and accept its own terms, which include P2P networking and advertising. The Live TV tab also includes a setup link for people who skipped the installer option. DizyTV auto-starts an existing engine on Windows, but no known redistribution/integration permission is implied by these changes. Once installed, regular HTTP/HLS playback remains entirely independent of Ace Stream. Desktop libVLC/VLC 3 requirements are separate.

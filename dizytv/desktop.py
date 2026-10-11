@@ -7,8 +7,8 @@ import time
 from pathlib import Path
 from zoneinfo import available_timezones
 
-from PySide6.QtCore import Qt, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -199,6 +199,10 @@ class MainWindow(QMainWindow):
         controls=QHBoxLayout()
         for label,handler in [('▶ Play',self.play),('■ Stop playback',self.stop_playback),('● Record now',self.record_now)]:
             b=QPushButton(label); b.clicked.connect(handler); controls.addWidget(b)
+        setup_engine=QPushButton('Set up Ace Stream engine')
+        setup_engine.setToolTip('Visit the official provider to install the optional P2P engine. Never needed for HTTP/HLS channels.')
+        setup_engine.clicked.connect(self.open_ace_stream_setup)
+        controls.addWidget(setup_engine)
         live_layout.addLayout(controls); self.tabs.addTab(live,'Live TV')
         guide_page=QWidget(); guide_layout=QVBoxLayout(guide_page); nav=QHBoxLayout()
         for label,delta in [('← Earlier',-21600),('Now',0),('Later →',21600)]:
@@ -486,6 +490,12 @@ class MainWindow(QMainWindow):
     def record_guide_channel(self,ch):
         self.select_guide_channel(ch)
         self.record_now()
+
+    def open_ace_stream_setup(self):
+        # Do not redistribute, download or silently execute proprietary binaries.
+        # The browser opens the provider's official page with the latest Windows version.
+        if not QDesktopServices.openUrl(QUrl('https://docs.acestream.net/products/')):
+            self.error('Could not open the official Ace Stream products page in your browser.')
 
     def play(self):
         if not self.selected:return
