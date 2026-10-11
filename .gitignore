@@ -1,0 +1,43 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.keystore
+*.jks
+
+# Runtime data and recordings
+.data/
+data/
+recordings/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.part
+
+# Downloaded dependencies and build outputs
+node_modules/
+.dart_tool/
+.gradle/
+build/
+dist/
+bin/
+obj/
+*.apk
+*.aab
+*.msi
+*.msix
+*.exe
+*.pkg
+*.dmg
+*.app/
+
+# Local editors and operating systems
+.idea/
+.vs/
+.DS_Store
+Thumbs.db
