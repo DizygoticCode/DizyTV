@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from zoneinfo import available_timezones
 
-from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF
+from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
@@ -182,11 +182,7 @@ class MainWindow(QMainWindow):
         for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
         layout.addLayout(top)
-        self.main_header=logo.parentWidget() if False else None
-        self.window_header=QWidget()
-        # Existing toolbar remains in root; in cinema mode its constituent widgets are hidden.
-        self.header_layout=top
-        self.root_layout=layout
+        self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter(); layout.addWidget(split,1)
         self.split=split
         sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
@@ -246,6 +242,19 @@ class MainWindow(QMainWindow):
         self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
+        self.seek_slider=QSlider(Qt.Horizontal)
+        self.seek_slider.setRange(0,1000)
+        self.seek_slider.setEnabled(False)
+        self.seek_slider.sliderReleased.connect(self.seek_from_slider)
+        live_layout.addWidget(self.seek_slider)
+        volume_row=QHBoxLayout()
+        volume_row.addWidget(QLabel('Volume'))
+        self.volume_slider=QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0,100)
+        self.volume_slider.setValue(85)
+        self.volume_slider.valueChanged.connect(self.set_tv_volume)
+        volume_row.addWidget(self.volume_slider,1)
+        live_layout.addLayout(volume_row)
         self.tabs.addTab(live,'Live TV')
         guide_page=QWidget(); guide_layout=QVBoxLayout(guide_page); nav=QHBoxLayout()
         for label,delta in [('← Earlier',-21600),('Now',0),('Later →',21600)]:
@@ -465,6 +474,16 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
+        if self.player and self.playback_started:
+            seekable=bool(self.player.is_seekable())
+            length=self.player.get_length()
+            position=self.player.get_time()
+            self.seek_slider.setEnabled(seekable and length>0)
+            if seekable and length>0 and position>=0 and not self.seek_slider.isSliderDown():
+                self.seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
+            self.rewind_button.setEnabled(seekable)
+            self.pause_button.setEnabled(seekable)
+            self.seek_notice.setText('DVR window available — pause, rewind or scrub' if seekable else 'LIVE — no time-shift window reported by this stream')
         if self.player and self.playback_started and not self.playback_reported:
             state=str(self.player.get_state())
             if state.endswith('.Playing'):
@@ -564,6 +583,7 @@ class MainWindow(QMainWindow):
                     os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH',''); self.dll_dir=os.add_dll_directory(str(folder)); break
         import vlc
         self.vlc_instance=vlc.Instance('--no-video-title-show'); self.player=self.vlc_instance.media_player_new()
+        self.player.audio_set_volume(self.volume_slider.value())
         win=int(self.video.winId())
         if sys.platform=='darwin':self.player.set_nsobject(win)
         elif os.name=='nt':self.player.set_hwnd(win)
@@ -632,10 +652,18 @@ class MainWindow(QMainWindow):
             # Ordinary HTTP/HLS streams play without the Ace Stream engine.
             self.play_url(url)
     def eventFilter(self,obj,event):
-        if obj is self.video and event.type()==event.Type.MouseButtonDblClick:
+        if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
             return True
         return super().eventFilter(obj,event)
+
+    def set_tv_volume(self,volume):
+        if self.player:self.player.audio_set_volume(volume)
+
+    def seek_from_slider(self):
+        if self.player and self.player.is_seekable() and self.player.get_length()>0:
+            position=max(0,min(1000,self.seek_slider.value()))
+            self.player.set_time(self.player.get_length()*position//1000)
 
     def _rebind_video(self):
         if self.player:
@@ -685,6 +713,8 @@ class MainWindow(QMainWindow):
             self.exit_screen_fullscreen()
         self.cinema_mode=not self.cinema_mode
         self.sidebar.setVisible(not self.cinema_mode)
+        for widget in self.header_buttons:
+            if widget:widget.setVisible(not self.cinema_mode)
         # Tabs remain accessible when not in cinema mode.
         self.tabs.tabBar().setVisible(not self.cinema_mode)
         self.cinema_button.setText('↩ Normal' if self.cinema_mode else '▣ Cinema')
@@ -775,6 +805,9 @@ class MainWindow(QMainWindow):
 
     def stop_playback(self):
         self.playback_started=0
+        self.seek_slider.setEnabled(False)
+        self.rewind_button.setEnabled(False)
+        self.pause_button.setEnabled(False)
         if self.player:self.player.stop()
     def add_job(self,job):
         def change(s):
