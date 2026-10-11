@@ -65,8 +65,10 @@ def catalogue(state):
 
 
 def default_state():
+    from .sources import DEFAULT_PLAYLIST_URLS, DEFAULT_GUIDE_URLS
     return {'settings': {'playlist_url': 'https://search-ace.stream/playlist',
-                         'xmltv_urls': [], 'engine_url': 'http://127.0.0.1:6878',
+                         'playlist_urls': list(DEFAULT_PLAYLIST_URLS),
+                         'xmltv_urls': list(DEFAULT_GUIDE_URLS), 'engine_url': 'http://127.0.0.1:6878',
                          'timezone': 'auto', 'epg_offset_minutes': 0,
                          'padding_before': 2, 'padding_after': 5,
                          'reserve_bytes': 1073741824, 'recording_dir': ''},
@@ -190,7 +192,10 @@ def format_time(utc_seconds, selected='auto', day=True, detected=None):
     return value.strftime('%a %d %b %H:%M %Z' if day else '%H:%M %Z')
 
 
-def make_job(channel_id, title, start, end, before=2, after=5):
+def _guide_name(value):
+    # Conservative exact-name fallback: never guess between regional variants.
+    value = re.sub(r'\\s*\\((?:\\d{3,4}p|HD|SD)\\)', '', value, flags=re.I)
+    value = re.sub(r'\\s+(?:HD|SD|FHD)
     if end <= start or before < 0 or after < 0:
         raise ValueError('A recording must end after its start')
     return {'id': str(uuid.uuid4()), 'channel_id': channel_id, 'title': title[:1024],
@@ -228,6 +233,11 @@ def validate_state(state):
         raise ValueError('Use at most 20 guide sources')
     for url in settings['xmltv_urls']:
         http_url(url)
+    if 'playlist_urls' in settings:
+        if not isinstance(settings['playlist_urls'], list) or len(settings['playlist_urls']) > 16:
+            raise ValueError('Use at most 16 playlist URLs')
+        for url in settings['playlist_urls']:
+            http_url(url)
     try:
         if settings['timezone'] != 'auto':
             ZoneInfo(settings['timezone'])
@@ -249,6 +259,8 @@ def validate_state(state):
         if not re.fullmatch('[a-f0-9]{40}', ch['id']) or ch['id'] in ids:
             raise ValueError('Duplicate or invalid channel identifier')
         ids.add(ch['id'])
+        if 'source' in ch:
+            http_url(ch['source'])
         for key in ('country','genre','kind','transport'):
             if key in ch and (not isinstance(ch[key],str) or len(ch[key])>512):
                 raise ValueError('Invalid channel category')
@@ -290,8 +302,174 @@ def export_backup(state):
     for key in ('playlist_url', 'engine_url'):
         data['settings'][key] = _redact_url(data['settings'][key])
     data['settings']['xmltv_urls'] = [_redact_url(u) for u in data['settings']['xmltv_urls']]
+    if 'playlist_urls' in data['settings']:
+        data['settings']['playlist_urls'] = [_redact_url(u) for u in data['settings']['playlist_urls']]
     for ch in data['channels']:
         ch['stream'] = _redact_url(ch['stream'])
+        if 'source' in ch:
+            ch['source'] = _redact_url(ch['source'])
+    payload = json.dumps({'app':'DizyTV', 'version':1, 'data':data}, ensure_ascii=False, indent=2)
+    if len(payload.encode('utf-8')) > MAX_BACKUP:
+        raise ValueError('Backup is too large')
+    return payload
+
+
+def _redact_url(url):
+    p = urlparse(url)
+    query = parse_qs(p.query)
+    safe = {k:v for k,v in query.items() if not re.search('token|key|pass|secret|auth|signature', k, re.I)}
+    return p._replace(query=urlencode(safe, doseq=True)).geturl()
+
+
+def restore_backup(payload, now=None):
+    if len(payload.encode('utf-8')) > MAX_BACKUP:
+        raise ValueError('Backup is too large')
+    try:
+        backup = json.loads(payload)
+    except (ValueError, RecursionError) as exc:
+        raise ValueError('Invalid backup JSON') from exc
+    if not isinstance(backup, dict) or backup.get('app') != 'DizyTV' or type(backup.get('version')) is not int or backup['version'] != 1:
+        raise ValueError('Unsupported DizyTV backup version')
+    state = copy.deepcopy(validate_state(backup.get('data')))
+    state['settings']['recording_dir'] = ''
+    now = int(time.time()) if now is None else now
+    state['jobs']=[{k:j[k] for k in ('id','channel_id','title','start','end','status')} for j in state['jobs']]
+    for job in state['jobs']:
+        if job['status'] not in TERMINAL:
+            job['status'] = 'missed' if job['end'] <= now else 'paused'
+    return state
+, '', value, flags=re.I)
+    return re.sub(r'\\s+', ' ', value).strip().casefold()
+
+
+def match_guide(channel, mappings, guide_names):
+    if channel['id'] in mappings:
+        return mappings[channel['id']]  # Explicitly unmapped is respected too.
+    cid = channel.get('tvg_id', '')
+    if cid in guide_names:
+        return cid
+    if cid:
+        hits = [k for k in guide_names if k.casefold() == cid.casefold()]
+        if len(hits) == 1:
+            return hits[0]
+    name = _guide_name(channel['name'])
+    matching = [key for key, label in guide_names.items() if _guide_name(label) == name]
+    return matching[0] if len(matching) == 1 else cid
+
+
+def make_job(channel_id, title, start, end, before=2, after=5):
+    if end <= start or before < 0 or after < 0:
+        raise ValueError('A recording must end after its start')
+    return {'id': str(uuid.uuid4()), 'channel_id': channel_id, 'title': title[:1024],
+            'start': int(start) - int(before)*60, 'end': int(end) + int(after)*60,
+            'status': 'queued', 'bytes': 0}
+
+
+def check_conflicts(jobs, candidate):
+    return [j for j in jobs if j['id'] != candidate['id'] and j['status'] in ACTIVE
+            and j['start'] < candidate['end'] and candidate['start'] < j['end']]
+
+
+def safe_filename(title, timestamp):
+    title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title).strip(' .')[:90] or 'Recording'
+    date = datetime.fromtimestamp(timestamp, timezone.utc).strftime('%Y%m%d-%H%M%S')
+    return f'{date}_{title}.ts'
+
+
+def _integer(value, low, high, label):
+    if type(value) is not int or not low <= value <= high:
+        raise ValueError('Invalid ' + label)
+
+
+def validate_state(state):
+    if not isinstance(state, dict) or set(default_state()) - set(state):
+        raise ValueError('Backup is missing required data')
+    if not isinstance(state['settings'], dict):
+        raise ValueError('Invalid settings')
+    settings = state['settings']
+    if set(default_state()['settings']) - set(settings):
+        raise ValueError('Backup is missing required settings')
+    for key in ('playlist_url', 'engine_url'):
+        http_url(settings[key])
+    if not isinstance(settings['xmltv_urls'], list) or len(settings['xmltv_urls']) > 20:
+        raise ValueError('Use at most 20 guide sources')
+    for url in settings['xmltv_urls']:
+        http_url(url)
+    if 'playlist_urls' in settings:
+        if not isinstance(settings['playlist_urls'], list) or len(settings['playlist_urls']) > 16:
+            raise ValueError('Use at most 16 playlist URLs')
+        for url in settings['playlist_urls']:
+            http_url(url)
+    try:
+        if settings['timezone'] != 'auto':
+            ZoneInfo(settings['timezone'])
+    except (ZoneInfoNotFoundError, TypeError, ValueError) as exc:
+        raise ValueError('Unknown timezone') from exc
+    for key in ('padding_before', 'padding_after'):
+        _integer(settings[key], 0, 240, key)
+    _integer(settings['epg_offset_minutes'], -1440, 1440, 'guide offset')
+    _integer(settings['reserve_bytes'], 0, 1024**5, 'storage reserve')
+    if not isinstance(settings['recording_dir'], str) or len(settings['recording_dir']) > 4096:
+        raise ValueError('Invalid destination')
+    for key, limit in (('channels', 100000), ('favourites', 100000), ('jobs', 10000)):
+        if not isinstance(state[key], list) or len(state[key]) > limit:
+            raise ValueError('Invalid ' + key)
+    ids = set()
+    for ch in state['channels']:
+        if not isinstance(ch, dict) or any(not isinstance(ch.get(k), str) for k in ('id','name','stream','group','tvg_id')):
+            raise ValueError('Invalid channel')
+        if not re.fullmatch('[a-f0-9]{40}', ch['id']) or ch['id'] in ids:
+            raise ValueError('Duplicate or invalid channel identifier')
+        ids.add(ch['id'])
+        if 'source' in ch:
+            http_url(ch['source'])
+        for key in ('country','genre','kind','transport'):
+            if key in ch and (not isinstance(ch[key],str) or len(ch[key])>512):
+                raise ValueError('Invalid channel category')
+        if not ace_id(ch['stream']):
+            http_url(ch['stream'])
+    if any(not isinstance(f, str) or not re.fullmatch('[a-f0-9]{40}', f) for f in state['favourites']):
+        raise ValueError('Invalid favourites')
+    if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
+        raise ValueError('Invalid guide mappings')
+    overrides = state.get('category_overrides', {})
+    if not isinstance(overrides, dict) or len(overrides) > 100000:
+        raise ValueError('Invalid saved categories')
+    for cid, values in overrides.items():
+        if not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid) or not isinstance(values,dict) or set(values)-{'country','genre','kind'}:
+            raise ValueError('Invalid saved categories')
+        if any(not isinstance(v,str) or not v.strip() or len(v)>512 for v in values.values()) or values.get('kind','TV') not in ('TV','Radio'):
+            raise ValueError('Invalid saved categories')
+    job_ids = set()
+    for job in state['jobs']:
+        if not isinstance(job, dict) or not isinstance(job.get('id'), str) or job['id'] in job_ids or len(job['id']) > 100:
+            raise ValueError('Invalid job identifier')
+        job_ids.add(job['id'])
+        if job.get('status') not in STATUSES or not isinstance(job.get('title'), str) or len(job['title']) > 1024:
+            raise ValueError('Invalid job')
+        if not isinstance(job.get('channel_id'), str) or not re.fullmatch('[a-f0-9]{40}', job['channel_id']):
+            raise ValueError('Invalid job channel')
+        _integer(job.get('start'), 0, 253402300799, 'start time')
+        _integer(job.get('end'), 1, 253402300799, 'end time')
+        if job['end'] <= job['start']:
+            raise ValueError('Invalid recording interval')
+    return state
+
+
+def export_backup(state):
+    data = copy.deepcopy(validate_state(state))
+    data['settings']['recording_dir'] = ''
+    # Keep only the portable recording contract, not paths or device grants.
+    data['jobs'] = [{k:j[k] for k in ('id','channel_id','title','start','end','status')} for j in data['jobs']]
+    for key in ('playlist_url', 'engine_url'):
+        data['settings'][key] = _redact_url(data['settings'][key])
+    data['settings']['xmltv_urls'] = [_redact_url(u) for u in data['settings']['xmltv_urls']]
+    if 'playlist_urls' in data['settings']:
+        data['settings']['playlist_urls'] = [_redact_url(u) for u in data['settings']['playlist_urls']]
+    for ch in data['channels']:
+        ch['stream'] = _redact_url(ch['stream'])
+        if 'source' in ch:
+            ch['source'] = _redact_url(ch['source'])
     payload = json.dumps({'app':'DizyTV', 'version':1, 'data':data}, ensure_ascii=False, indent=2)
     if len(payload.encode('utf-8')) > MAX_BACKUP:
         raise ValueError('Backup is too large')
