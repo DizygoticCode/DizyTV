@@ -8,7 +8,7 @@ The DizyTV mark carries the existing DizyChat palette and bold lettering into a 
 - **Background:** transparent PNG; retain the alpha channel.
 - **README display:** 280 pixels wide.
 - **Brand colours:** muted green, charcoal and cream, based on the DizyChat reference.
-- **Use:** project documentation and future app branding. Platform-specific application icons still need to be prepared and tested during packaging.
+- **Use:** README, desktop window branding and Android launcher/app branding. Native build scripts generate Windows ICO and Mac ICNS assets from this master; all three platform package jobs have passed. Small-icon legibility and launcher presentation still need physical-device checks.
 
 ## Reference and generation
 

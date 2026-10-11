@@ -8,6 +8,8 @@
 
 **Spec:** [Product design](../specs/2026-10-11-dizytv-design.md), extended by the user's requests for favourites, local backups and timezone detection/selection.
 
+**Outcome:** Native alpha source is implemented. All four native build jobs passed for application commit `ba30a3966a16fe64e48a98e73f2dd222dae734fb`; see [build verification](../../BUILD-VERIFICATION.md) for checks and physical-device limits. Country/genre/type filters and persistent category edits were added to both clients following the user's extension.
+
 ## Global constraints
 
 - One recording at a time; never interrupt an existing recording when a timer overlaps.

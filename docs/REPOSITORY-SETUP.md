@@ -4,7 +4,7 @@ Requested visibility: **Public**.
 
 About description:
 
-> Native TV apps for Windows, Android and macOS, with Ace Stream playback, XMLTV guides, favourites, local recording, backup/restore and timezone support.
+> Native TV for Windows, Android and macOS: Ace Stream playback, XMLTV guides, country/genre filters, favourites, local recording, backups and automatic timezones.
 
 Suggested topics: `dizytv`, `iptv`, `xmltv`, `acestream`, `libvlc`, `android`, `windows`, `macos`, `pyside6`, `local-recording`.
 

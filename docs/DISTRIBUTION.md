@@ -1,56 +1,52 @@
 # DizyTV installers and distribution
 
-Status: planned release outputs. This repository contains documentation, not working applications or downloadable builds.
+**0.1.0-alpha packages have been built.** These are development artifacts, with native-host package/startup checks and Android compilation/lint/signature checks. See [verification](BUILD-VERIFICATION.md) and the [README download buttons](../README.md#downloads).
 
-## Deliverables
+## Outputs
 
-| Platform | Intended download | Application |
+| Platform | Artifact contents | Signing status |
 | --- | --- | --- |
-| Windows | `DizyTV-Setup-<version>-<arch>.exe` | Installed native Windows application |
-| Android | `DizyTV-<version>-<abi>.apk` | Installed native Android application |
-| macOS | `DizyTV-<version>-<arch>.pkg` | Native `DizyTV.app`, installed in Applications |
+| Windows x64 | `DizyTV-Setup-0.1.0-alpha-windows-x64.exe` and checksum | Unsigned development installer |
+| Android 8.0+ / API 26 | `DizyTV-0.1.0-alpha-android-universal-debug.apk` and checksum | Verified CI debug signature; no retained release key |
+| Apple Silicon Mac | `DizyTV-0.1.0-alpha-macos-arm64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
+| Intel Mac | `DizyTV-0.1.0-alpha-macos-x86_64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
 
-The installer extension does not establish compatibility. Minimum OS versions, CPU architectures and required engine versions are selected from the first integration tests and listed beside each release. Apple Silicon and Intel Macs require separate validation; a universal Mac app is offered only if all bundled native libraries support both.
+Mac packages target macOS 13+. Windows builds target x64. Build settings and CI runner results establish package targets; fresh installation and compatibility on user devices are still to be tested.
 
-## Engine setup
+## Install and configure
 
-Windows and Android initially use a separately installed, supported Ace Stream engine. Bundling it is a separate decision based on the exact binary's distribution permission and installation behaviour.
+Extract the selected artifact ZIP and check its SHA-256 file against the installer. Run the Windows EXE, install the APK through Android's permitted sideload flow, or open the matching Mac PKG to install `DizyTV.app` in Applications. Unsigned/development builds may trigger operating-system trust warnings.
 
-The official [Ace Stream products](https://docs.acestream.media/products/) and [desktop-engine instructions](https://docs.acestream.media/developers/running-engine-desktop/) do not list a macOS engine. The initial native Mac client connects to a user-configured, reachable Windows/Linux engine, plays its output and saves recordings directly to Mac storage. Installation must explain this dependency before the user expects playback. The `.pkg` alone cannot be described as a self-contained Ace Stream solution. A local container/helper or another Mac engine route must be proved and explicitly chosen before inclusion.
+- **Windows:** install VLC 3 x64 and a separately installed Ace Stream engine. Start the engine before playback/recording. The app installs per user, without requiring an administrator by default.
+- **Android:** libVLC is embedded; install/open Ace Stream separately. Select a folder through Settings and retain its read/write grant. Allow recording notifications and grant exact-alarm access when scheduling.
+- **Mac:** install VLC 3 for the app architecture and configure a reachable Windows/Linux engine endpoint. No Mac Ace Stream engine is bundled. The player and output files stay on the Mac.
 
-Engine connections use trusted endpoints. A later remote service needs authenticated access and protected transport; public releases do not expose an unauthenticated engine API on DizyServer. Metadata service deployment and optional server recording remain separate milestones.
+In DizyTV Settings, select the recording destination, XMLTV feed URLs, timezone/guide correction and timer padding. The playlist imports automatically on first launch. Refresh the guide, map missing channels and edit country/genre/type categories where needed.
 
-## Signing and build hosts
+One recorder runs per device. Desktop recording requires an awake machine; closing the window leaves the detached worker running. Open the app after reboot. Android alarms/foreground recording/reboot recovery are implemented, but battery management, force-stop and engine availability need real-device validation.
 
-- Windows: build and package on a Windows-capable build host; sign the application and installer with an appropriate code-signing certificate and verify the signatures. A signature does not guarantee immediate SmartScreen reputation.
-- Android: generate a release APK and sign with the project's retained release key. Keep the key backed up securely outside source control so future versions can update existing installations.
-- macOS: build on a Mac/Xcode-capable host; sign the `.app` and bundled native components using Developer ID Application, sign the `.pkg` using Developer ID Installer, then notarize and staple it. Release distribution requires access to the developer account and its signing certificates.
+## Backups and updates
 
-The project does not currently have configured signing credentials or a build pipeline. Credentials, keystores, private keys, generated installers and recordings are excluded from source control. Development artifacts are labelled as such and are not presented as validated public releases.
+Use Backup before changing development builds. JSON restores channels, favourites, category edits, mappings, preferences and timer definitions across platforms. It excludes video files, file paths and storage permissions. Choose the folder again and rearm paused timers after restoring.
 
-## Public downloads
+Android CI debug keys are generated on build hosts and do not provide a guaranteed update identity. A retained release keystore is required before a stable upgrade path is promised. Desktop upgrade behaviour also needs installer testing.
 
-The current GitHub repository is private. Its release files require repository access. Downloads intended for everyone therefore need a public release repository or public download hosting when the release is ready. Source visibility and binary distribution are separate decisions; repository setup does not change visibility or publish anything.
+## Distribution status
 
-Each published version includes:
+GitHub Actions artifacts require GitHub sign-in and repository access, and expire after 30 days. The owner has requested public source visibility; the connector cannot change the setting or About text. Instructions are in [repository setup](REPOSITORY-SETUP.md). No GitHub Release or store listing has been published.
 
-- Platform and architecture-specific installers and SHA-256 checksums.
-- Supported OS and engine versions, setup instructions and known limitations.
-- A tested update path that preserves favourites, guide mappings and future timers.
-- Third-party licence notices and any required source distribution.
-- Notes on local storage permissions and when unattended recording can run.
+Public release work remains: device acceptance, durable versioned downloads, Windows signing, Android release signing, Apple Developer ID signing/notarization, exact third-party sources/relinking information and an owner-selected source licence. Licence texts and component notices are included in the packages; see [third-party notices](../THIRD-PARTY-NOTICES.md).
 
-Direct downloads are the initial distribution target. Google Play would add an Android App Bundle and store submission work; the Mac App Store is also separate. Neither store listing is implied by creating the APK or PKG.
+The engine is separately installed/configured; this project does not rename or redistribute Ace Stream binaries. DizyServer metadata and optional server recording are separate future milestones. Engine endpoints should be configured for trusted networks; this work does not expose a public unauthenticated engine service.
 
-## Release acceptance
+## Build hosts
 
-Validate fresh installation and upgrade on every advertised platform/architecture. Exercise catalogue import, guide matching, playback, instant recording, a scheduled recording and permission/connection failures. Confirm signature verification and Mac notarization before describing the artifacts as public releases.
-
-macOS initially requires an awake Mac and signed-in user for scheduled recording. Windows sleep/wake support and Android screen-off, reboot and battery restrictions are demonstrated on supported devices. Recordings must continue independently of the main UI where that platform's validated background mechanism permits it.
+The workflow uses Windows 2022 x64, macOS 15 Apple Silicon, macOS 15 Intel and Ubuntu 24.04 Android build hosts. Desktop packaging uses PyInstaller 6.22.3, Inno Setup 6 and macOS `pkgbuild`; Android uses JDK 17, Gradle 8.13 and AGP 8.11.1. Compile SDK 36 satisfies libVLC 3.7.5's AAR requirement while target remains 35 and minimum remains 26.
 
 ## Primary references
 
+- [Ace Stream engine products](https://docs.acestream.media/products/)
+- [Android app signing](https://developer.android.com/studio/publish/app-signing)
 - [Apple Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates)
 - [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
-- [Android app signing](https://developer.android.com/studio/publish/app-signing)
 - [Microsoft SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool)

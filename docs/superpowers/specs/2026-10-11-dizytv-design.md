@@ -2,13 +2,13 @@
 
 Date: 2026-10-11
 
-Status: product scope approved in conversation; native alpha implementation underway. Automated core and desktop checks are running; platform builds and device validation remain separate gates.
+Status: product scope approved; native alpha implemented and all four platform build jobs passed. This document describes the product design, including future integrations. [Build verification](../../BUILD-VERIFICATION.md) records current evidence and outstanding device validation.
 
 ## Intent
 
 Build native DizyTV applications for Windows, Android and macOS that make an imported Ace Stream channel catalogue usable through a television-style interface, an XMLTV guide, and instant or scheduled recordings saved directly to storage selected on the viewing device. Deliver downloadable Windows `.exe`, Android `.apk` and Mac `.pkg` installers for public use after platform validation.
 
-The application is a separate project. DizyServer hosts the metadata backend; DizyTrades and DizyChat are not modified by the initial work. Server recording is optional and follows the local recording milestones.
+The application is a separate project. The native alpha imports feeds and records locally. DizyServer is the intended future metadata host; neither a metadata backend nor server recorder is deployed by this work. DizyTrades and DizyChat are not modified. See [build verification](../../BUILD-VERIFICATION.md) for the implemented alpha and device-validation limits.
 
 ## Architecture
 
@@ -71,7 +71,7 @@ A later, explicitly selected destination runs the engine and recorder on DizySer
 
 Public release targets are a Windows executable installer, a release-signed Android APK and a macOS installer package containing the native application. Versioned artifacts include platform/architecture names, checksums, supported OS versions, engine setup instructions and recording limitations. Signing credentials are kept outside the repository. Mac distribution uses Developer ID Application for the app, Developer ID Installer for the package and Apple notarization. Android retains its release key so users can install future updates. The Windows application and installer are signed for public releases. See the [distribution plan](../../DISTRIBUTION.md).
 
-Apple Silicon and Intel Mac support are validated independently; a universal Mac build is advertised only after every native dependency supports both architectures. The initial repository is private. Public downloads require a public release location; this setup does not change repository visibility, publish binaries or enroll in an app store. Google Play and the Mac App Store are separate distribution decisions.
+Apple Silicon and Intel Mac builds are validated independently; separate alpha PKGs have passed native-host package/startup checks. The repository is currently private, with public visibility requested by the owner. Alpha artifacts are built in GitHub Actions; durable public release downloads, retained release signing and device acceptance remain separate work. The owner must change visibility because the connected file tools cannot edit that setting. Google Play and the Mac App Store are separate distribution decisions.
 
 VLC/libVLC and Ace Stream components have different licences. The exact source components, binary distribution permissions, notices and any engine access requirements must be documented before bundling them. The project does not rename proprietary Ace Stream binaries or remove their notices. Public distribution of bundled channels or guide data requires appropriate source permissions. Feasibility tests use permitted streams and synthetic fixtures where possible.
 
@@ -110,4 +110,4 @@ The desktop alpha uses a detached recording worker: closing the UI leaves it run
 
 ## EPG country, genre and stream categories
 
-The channel browser and guide expose shared country, genre and stream-type filters. Country uses explicit playlist country metadata or recognized country tags in source groups; missing data stays Unspecified. Genre uses playlist groups/genre fields plus XMLTV programme categories. TV/radio and Ace Stream/HTTP are independent stream classifications. Channel names and languages are not treated as proof of country. Filters never alter saved timers or favourites.
+The channel browser and guide expose shared country, genre and stream-type filters. Country uses explicit playlist metadata, recognized source groups and bracketed country tags such as `[RU]`; missing data stays Unspecified. Ordinary channel-name words and languages are not treated as proof of country, and quality tags such as `[HD]` are ignored. Genre uses playlist groups/genre fields plus XMLTV programme categories. Users can save country/genre/TV-radio edits, retained across catalogue refresh and backup/restore, or reset them to source metadata. Transport is derived from the stream. Filters never alter saved timers or favourites.
