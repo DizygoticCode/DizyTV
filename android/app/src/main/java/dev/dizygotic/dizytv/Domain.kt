@@ -21,6 +21,38 @@ object Domain {
     private val countries=mapOf("GB" to "United Kingdom","UK" to "United Kingdom","US" to "United States","USA" to "United States","CA" to "Canada","AU" to "Australia","NZ" to "New Zealand","IE" to "Ireland","FR" to "France","DE" to "Germany","ES" to "Spain","IT" to "Italy","PT" to "Portugal","NL" to "Netherlands","BE" to "Belgium","CH" to "Switzerland","AT" to "Austria","PL" to "Poland","CZ" to "Czechia","SE" to "Sweden","NO" to "Norway","DK" to "Denmark","FI" to "Finland","GR" to "Greece","TR" to "Turkey","UA" to "Ukraine","RU" to "Russia","IN" to "India","PK" to "Pakistan","BR" to "Brazil","MX" to "Mexico","AR" to "Argentina","JP" to "Japan","CN" to "China","KR" to "South Korea","ZA" to "South Africa","IL" to "Israel","AE" to "United Arab Emirates")
     private val genres=listOf("Sport" to "sports?","News" to "news|current affairs","Movies" to "movies?|films?|cinema","Kids" to "kids|children|cartoons?","Music" to "music","Documentary" to "documentar(?:y|ies)|factual","Entertainment" to "entertainment","Education" to "education","General" to "general")
     fun normaliseGenre(value:String)=genres.firstOrNull { Regex("\\b(?:${it.second})\\b",RegexOption.IGNORE_CASE).containsMatchIn(value) }?.first?:value.trim().take(512).ifEmpty { "Unspecified" }
+
+    /** Display-only labels; IDs, original names and streams are never edited. */
+    fun displayName(raw:String):String {
+        var value=raw.replace(Regex("[\\u200B-\\u200D\\uFEFF\\x00-\\x1F\\x7F]"),"").trim()
+            .replace(Regex("[ⒼⓈⓎⓐ-ⓩ]"),"").trim()
+        val marker=Regex("(?:\\s*[@#]\\s*(?:HD|SD|FHD|UHD|4K|2160P|1080P|720P|480P|50FPS|60FPS|UK|GB|US|USA|LIVE)\\b|\\s*[@#]\\s*$|\\s*[\\[(](?:HD|SD|FHD|UHD|4K|2160P|1080P|720P)[\\])])+$",RegexOption.IGNORE_CASE)
+        repeat(8) {
+            val cleaned=value.replace(marker,"").trim()
+            if(cleaned==value) return@repeat
+            value=cleaned
+        }
+        return value.replace(Regex("\\s+")," ").ifEmpty { "Unnamed channel" }
+    }
+
+    fun section(ch:JSONObject):String {
+        if(ch.optString("kind")=="Radio") return "Radio"
+        val genre=normaliseGenre(ch.optString("genre"))
+        if(genre in setOf("Sport","News","Movies","Kids","Music","Documentary","Entertainment","Education")) return genre
+        val label=displayName(ch.optString("name"))+" "+ch.optString("group")
+        val patterns=listOf(
+            "News" to "\\b(?:news|headlines?|weather)\\b",
+            "Sport" to "\\b(?:sports?|football|cricket|racing|nba|nfl|golf)\\b",
+            "Movies" to "\\b(?:movies?|cinema|films?)\\b",
+            "Kids" to "\\b(?:kids|children|cartoons?|junior)\\b",
+            "Music" to "\\b(?:music|concert)\\b",
+            "Documentary" to "\\b(?:documentar(?:y|ies)|factual|history|nature)\\b",
+            "Education" to "\\b(?:education|learning)\\b",
+            "Entertainment" to "\\b(?:entertainment|comedy|drama)\\b"
+        )
+        return patterns.firstOrNull { Regex(it.second,RegexOption.IGNORE_CASE).containsMatchIn(label) }?.first?:"General TV"
+    }
+
     private fun categories(attrs:Map<String,String>,stream:String,name:String):JSONObject {
         val group=attrs["group-title"].orEmpty(); val explicit=(attrs["tvg-country"]?:attrs["country"]).orEmpty().trim()
         val aliases=countries+countries.values.associateWith { it }
