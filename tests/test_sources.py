@@ -8,6 +8,15 @@ def feed(url, name="News", tvg="News.us"):
 
 
 class FreeSourceTests(unittest.TestCase):
+    def test_import_errors_identify_builtin_source_not_generic_hostname(self):
+        from dizytv.sources import source_label
+        uk=DEFAULT_PLAYLIST_URLS[1]
+        self.assertEqual('UK free television',source_label(uk))
+        settings={'playlist_url':uk,'playlist_urls':[uk]}
+        _,success,errors=refresh_catalogue(settings,[{'id':'a'*40,'name':'Cached','group':'','tvg_id':'','stream':'https://example.com/a.m3u8','source':uk}],lambda _: (_ for _ in ()).throw(OSError('offline')))
+        self.assertEqual(0,success)
+        self.assertEqual(['UK free television: OSError'],errors)
+
     def test_default_presets_include_uk_us_and_epg(self):
         state=default_state()
         self.assertTrue(any('countries/us.m3u' in u for u in state['settings']['playlist_urls']))

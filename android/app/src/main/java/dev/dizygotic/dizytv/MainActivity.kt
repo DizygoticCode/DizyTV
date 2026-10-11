@@ -33,6 +33,7 @@ class MainActivity:Activity() {
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
     private var search=""; private var onlyFavourites=false; private var refreshing=false; private var guide=JSONObject().put("names",JSONObject()).put("programmes",JSONArray())
     private var countryFilter=""; private var genreFilter=""; private var typeFilter=""
+    private var sourceErrors=emptyList<String>()
     private var displayedZone=""
     private val executor=Executors.newSingleThreadExecutor(); private val handler=Handler(Looper.getMainLooper())
     private val ticker=object:Runnable { override fun run() { val changed=updateZone(); if(page=="Recordings" || changed && page=="Guide") render(); handler.postDelayed(this,5000) } }
@@ -54,8 +55,8 @@ class MainActivity:Activity() {
         status=text("Native alpha • Install/open Ace Stream, configure XMLTV and choose recording storage",12f); root.addView(status); setContentView(root)
         runCatching { val file=File(filesDir,"guide.json"); if(file.exists() && file.length()<=100*1024*1024) guide=JSONObject(file.readText()) }
         render(); if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),20)
-        if(store.read().getJSONArray("channels").length()==0) refreshChannels()
-        else if(guide.getJSONArray("programmes").length()==0) refreshGuide()
+        // Import newly added free playlists on upgrades even if old Ace entries were cached.
+        refreshChannels()
     }
     override fun onResume() { super.onResume(); attempt { Scheduler.recover(this) }; handler.post(ticker) }
     override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
@@ -103,6 +104,14 @@ class MainActivity:Activity() {
         val input=EditText(this).apply { hint="Search channels or groups"; setText(search); setSingleLine(true) }; body.addView(input)
         val filter=CheckBox(this).apply { text="★ Favourites only"; isChecked=onlyFavourites }; body.addView(filter)
         val refresh=button("Refresh channel catalogue") { refreshChannels() }; body.addView(refresh)
+        body.addView(button("Source counts / import errors") {
+            val s=store.read()
+            val counts=Domain.objects(s.getJSONArray("channels")).groupingBy { it.optString("source",Sources.legacy) }.eachCount()
+            val lines=Sources.urls(s.getJSONObject("settings")).map { "${Sources.label(it)}: ${counts[it]?:0} saved channels" }
+            AlertDialog.Builder(this).setTitle("DizyTV playlist sources")
+                .setMessage((lines+listOf("Refresh channels to update these counts.")+sourceErrors).joinToString("\n"))
+                .setPositiveButton("OK",null).show()
+        })
         val list=ListView(this); body.addView(list,LinearLayout.LayoutParams(-1,0,1f)); var shown=listOf<JSONObject>()
         fun populate() {
             val state=store.read(); val fav=Domain.strings(state.getJSONArray("favourites")).toSet()
@@ -130,7 +139,8 @@ class MainActivity:Activity() {
     private fun play()=attempt {
         val ch=selected?:return@attempt; val s=store.read()
         require(Domain.objects(s.getJSONArray("jobs")).none { it.getString("status")=="recording" && it.getString("channel_id")!=ch.getString("id") }) { "Another channel is recording. Finish or stop it before changing playback." }
-        val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings")))); player.media=media; media.release(); player.play(); status.text="Connecting to engine…"
+        val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings")))); player.media=media; media.release(); player.play()
+        status.text=if(ch.getString("stream").startsWith("acestream:")) "Connecting to Ace engine…" else "Connecting to HTTP/HLS stream…"
     }
     private fun toggleFavourite(ch:JSONObject) {
         store.update { s->val fav=Domain.strings(s.getJSONArray("favourites")).toMutableList(); if(!fav.remove(ch.getString("id"))) fav.add(ch.getString("id")); s.put("favourites",JSONArray(fav)) }
@@ -243,7 +253,12 @@ class MainActivity:Activity() {
     private fun settingsPage() {
         val list=scroller(); val original=store.read().getJSONObject("settings"); val fields=mutableMapOf<String,EditText>()
         fun field(key:String,label:String,value:String) { list.addView(text(label)); val input=EditText(this).apply { setText(value); maxLines=if(key=="xmltv_urls" || key=="playlist_urls") 8 else 1 }; fields[key]=input; list.addView(input) }
-        field("playlist_urls","Channel playlists (one URL per line; remove to disable)",Sources.urls(original).joinToString("\n")); field("engine_url","Ace engine URL",original.getString("engine_url"))
+        field("playlist_urls","Channel playlists (one URL per line; remove to disable)",Sources.urls(original).joinToString("\n"))
+        list.addView(button("Add built-in free playlists") {
+            val existing=fields["playlist_urls"]!!.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            fields["playlist_urls"]!!.setText((existing+Sources.presets).distinct().joinToString("\n"))
+        })
+        field("engine_url","Ace engine URL",original.getString("engine_url"))
         field("xmltv_urls","XMLTV URLs — one per line",Domain.strings(original.getJSONArray("xmltv_urls")).joinToString("\n"))
         field("timezone","Timezone — auto or IANA name",original.getString("timezone")); list.addView(button("Choose timezone") { val zones=(listOf("auto")+ZoneId.getAvailableZoneIds().sorted()).toTypedArray(); AlertDialog.Builder(this).setTitle("Display timezone").setItems(zones) { _,i->fields["timezone"]!!.setText(zones[i]) }.show() })
         field("epg_offset_minutes","EPG correction in minutes (new imports only)",original.getInt("epg_offset_minutes").toString())
@@ -273,6 +288,7 @@ class MainActivity:Activity() {
             handler.post {
                 refreshing=false
                 result.onSuccess { refreshed->attempt {
+                    sourceErrors=refreshed.errors
                     if(refreshed.succeeded>0) store.update { it.put("channels",refreshed.channels) }
                     status.text="${refreshed.channels.length()} channels • ${refreshed.succeeded} sources updated • ${refreshed.errors.size} failed (cached)"
                     render()

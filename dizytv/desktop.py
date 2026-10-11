@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, COUNTRIES, GENRES)
 from .network import download
-from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS
+from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 
@@ -107,6 +107,9 @@ class Settings(QDialog):
         self.playlists=QPlainTextEdit('\n'.join(configured_playlists(self.original)))
         self.playlists.setPlaceholderText('One M3U playlist URL per line; remove a line to disable that source')
         self.playlists.setMaximumHeight(125); form.addRow('Channel playlists',self.playlists)
+        add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
+        add_presets.clicked.connect(self.add_free_playlists)
+        form.addRow(add_presets)
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
@@ -122,6 +125,10 @@ class Settings(QDialog):
         self.reserve=QDoubleSpinBox(); self.reserve.setRange(0,10000); self.reserve.setValue(self.original['reserve_bytes']/1024**3); self.reserve.setSuffix(' GiB'); form.addRow('Keep free space',self.reserve)
         note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
+    def add_free_playlists(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
+
     def pick_folder(self):
         folder=QFileDialog.getExistingDirectory(self,'Recording destination',self.folder.text())
         if folder:self.folder.setText(folder)
@@ -138,18 +145,20 @@ class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''
+        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]
         self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand); top.addStretch()
         self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
-        for label,handler in [('Refresh channels',self.refresh_channels),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
+        for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
         layout.addLayout(top)
         split=QSplitter(); layout.addWidget(split,1)
         sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
-        self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox()
+        self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox(); self.source_filter=QComboBox()
+        self.source_filter.addItem('All playlists','')
+        self.source_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.source_filter)
         for widget,label in ((self.country_filter,'All countries'),(self.genre_filter,'All genres'),(self.kind_filter,'All stream types')):
             widget.addItem(label,''); widget.currentIndexChanged.connect(self.render_channels); side.addWidget(widget)
         self.favourites_only=QCheckBox('★ Favourites only'); self.favourites_only.toggled.connect(self.render_channels); side.addWidget(self.favourites_only)
@@ -183,10 +192,11 @@ class MainWindow(QMainWindow):
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
         self.guide_clock=QTimer(self); self.guide_clock.timeout.connect(self.refresh_guide); self.guide_clock.start(12*3600*1000)
-        if start_worker and self.state['channels'] and not self.guide['programmes']:
-            QTimer.singleShot(500,self.refresh_guide)
-        if start_worker:ensure_worker(self.store.directory)
-        if start_worker and not self.state['channels']:QTimer.singleShot(200,self.refresh_channels)
+        if start_worker:
+            ensure_worker(self.store.directory)
+            # Previously cached Ace channels hid newly configured public feeds.
+            # Always refresh on startup, retaining cached channels until success.
+            QTimer.singleShot(200,self.refresh_channels)
     def error(self,message):
         self.status.setText(message); QMessageBox.warning(self,'DizyTV',message)
     def load_guide(self):
@@ -195,8 +205,38 @@ class MainWindow(QMainWindow):
             if path.exists() and path.stat().st_size<=100*1024**2:
                 self.guide=json.loads(path.read_text(encoding='utf-8'))
         except (OSError,ValueError):pass
+    def show_source_status(self):
+        state=self.store.read(); counts={}
+        for ch in state['channels']:
+            key=ch.get('source','https://search-ace.stream/playlist')
+            counts[key]=counts.get(key,0)+1
+        lines=['Saved unique channels per configured playlist (not guaranteed playable):']
+        for url in configured_playlists(state['settings']):
+            lines.append(f'{source_label(url)}: {counts.get(url,0)}')
+        lines.append('Zero means none saved from that source. Click Refresh channels to retry.')
+        if self.source_errors:
+            lines.append('Last refresh failures (old cache preserved when possible):')
+            lines.extend(self.source_errors)
+        QMessageBox.information(self,'DizyTV playlist import status','\n'.join(lines))
+
     def render_channels(self,*_):
         previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
+        # Give free HTTP/HLS channels prominence, without removing Ace streams.
+        source.sort(key=lambda ch:(ch.get('transport')=='Ace Stream',ch.get('country')!='United Kingdom',ch['name'].casefold()))
+        selected_source=self.source_filter.currentData()
+        urls=configured_playlists(self.state['settings'])
+        counts={}
+        for ch in source:
+            source_url=ch.get('source','https://search-ace.stream/playlist')
+            counts[source_url]=counts.get(source_url,0)+1
+        self.source_filter.blockSignals(True); self.source_filter.clear()
+        self.source_filter.addItem('All playlists','')
+        self.source_filter.addItem('HTTP/HLS (no Ace engine)','<http>')
+        self.source_filter.addItem('Ace Stream only','<ace>')
+        for url in urls:
+            self.source_filter.addItem(f'{source_label(url)} ({counts.get(url,0)})',url)
+        self.source_filter.setCurrentIndex(max(0,self.source_filter.findData(selected_source)))
+        self.source_filter.blockSignals(False)
         genre_by_id={}
         for p in self.guide['programmes']:
             genre_by_id.setdefault(p['channel'],set()).update(normalise_genre(v) for v in p.get('categories',[]))
@@ -208,7 +248,13 @@ class MainWindow(QMainWindow):
             for value in sorted(values):widget.addItem(value,value)
             widget.setCurrentIndex(max(0,widget.findData(chosen))); widget.blockSignals(False)
         query=self.search.text().casefold(); favs=set(self.state['favourites'])
+        active_source=self.source_filter.currentData()
         for ch in source:
+            transport=ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')
+            source_url=ch.get('source','https://search-ace.stream/playlist')
+            if active_source=='<http>' and transport=='Ace Stream': continue
+            if active_source=='<ace>' and transport!='Ace Stream': continue
+            if active_source not in ('','<http>','<ace>') and active_source!=source_url: continue
             if query not in (ch['name']+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
@@ -259,9 +305,10 @@ class MainWindow(QMainWindow):
         current=self.store.read(); self.status.setText('Importing free channel sources…')
         def done(result):
             channels,success,errors=result
+            self.source_errors=errors
             if success:self.store.update(lambda s:s.update(channels=channels))
             self.render_channels()
-            self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (cached entries kept)' if errors else ''))
+            self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (open Source status)' if errors else '')+' • use playlist filter to view free HTTP/HLS')
             if not self.guide['programmes'] and self.state['settings']['xmltv_urls']:
                 QTimer.singleShot(300,self.refresh_guide)
         self.async_task(lambda:refresh_catalogue(current['settings'],current['channels'],download),done)

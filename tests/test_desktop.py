@@ -5,7 +5,7 @@ import unittest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimeZone
 
-from dizytv.desktop import MainWindow, GuideGrid
+from dizytv.desktop import MainWindow, GuideGrid, Settings
 from dizytv.storage import Store
 
 
@@ -43,6 +43,42 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(1,window.channels.count())
             self.assertEqual('Sport',window.grid.rows[0]['name'])
             window.close()
+
+    def test_source_filter_separates_free_http_from_ace_and_preserves_all(self):
+        from dizytv.core import parse_playlist
+        from dizytv.sources import DEFAULT_PLAYLIST_URLS
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            ace=parse_playlist('#EXTM3U\n#EXTINF:-1,Old sports\nacestream://'+'a'*40)[0]
+            ace['source']=DEFAULT_PLAYLIST_URLS[0]
+            uk=parse_playlist('#EXTM3U\n#EXTINF:-1 tvg-country="GB",BBC News\nhttps://example.com/live.m3u8')[0]
+            uk['source']=DEFAULT_PLAYLIST_URLS[1]
+            store.update(lambda s:s.update(channels=[ace,uk]))
+            window=MainWindow(store,start_worker=False)
+            self.assertEqual(2,window.channels.count())
+            self.assertEqual('BBC News',window.channels.item(0).text())
+            window.source_filter.setCurrentIndex(window.source_filter.findData('<http>'))
+            self.assertEqual(['BBC News'],[window.channels.item(i).text() for i in range(window.channels.count())])
+            window.country_filter.setCurrentIndex(window.country_filter.findData('United Kingdom'))
+            self.assertEqual(1,len(window.grid.rows))
+            window.source_filter.setCurrentIndex(window.source_filter.findData(DEFAULT_PLAYLIST_URLS[0]))
+            self.assertEqual(0,window.channels.count())
+            window.country_filter.setCurrentIndex(0)
+            self.assertEqual(1,window.channels.count())
+            window.close()
+
+    def test_add_free_presets_keeps_custom_playlist(self):
+        from dizytv.sources import DEFAULT_PLAYLIST_URLS
+        with tempfile.TemporaryDirectory() as folder:
+            state=Store(folder).read()
+            state['settings']['playlist_urls']=['https://example.com/private.m3u']
+            dialog=Settings(state,None)
+            dialog.add_free_playlists()
+            urls=dialog.values()['playlist_urls']
+            self.assertEqual('https://example.com/private.m3u',urls[0])
+            self.assertIn(DEFAULT_PLAYLIST_URLS[1],urls)
+            self.assertEqual(len(urls),len(set(urls)))
+            dialog.close()
 
     @classmethod
     def setUpClass(cls):
