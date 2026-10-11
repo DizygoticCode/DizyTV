@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import Request, build_opener
 import math
 import os
+import re
 import secrets
 import shutil
 import threading
@@ -188,8 +189,23 @@ class RollingTimeshift:
                  reserve_bytes=MIN_RESERVE, session_id=None):
         self.source = http_url(source)
         self.token = session_id or secrets.token_urlsafe(24)
+        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,90}',self.token):
+            raise ValueError('Invalid local timeshift session token')
         root = Path(directory)
         root.mkdir(parents=True, exist_ok=True)
+        # Crash leftovers: only files matching our segment naming convention
+        # inside a stale session directory, never arbitrary user recordings.
+        for stale in root.glob('session-*'):
+            try:
+                if not stale.is_dir() or stale.is_symlink() or time.time()-stale.stat().st_mtime<86400:
+                    continue
+                for child in stale.iterdir():
+                    if (child.is_file() and not child.is_symlink() and
+                        re.fullmatch(r'\d{12}\.(ts|part)',child.name)):
+                        child.unlink()
+                stale.rmdir()
+            except OSError:
+                pass
         self.window = RollingWindow(root / ('session-' + self.token), minutes,
                                     max_bytes, reserve_bytes)
         self.stop_event = threading.Event()

@@ -155,6 +155,23 @@ class TestTimeshift(unittest.TestCase):
             w.close()
             self.assertEqual('user file',other.read_text(encoding='utf-8'))
 
+    def test_crash_cleanup_only_removes_older_timeshift_segments(self):
+        import os
+        import time
+        with tempfile.TemporaryDirectory() as root:
+            cache=Path(root)/'cache'
+            stale=cache/'session-old'
+            stale.mkdir(parents=True)
+            orphan=stale/'000000000000.ts'
+            orphan.write_bytes(PACKET)
+            os.utime(stale,(time.time()-90000,time.time()-90000))
+            unrelated=cache/'my-recording.ts'
+            unrelated.write_bytes(PACKET)
+            session=RollingTimeshift('https://example.com/a.ts',cache,session_id='new-session')
+            self.assertFalse(orphan.exists())
+            self.assertTrue(unrelated.exists())
+            session.close()
+
     def test_on_device_only_no_persistent_recordings(self):
         with tempfile.TemporaryDirectory() as root:
             session=RollingTimeshift('https://example.com/video.ts',root,session_id='bounded')

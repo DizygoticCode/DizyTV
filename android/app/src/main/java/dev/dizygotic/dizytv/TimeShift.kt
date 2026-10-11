@@ -108,6 +108,17 @@ internal class DeviceTimeshift(
 ) {
     private val token=UUID.randomUUID().toString()
     val ring=TimeshiftRing(File(cacheRoot,"session-"+token),minutes,quota,reserve)
+    init {
+        val yesterday=System.currentTimeMillis()-24L*60*60*1000
+        cacheRoot.listFiles()?.filter { it.isDirectory && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
+            it.name.startsWith("session-") && it.lastModified()<yesterday }?.forEach { old->
+            old.listFiles()?.filter {
+                it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) &&
+                Regex("\\d+\\.(?:ts|part)").matches(it.name)
+            }?.forEach { it.delete() }
+            old.delete()
+        }
+    }
     private val stopped=AtomicBoolean(false)
     private val ready=CountDownLatch(1)
     @Volatile private var error:String?=null
