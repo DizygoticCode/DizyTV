@@ -270,12 +270,20 @@ class MainWindow(QMainWindow):
         if not settings['xmltv_urls']:self.error('Add one or more XMLTV URLs in Settings'); return
         self.status.setText('Importing XMLTV guide…')
         def fetch():
-            names={}; programmes=[]
+            names={}; programmes=[]; errors=[]
             for url in settings['xmltv_urls']:
-                n,p=parse_xmltv(download(url),settings['epg_offset_minutes']); names.update(n); programmes.extend(p)
-            return {'names':names,'programmes':sorted(programmes,key=lambda p:(p['channel'],p['start']))}
-        def done(guide):
-            atomic_json(self.store.directory/'guide.json',guide); self.guide=guide; self.render_channels(); self.render_now(); self.status.setText(f"Imported {len(guide['programmes'])} programmes • accepted timers keep their UTC times")
+                try:
+                    n,p=parse_xmltv(download(url),settings['epg_offset_minutes'])
+                    names.update(n); programmes.extend(p)
+                except Exception as exc:
+                    errors.append(type(exc).__name__)
+            if not names and not programmes:
+                raise ValueError(f'All {len(settings["xmltv_urls"])} guide sources failed; cached guide retained')
+            return {'names':names,'programmes':sorted(programmes,key=lambda p:(p['channel'],p['start']))}, errors
+        def done(result):
+            guide, errors=result
+            atomic_json(self.store.directory/'guide.json',guide); self.guide=guide; self.render_channels(); self.render_now()
+            self.status.setText(f"Imported {len(guide['programmes'])} programmes"+(f" • {len(errors)} guide source(s) failed" if errors else '')+" • timers unchanged")
         self.async_task(fetch,done)
     def settings(self):
         dialog=Settings(self.store.read(),self)
