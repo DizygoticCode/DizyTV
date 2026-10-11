@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, COUNTRIES, GENRES)
@@ -58,7 +58,9 @@ class Task(QRunnable):
 
 
 class GuideGrid(QWidget):
-    programme_clicked = Signal(object,object)
+    channel_clicked = Signal(object)
+    programme_record_requested = Signal(object,object)
+    channel_record_requested = Signal(object)
     def __init__(self):
         super().__init__(); self.rows=[]; self.programmes=[]; self.hitboxes=[]; self.zone='auto'; self.start=0
     def set_data(self,channels,programmes,mappings,zone,start):
@@ -95,9 +97,32 @@ class GuideGrid(QWidget):
         if left<=x<=left+1080:
             p.setPen(QColor('#f4af71')); p.drawLine(int(x),40,int(x),self.height())
     def mousePressEvent(self,event):
-        for rect,ch,item in self.hitboxes:
-            if rect.contains(event.position()):
-                self.programme_clicked.emit(ch,item); break
+        # Row identity does not depend on whether this channel has XMLTV data.
+        row=int((event.position().y()-48)//58)
+        if not (0<=row<len(self.rows)):
+            return super().mousePressEvent(event)
+        channel=self.rows[row]
+        if event.button()==Qt.LeftButton:
+            self.channel_clicked.emit(channel)
+            event.accept()
+            return
+        if event.button()==Qt.RightButton:
+            # Offer recording only through an explicit menu, never by default click.
+            programme=next((p for rect,ch,p in reversed(self.hitboxes)
+                            if ch['id']==channel['id'] and rect.contains(event.position())),None)
+            menu=QMenu(self)
+            watch=menu.addAction('▶ Watch channel')
+            watch.triggered.connect(lambda checked=False,ch=channel:self.channel_clicked.emit(ch))
+            if programme is not None:
+                record=menu.addAction('● Record programme…')
+                record.triggered.connect(lambda checked=False,ch=channel,p=programme:self.programme_record_requested.emit(ch,p))
+            else:
+                record=menu.addAction('● Record now…')
+                record.triggered.connect(lambda checked=False,ch=channel:self.channel_record_requested.emit(ch))
+            menu.exec(event.globalPosition().toPoint())
+            event.accept()
+            return
+        return super().mousePressEvent(event)
 
 
 class Settings(QDialog):
@@ -176,7 +201,7 @@ class MainWindow(QMainWindow):
         for label,delta in [('← Earlier',-21600),('Now',0),('Later →',21600)]:
             b=QPushButton(label); b.clicked.connect(lambda checked=False,d=delta:self.move_guide(d)); nav.addWidget(b)
         self.guide_date=QLabel(); nav.addWidget(self.guide_date); guide_layout.addLayout(nav)
-        self.grid=GuideGrid(); self.grid.programme_clicked.connect(self.schedule_programme); scroll=QScrollArea(); scroll.setWidget(self.grid); scroll.setWidgetResizable(True); guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
+        self.grid=GuideGrid(); self.grid.channel_clicked.connect(self.play_guide_channel); self.grid.programme_record_requested.connect(self.schedule_programme); self.grid.channel_record_requested.connect(self.record_guide_channel); scroll=QScrollArea(); scroll.setWidget(self.grid); scroll.setWidgetResizable(True); guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
         recordings=QWidget(); rec_layout=QVBoxLayout(recordings)
         self.jobs=QTableWidget(0,5); self.jobs.setHorizontalHeaderLabels(['Programme','Start','End','Status','Size']); self.jobs.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.jobs.setSelectionBehavior(QTableWidget.SelectRows); self.jobs.setSelectionMode(QTableWidget.SingleSelection); rec_layout.addWidget(self.jobs)
         rec_buttons=QHBoxLayout()
@@ -388,6 +413,25 @@ class MainWindow(QMainWindow):
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.tabs.setCurrentIndex(0); self.status.setText('Connecting… engine availability and peers may affect playback')
         except Exception as exc:self.error('Playback could not start. Install VLC 3 for this app architecture and check the Ace engine. '+str(exc))
+    def select_guide_channel(self,ch):
+        self.selected=ch
+        # Keep the sidebar and Now/Next label in step with the programme grid.
+        for idx in range(self.channels.count()):
+            item=self.channels.item(idx)
+            if item.data(Qt.UserRole)['id']==ch['id']:
+                self.channels.setCurrentItem(item)
+                break
+        self.render_now()
+
+    def play_guide_channel(self,ch):
+        self.select_guide_channel(ch)
+        self.tabs.setCurrentIndex(0)
+        self.play()
+
+    def record_guide_channel(self,ch):
+        self.select_guide_channel(ch)
+        self.record_now()
+
     def play(self):
         if not self.selected:return
         active=[j for j in self.store.read()['jobs'] if j['status']=='recording' and j['channel_id']!=self.selected['id']]

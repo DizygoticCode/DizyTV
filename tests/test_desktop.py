@@ -2,6 +2,9 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import tempfile
 import unittest
+from unittest.mock import patch
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimeZone
 
@@ -10,6 +13,45 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_epg_left_click_watches_and_right_click_offers_recording(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            ch=parse_playlist('#EXTM3U\n#EXTINF:-1 tvg-id="itv1",ITV1\nhttps://example.com/live.m3u8')[0]
+            store.update(lambda s:s.update(channels=[ch]))
+            window=MainWindow(store,start_worker=False)
+            start=window.guide_start
+            programme={'channel':'itv1','start':start,'end':start+3600,'title':'Current show','categories':[]}
+            window.guide={'names':{'itv1':'ITV1'},'programmes':[programme]}
+            window.render_channels()
+            window.resize(1100,750)
+            window.show()
+            self.app.processEvents()
+            window.grid.repaint()
+            self.app.processEvents()
+            self.assertGreater(len(window.grid.hitboxes),0)
+            watched=[]; scheduled=[]
+            window.play=lambda:watched.append(window.selected['id'])
+            window.schedule_programme=lambda ch,p:scheduled.append((ch['id'],p['title']))
+            # A simple left-click on the EPG or its channel name watches live TV.
+            QTest.mouseClick(window.grid,Qt.LeftButton,Qt.NoModifier,QPoint(230,75))
+            self.assertEqual([ch['id']],watched)
+            self.assertEqual([],scheduled)
+            self.assertEqual(0,window.tabs.currentIndex())
+            # Right-click opens menu; choosing Record must not play the stream.
+            with patch('dizytv.desktop.QMenu.exec',lambda menu,*args:menu.actions()[-1].trigger()):
+                QTest.mouseClick(window.grid,Qt.RightButton,Qt.NoModifier,QPoint(230,75))
+            self.assertEqual([(ch['id'],'Current show')],scheduled)
+            self.assertEqual([ch['id']],watched)
+            # Right-click on a channel with no current programme can record now.
+            window.guide={'names':{},'programmes':[]}
+            window.render_channels()
+            recorded_now=[]; window.record_now=lambda:recorded_now.append(window.selected['id'])
+            with patch('dizytv.desktop.QMenu.exec',lambda menu,*args:menu.actions()[-1].trigger()):
+                QTest.mouseClick(window.grid,Qt.RightButton,Qt.NoModifier,QPoint(25,75))
+            self.assertEqual([ch['id']],recorded_now)
+            window.close()
+
     def test_saved_category_edit_filters_channels_and_guide(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as directory:
