@@ -132,7 +132,11 @@ class GuideGrid(QWidget):
 class Settings(QDialog):
     def __init__(self,state,parent):
         super().__init__(parent); self.setWindowTitle('DizyTV settings'); self.resize(690,640)
-        self.original=state['settings'].copy(); form=QFormLayout(self)
+        self.original=state['settings'].copy()
+        root=QVBoxLayout(self)
+        page=QWidget(self); form=QFormLayout(page)
+        scroll=QScrollArea(self);scroll.setWidgetResizable(True);scroll.setWidget(page)
+        root.addWidget(scroll,1)
         self.playlists=QPlainTextEdit('\n'.join(configured_playlists(self.original)))
         self.playlists.setPlaceholderText('One M3U playlist URL per line; remove a line to disable that source')
         self.playlists.setMaximumHeight(125); form.addRow('Channel playlists',self.playlists)
@@ -179,7 +183,7 @@ class Settings(QDialog):
         warning.setWordWrap(True)
         form.addRow(warning)
         note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
-        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))

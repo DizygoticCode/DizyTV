@@ -384,6 +384,8 @@ class RollingTimeshift:
         return self.base_url + f'replay.m3u8?seq={seq}'
 
     def start(self, timeout=18):
+        if self.stop_event.is_set():
+            raise RuntimeError('Timeshift session was already closed')
         if self._opened:
             raise RuntimeError('Timeshift already running')
         self._opened = True

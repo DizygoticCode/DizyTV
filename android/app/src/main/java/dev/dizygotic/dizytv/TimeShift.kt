@@ -302,6 +302,7 @@ internal class DeviceTimeshift(
     }
 
     fun start():String {
+        check(!stopped.get()) { "Timeshift session was closed" }
         try {
             listener=ServerSocket(0,30,InetAddress.getByName("127.0.0.1"))
             Thread({

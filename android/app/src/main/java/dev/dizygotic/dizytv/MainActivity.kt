@@ -113,6 +113,7 @@ class MainActivity:Activity() {
     override fun onPause() {
         handler.removeCallbacks(ticker)
         // Never spool video secretly while the viewing Activity is in the background.
+        if(timeshift!=null || pendingTimeshift!=null)player.stop()
         clearTimeshift()
         super.onPause()
     }
