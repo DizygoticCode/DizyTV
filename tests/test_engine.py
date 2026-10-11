@@ -29,4 +29,4 @@ class EngineTests(unittest.TestCase):
         with patch.object(engine.sys,'platform','win32'),patch.object(engine,'windows_engine_path',return_value=__import__('pathlib').Path('C:/ACEStream/engine/ace_console.exe')),patch.object(engine,'running',side_effect=[False,False,True]),patch.object(engine.subprocess,'Popen') as spawn,patch.object(engine.time,'sleep'):
             self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878',startup_seconds=5))
             spawn.assert_called_once()
-            self.assertEqual('ace_console.exe',spawn.call_args.args[0][0].split('/')[-1])
+            self.assertTrue(spawn.call_args.args[0][0].lower().endswith('ace_console.exe'))
