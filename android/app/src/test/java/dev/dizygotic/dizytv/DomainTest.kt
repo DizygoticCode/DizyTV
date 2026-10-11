@@ -5,6 +5,22 @@ import org.junit.Test
 import org.json.JSONObject
 
 class DomainTest {
+    @Test fun cleanedDisplayAndSectionsPreserveOriginalChannel() {
+        assertEquals("BBC One",Domain.displayName("BBC One Ⓖ @HD"))
+        assertEquals("BBC Two",Domain.displayName("BBC Two @"))
+        assertEquals("Channel 5",Domain.displayName("Channel 5 @ UK Ⓖ"))
+        assertEquals("AT&T SportsNet",Domain.displayName("AT&T SportsNet"))
+        val list=Domain.playlist("#EXTM3U\n#EXTINF:-1 tvg-id=\"BBCOne.uk\" tvg-country=\"GB\" group-title=\"UK\",BBC One @ HD Ⓖ\nhttps://example.com/bbc.m3u8")
+        val channel=list.getJSONObject(0)
+        assertEquals("BBC One @ HD Ⓖ",channel.getString("name"))
+        assertEquals("BBCOne.uk",channel.getString("tvg_id"))
+        assertEquals("https://example.com/bbc.m3u8",channel.getString("stream"))
+        assertEquals("BBC One",Domain.displayName(channel.getString("name")))
+        assertEquals("General TV",Domain.section(channel))
+        assertEquals("Sport",Domain.section(JSONObject().put("genre","Sport").put("name","ESPN").put("kind","TV")))
+        assertEquals("Radio",Domain.section(JSONObject().put("genre","Music").put("name","Radio 1").put("kind","Radio")))
+    }
+
     @Test fun freeviewGuideAliasesKeepRegionalVariantsUnambiguous() {
         val names=JSONObject().put("BBCTwoHD.uk","BBC Two HD").put("BBCFourHD.uk","BBC Four HD")
             .put("5.uk","5 HD").put("BBCOneSouth.uk","BBC One South HD")

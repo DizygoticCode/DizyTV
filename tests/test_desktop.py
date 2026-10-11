@@ -2,6 +2,7 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import tempfile
 import unittest
+from unittest.mock import patch
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -12,6 +13,14 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_ace_setup_opens_verified_official_provider_without_download(self):
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            with patch('dizytv.desktop.QDesktopServices.openUrl',return_value=True) as open_url:
+                window.open_ace_stream_setup()
+                self.assertEqual('https://docs.acestream.net/products/',open_url.call_args.args[0].toString())
+            window.close()
+
     def test_guide_index_reuses_programmes_and_limits_painting_to_visible_window(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:
@@ -127,6 +136,28 @@ class DesktopTests(unittest.TestCase):
             window.genre_filter.setCurrentIndex(window.genre_filter.findData('Sport'))
             self.assertEqual(1,window.channels.count())
             self.assertEqual('Sport',window.grid.rows[0]['name'])
+            window.close()
+
+    def test_country_tree_and_category_navigation_keeps_source_values(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            source='#EXTM3U\n#EXTINF:-1 tvg-id="BBCOne.uk" tvg-country="GB" group-title="News",BBC One @ HD Ⓖ\nhttps://example.com/one.m3u8\n#EXTINF:-1 tvg-country="US" group-title="Sports",AT&T SportsNet\nhttps://example.com/two.m3u8'
+            store.update(lambda s:s.update(channels=parse_playlist(source)))
+            window=MainWindow(store,start_worker=False)
+            self.assertEqual(2,window.country_tree.topLevelItemCount())
+            uk=next(window.country_tree.topLevelItem(i) for i in range(2) if 'United Kingdom' in window.country_tree.topLevelItem(i).text(0))
+            self.assertEqual(('country','United Kingdom','',''),uk.data(0,Qt.UserRole))
+            news=uk.child(0)
+            self.assertIn('News',news.text(0))
+            leaf=news.child(0)
+            self.assertEqual('BBC One',leaf.text(0))
+            window.country_tree_clicked(news)
+            self.assertEqual(['BBC One'],[window.channels.item(i).text() for i in range(window.channels.count())])
+            window.country_tree_clicked(leaf)
+            self.assertEqual('BBC One @ HD Ⓖ',window.selected['name'])
+            self.assertEqual('BBCOne.uk',window.selected['tvg_id'])
+            self.assertEqual('https://example.com/one.m3u8',window.selected['stream'])
             window.close()
 
     def test_source_filter_separates_free_http_from_ace_and_preserves_all(self):

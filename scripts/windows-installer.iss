@@ -1,4 +1,4 @@
-#define AppVersion "0.1.4-alpha"
+#define AppVersion "0.1.5-alpha"
 [Setup]
 AppId={{3F1997BD-12C5-4C17-B013-09C82DA8BAF6}
 AppName=DizyTV
@@ -9,7 +9,7 @@ DefaultDirName={localappdata}\Programs\DizyTV
 DefaultGroupName=DizyTV
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=DizyTV-Setup-0.1.4-alpha-windows-x64
+OutputBaseFilename=DizyTV-Setup-0.1.5-alpha-windows-x64
 SetupIconFile=..\assets\branding\dizytv.ico
 UninstallDisplayIcon={app}\DizyTV.exe
 ArchitecturesAllowed=x64compatible
@@ -30,6 +30,12 @@ Name: "{autodesktop}\DizyTV"; Filename: "{app}\DizyTV.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
+; Ace Stream is third-party P2P software. It is NOT shipped with DizyTV.
+; The user explicitly opts in to visiting its official installer/download site.
+Name: "acestreamsetup"; Description: "Open the official Ace Stream download page after installing DizyTV (optional third-party P2P engine)"; Flags: unchecked
+
+[Run]
+Filename: "https://docs.acestream.net/products/"; Description: "Official Ace Stream Windows download page"; Flags: shellexec skipifsilent; Tasks: acestreamsetup
 
 [Code]
 // This runs before Restart Manager checks open DLLs/executables.

@@ -58,3 +58,7 @@ Embed the previously omitted pre-install PowerShell safety helper; verify an act
 - Safe Freeview EPG name/ID aliases and manual regional mapping for BBC One/ITV1.
 - Better HTTP/HLS playback and failure statuses, background Windows Ace engine launch if engine is separately installed. Android detects a stopped engine without UI-thread networking.
 - Native CI must pass before a new tagged release; streaming availability, geoblocks, DRM and proprietary engine redistribution remain external limitations.
+
+## 0.1.5-alpha: country/category browser and optional Ace engine setup
+
+Display-only name normalization; country and genre/category hierarchy in both native UIs without changing stored channel IDs or XMLTV mappings. Provide explicit official Ace Stream Windows setup page option, rather than bundling unlicensed proprietary binaries. Future integration may support properly licensed/offline engine distribution if a redistribution and SDK agreement is obtained from Ace Stream.

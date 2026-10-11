@@ -59,6 +59,50 @@ def channel_categories(attrs, stream, name=''):
             'transport':'Ace Stream' if ace_id(stream) else 'HTTP'}
 
 
+
+def display_channel_name(name):
+    """Display-only cleanup: never rewrite playlist, programme or stream metadata."""
+    value=re.sub(r'[\u200b-\u200d\ufeff\x00-\x1f\x7f]', '', str(name))
+    value=re.sub(r'[ⒼⓈⓎⓐ-ⓩ]', '', value).strip()
+    annotation=re.compile(
+        r'(?:\s*[@#]\s*(?:HD|SD|FHD|UHD|4K|2160P|1080P|720P|480P|50FPS|60FPS|UK|GB|US|USA|LIVE)'
+        r'|\s*[@#]\s*'
+        r'|\s*[\[(](?:HD|SD|FHD|UHD|4K|2160P|1080P|720P)[\])])\Z',
+        re.I
+    )
+    for _ in range(8):
+        cleaned=annotation.sub('',value).strip()
+        if cleaned==value:
+            break
+        value=cleaned
+    return re.sub(r'\s+', ' ', value).strip() or 'Unnamed channel'
+
+
+def channel_section(channel):
+    """Country/category navigator: keep original group-title and IDs intact."""
+    if channel.get('kind')=='Radio':
+        return 'Radio'
+    genre=normalise_genre(str(channel.get('genre') or ''))
+    sections={'Sport','News','Movies','Kids','Music','Documentary','Entertainment','Education'}
+    if genre in sections:
+        return genre
+    label=' '.join((display_channel_name(channel.get('name','')),str(channel.get('group') or '')))
+    patterns=[
+        ('News',r'\b(?:news|headlines?|weather)\b'),
+        ('Sport',r'\b(?:sports?|football|cricket|racing|nba|nfl|golf)\b'),
+        ('Movies',r'\b(?:movies?|cinema|films?)\b'),
+        ('Kids',r'\b(?:kids|children|cartoons?|junior)\b'),
+        ('Music',r'\b(?:music|concert)\b'),
+        ('Documentary',r'\b(?:documentar(?:y|ies)|factual|history|nature)\b'),
+        ('Education',r'\b(?:education|learning)\b'),
+        ('Entertainment',r'\b(?:entertainment|comedy|drama)\b'),
+    ]
+    for section,pattern in patterns:
+        if re.search(pattern,label,re.I):
+            return section
+    return 'General TV'
+
+
 def catalogue(state):
     overrides = state.get('category_overrides', {})
     return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']]

@@ -88,6 +88,31 @@ class CoreTests(unittest.TestCase):
         self.assertEqual('',match_guide(make('BBCOne.uk','BBC One Ⓖ'),{'a'*40:''},names))
         self.assertEqual('ITV1.uk',match_guide(make('ITV1.uk','ITV 1'),{},names))
 
+    def test_presentational_name_cleanup_and_country_sections(self):
+        from dizytv.core import display_channel_name,channel_section
+        samples={
+            'BBC One Ⓖ @HD':'BBC One',
+            'BBC Two @':'BBC Two',
+            'BBC Four Ⓢ':'BBC Four',
+            'BBC One @1080p':'BBC One',
+            'NBC News [HD]':'NBC News',
+            'AT&T SportsNet':'AT&T SportsNet',
+            'Great! Movies':'Great! Movies',
+            'Channel 5 @ UK Ⓖ':'Channel 5',
+            '  ':'Unnamed channel',
+        }
+        for raw,expected in samples.items():
+            self.assertEqual(expected,display_channel_name(raw),raw)
+        channels=parse_playlist('#EXTM3U\n#EXTINF:-1 tvg-id="BBCOne.uk" tvg-country="GB" group-title="UK",BBC One @ HD Ⓖ\nhttps://example.com/bbc.m3u8')
+        self.assertEqual('BBC One @ HD Ⓖ',channels[0]['name'])
+        self.assertEqual('BBCOne.uk',channels[0]['tvg_id'])
+        self.assertEqual('https://example.com/bbc.m3u8',channels[0]['stream'])
+        self.assertEqual('BBC One',display_channel_name(channels[0]['name']))
+        self.assertEqual('General TV',channel_section(channels[0]))
+        self.assertEqual('News',channel_section({'name':'BBC News','genre':'Unspecified','group':'UK','kind':'TV'}))
+        self.assertEqual('Sport',channel_section({'name':'ESPN','genre':'Sport','group':'USA','kind':'TV'}))
+        self.assertEqual('Radio',channel_section({'name':'Radio 1','genre':'Music','group':'UK','kind':'Radio'}))
+
     def test_xmltv_preserves_programme_genres(self):
         xml = XML.replace('<title>Clock change</title>','<title>Clock change</title><category>News</category><category>Current affairs</category>')
         self.assertEqual(['News','Current affairs'], parse_xmltv(xml)[1][0]['categories'])
