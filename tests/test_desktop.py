@@ -58,6 +58,21 @@ class DesktopTests(unittest.TestCase):
             window.player=None
             window.close()
 
+    def test_default_no_implicit_timeshift_and_settings_max_four_hours(self):
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            self.assertFalse(window.state['settings']['timeshift_enabled'])
+            dialog=Settings(window.state,window)
+            dialog.timeshift_enabled.setChecked(True)
+            dialog.timeshift_minutes.setValue(240)
+            dialog.timeshift_limit.setValue(8)
+            values=dialog.values()
+            self.assertTrue(values['timeshift_enabled'])
+            self.assertEqual(240,values['timeshift_minutes'])
+            self.assertEqual(8*1024**3,values['timeshift_max_bytes'])
+            dialog.close()
+            window.close()
+
     def test_ace_setup_opens_verified_official_provider_without_download(self):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
