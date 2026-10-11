@@ -266,6 +266,11 @@ class RollingTimeshift:
                             self.window.append(b''.join(pieces), max(.1, elapsed))
                             self.ready.set()
                             pieces=[]; size=0; started=time.monotonic()
+                    # Some live TS sources reconnect every few seconds. Preserve
+                    # the final complete fragment instead of waiting forever.
+                    if pieces and not self.stop_event.is_set():
+                        self.window.append(b''.join(pieces), max(.1, time.monotonic()-started))
+                        self.ready.set()
             except (OSError, ValueError) as exc:
                 self.error = str(exc)[:250]
                 if not self.ready.is_set():

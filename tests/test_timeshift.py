@@ -78,6 +78,83 @@ class TestTimeshift(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Fragmented'):
             parse_hls('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:4,\na.m4s','https://example.com')
 
+    def test_actual_clear_hls_ingest_replay_and_local_cleanup(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from threading import Thread
+        class Origin(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path=='/live.m3u8':
+                    payload=b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:4,\n/one.ts\n'
+                    mime='application/vnd.apple.mpegurl'
+                elif self.path=='/one.ts':
+                    payload=PACKET*100
+                    mime='video/mp2t'
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type',mime)
+                self.send_header('Content-Length',str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            def log_message(self,*_):
+                pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Origin)
+        Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                session=RollingTimeshift('http://127.0.0.1:'+str(server.server_port)+'/live.m3u8',
+                                         root,session_id='hls-test')
+                live=session.start(timeout=5)
+                with urlopen(live) as response:
+                    self.assertIn('s/0.ts',response.read().decode())
+                self.assertGreater(session.window.latest_seconds(),0)
+                with urlopen(session.replay_url(30)) as response:
+                    self.assertIn('EXT-X-START',response.read().decode())
+                session.close()
+                self.assertFalse((Path(root)/'session-hls-test').exists())
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_real_direct_ts_short_http_response_still_enters_buffer(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from threading import Thread
+        class Origin(BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload=PACKET*100
+                self.send_response(200)
+                self.send_header('Content-Type','video/mp2t')
+                self.send_header('Content-Length',str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            def log_message(self,*_):pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Origin)
+        Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                session=RollingTimeshift('http://127.0.0.1:'+str(server.server_port)+'/live.ts',
+                                         root,session_id='ts-test')
+                self.assertIn('/live.m3u8',session.start(timeout=5))
+                self.assertTrue(session.window.snapshot())
+                session.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_quota_evicts_oldest_without_touching_unrelated_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            other=Path(root)/'keep-me.txt'
+            other.write_text('user file',encoding='utf-8')
+            w=RollingWindow(Path(root)/'session',free=lambda:1024**4)
+            w.max_bytes=len(PACKET)*12
+            a=w.append(PACKET*10,4)
+            b=w.append(PACKET*10,4)
+            self.assertFalse(a.path.exists())
+            self.assertEqual([b.seq],[p.seq for p in w.snapshot()])
+            w.close()
+            self.assertEqual('user file',other.read_text(encoding='utf-8'))
+
     def test_on_device_only_no_persistent_recordings(self):
         with tempfile.TemporaryDirectory() as root:
             session=RollingTimeshift('https://example.com/video.ts',root,session_id='bounded')

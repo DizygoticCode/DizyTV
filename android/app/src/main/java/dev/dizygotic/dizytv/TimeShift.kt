@@ -222,6 +222,12 @@ internal class DeviceTimeshift(
                             data.reset();started=System.nanoTime()
                         }
                     }
+                    // Reconnecting live TS sources may close before a full
+                    // 4-second segment: keep their complete tail fragment.
+                    if(data.size()>0 && !stopped.get()) {
+                        ring.append(data.toByteArray(),max(0.1,(System.nanoTime()-started)/1e9))
+                        ready.countDown()
+                    }
                 }
             } catch(e:Exception) {
                 error=e.message
