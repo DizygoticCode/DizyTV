@@ -33,8 +33,9 @@ class MainActivity:Activity() {
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
     private var search=""; private var onlyFavourites=false; private var refreshing=false; private var guide=JSONObject().put("names",JSONObject()).put("programmes",JSONArray())
     private var countryFilter=""; private var genreFilter=""; private var typeFilter=""
+    private var displayedZone=""
     private val executor=Executors.newSingleThreadExecutor(); private val handler=Handler(Looper.getMainLooper())
-    private val ticker=object:Runnable { override fun run() { updateZone(); if(page=="Recordings") render(); handler.postDelayed(this,5000) } }
+    private val ticker=object:Runnable { override fun run() { val changed=updateZone(); if(page=="Recordings" || changed && page=="Guide") render(); handler.postDelayed(this,5000) } }
     private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
     private fun text(value:String,size:Float=15f)=TextView(this).apply { text=value; textSize=size; setTextColor(Color.rgb(243,234,213)); setPadding(dp(10),dp(8),dp(10),dp(8)) }
     private fun button(label:String,action:()->Unit)=Button(this).apply { text=label; setOnClickListener { attempt(action) } }
@@ -58,9 +59,11 @@ class MainActivity:Activity() {
     override fun onResume() { super.onResume(); attempt { Scheduler.recover(this) }; handler.post(ticker) }
     override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
     override fun onDestroy() { handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); super.onDestroy() }
-    private fun updateZone() {
+    private fun updateZone():Boolean {
         val zone=store.read().getJSONObject("settings").getString("timezone")
+        val effective=Domain.zone(zone); val key=effective.id+effective.rules.getOffset(Instant.now()).id; val changed=key!=displayedZone; displayedZone=key
         zoneLabel.text=(if(zone=="auto") "Auto: ${ZoneId.systemDefault().id}" else zone)+" • "+Domain.time(Instant.now().epochSecond,zone,true)
+        return changed
     }
     private fun scroller():LinearLayout { val scroll=ScrollView(this); val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; scroll.addView(column); body.addView(scroll,LinearLayout.LayoutParams(-1,-1)); return column }
     private fun filteredChannels(state:JSONObject):List<JSONObject> {
@@ -274,7 +277,12 @@ class MainActivity:Activity() {
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data); if(resultCode!=RESULT_OK) return; val uri=data?.data?:return
         attempt { when(requestCode) {
-            100->{ val grants=data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION); contentResolver.takePersistableUriPermission(uri,grants); store.update { it.getJSONObject("settings").put("recording_dir",uri.toString()) }; render() }
+            100->{
+                val required=Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                require((data.flags and required)==required) { "Choose a folder that allows both reading and writing recordings" }
+                contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                store.update { it.getJSONObject("settings").put("recording_dir",uri.toString()) }; render()
+            }
             101->{ val payload=Domain.backup(store.read()); contentResolver.openOutputStream(uri,"wt")?.use { it.write(payload.toByteArray()) }?:throw IllegalArgumentException("Cannot write backup"); status.text="Backup saved on device" }
             102->{
                 val input=contentResolver.openInputStream(uri)?:throw IllegalArgumentException("Cannot read backup"); val out=java.io.ByteArrayOutputStream()

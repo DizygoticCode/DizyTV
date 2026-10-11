@@ -2,7 +2,9 @@ name: Native alpha builds
 on:
   push:
     branches: [main, build/native-apps]
+    paths: ['dizytv/**', 'android/**', 'assets/**', 'tests/**', 'scripts/**', 'requirements.txt', 'pyproject.toml', 'THIRD-PARTY-NOTICES.md', '.github/workflows/native-builds.yml']
   pull_request:
+    paths: ['dizytv/**', 'android/**', 'assets/**', 'tests/**', 'scripts/**', 'requirements.txt', 'pyproject.toml', 'THIRD-PARTY-NOTICES.md', '.github/workflows/native-builds.yml']
   workflow_dispatch:
 permissions:
   contents: read

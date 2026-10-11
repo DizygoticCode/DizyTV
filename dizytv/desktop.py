@@ -133,7 +133,7 @@ class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance()
+        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''
         self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
@@ -228,7 +228,9 @@ class MainWindow(QMainWindow):
         self.guide_start=self.guide_start+delta if delta else int(time.time()/3600)*3600; self.render_guide()
     def tick(self):
         self.state=self.store.read(); zone=self.state['settings']['timezone']
-        self.timezone_label.setText(('Auto: '+detected_zone() if zone=='auto' else zone)+' • '+format_time(time.time(),zone,False,detected_zone()))
+        label=('Auto: '+detected_zone() if zone=='auto' else zone); local=format_time(time.time(),zone,False,detected_zone()); key=label+' '+local.rsplit(' ',1)[-1]
+        self.timezone_label.setText(label+' • '+local)
+        if key!=self.displayed_zone:self.displayed_zone=key; self.render_guide()
         self.render_now(); self.jobs.setRowCount(len(self.state['jobs']))
         for row,job in enumerate(self.state['jobs']):
             values=[job['title'],format_time(job['start'],zone,detected=detected_zone()),format_time(job['end'],zone,detected=detected_zone()),job['status'],f"{job.get('bytes',0)/1024**2:.1f} MiB"]
