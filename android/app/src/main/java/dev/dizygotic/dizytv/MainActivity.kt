@@ -32,7 +32,9 @@ class MainActivity:Activity() {
     private lateinit var zoneLabel:TextView; private lateinit var lib:LibVLC; private lateinit var player:MediaPlayer
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
     private var search=""; private var onlyFavourites=false; private var refreshing=false; private var guide=JSONObject().put("names",JSONObject()).put("programmes",JSONArray())
-    private var countryFilter=""; private var genreFilter=""; private var typeFilter=""
+    private var countryFilter=""; private var sectionFilter=""; private var genreFilter=""; private var typeFilter=""
+    private val collapsedCountries=mutableSetOf<String>()
+    private val collapsedSections=mutableSetOf<String>()
     private var sourceErrors=emptyList<String>()
     private var displayedZone=""
     // XMLTV guide may have tens of thousands of programmes. Build grouping
@@ -89,6 +91,7 @@ class MainActivity:Activity() {
             val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names"))
             (ch.getString("name")+" "+ch.getString("group")).contains(search,true) && (!onlyFavourites || ch.getString("id") in fav) &&
             (countryFilter.isEmpty() || ch.optString("country","Unspecified")==countryFilter) &&
+            (sectionFilter.isEmpty() || Domain.section(ch)==sectionFilter) &&
             (genreFilter.isEmpty() || ch.optString("genre","Unspecified")==genreFilter || genreFilter in programmeGenres[key].orEmpty()) &&
             (typeFilter.isEmpty() || typeFilter in listOf(ch.optString("kind","TV"),ch.optString("transport",if(ch.getString("stream").startsWith("acestream:")) "Ace Stream" else "HTTP")))
         }
@@ -97,17 +100,26 @@ class MainActivity:Activity() {
         val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val channels=Domain.catalogue(store.read())
         indexGuide()
         val guideGenres=indexedGenres.values.flatMap { it }
-        for(key in listOf("country","genre","kind")) {
-            val values=(channels.map { it.optString(key,if(key=="kind") "TV" else "Unspecified") }+if(key=="genre") guideGenres else if(key=="kind") channels.map { it.optString("transport",if(it.getString("stream").startsWith("acestream:")) "Ace Stream" else "HTTP") } else emptyList()).distinct().sorted()
-            val label=when(key) { "country"->"All countries"; "genre"->"All genres"; else->"All stream types" }; val options=listOf(label)+values
+        for(key in listOf("country","section","genre","kind")) {
+            val values=(when(key) {
+                "section"->channels.filter { countryFilter.isEmpty() || it.optString("country","Unspecified")==countryFilter }.map(Domain::section)
+                else->channels.map { it.optString(key,if(key=="kind") "TV" else "Unspecified") }
+            }+if(key=="genre") guideGenres else if(key=="kind") channels.map { it.optString("transport",if(it.getString("stream").startsWith("acestream:")) "Ace Stream" else "HTTP") } else emptyList()).distinct().sorted()
+            val label=when(key) { "country"->"All countries"; "section"->"All categories"; "genre"->"All genres"; else->"All stream types" }; val options=listOf(label)+values
             val spinner=Spinner(this); spinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,options)
-            val current=when(key) { "country"->countryFilter; "genre"->genreFilter; else->typeFilter }; spinner.setSelection(maxOf(0,options.indexOf(current)))
+            val current=when(key) { "country"->countryFilter; "section"->sectionFilter; "genre"->genreFilter; else->typeFilter }; spinner.setSelection(maxOf(0,options.indexOf(current)))
             spinner.onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent:AdapterView<*>?){}
                 override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long) {
-                    val value=if(position==0) "" else options[position]; val old=when(key) { "country"->countryFilter; "genre"->genreFilter; else->typeFilter }
+                    val value=if(position==0) "" else options[position]; val old=when(key) { "country"->countryFilter; "section"->sectionFilter; "genre"->genreFilter; else->typeFilter }
                     if(old==value) return
-                    when(key) { "country"->countryFilter=value; "genre"->genreFilter=value; else->typeFilter=value }; onChange()
+                    when(key) {
+                        "country"->{ countryFilter=value; sectionFilter="" }
+                        "section"->sectionFilter=value
+                        "genre"->genreFilter=value
+                        else->typeFilter=value
+                    }
+                    onChange()
                 }
             }; column.addView(spinner)
         }; return column
@@ -128,17 +140,66 @@ class MainActivity:Activity() {
                 .setMessage((lines+listOf("Refresh channels to update these counts.")+sourceErrors).joinToString("\n"))
                 .setPositiveButton("OK",null).show()
         })
-        val list=ListView(this); body.addView(list,LinearLayout.LayoutParams(-1,0,1f)); var shown=listOf<JSONObject>()
+        val list=ListView(this)
+        body.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        var channelRows=listOf<JSONObject?>()
+        var rowKeys=listOf<String?>()
         fun populate() {
-            val state=store.read(); val fav=Domain.strings(state.getJSONArray("favourites")).toSet()
-            shown=filteredChannels(state)
-            list.adapter=ArrayAdapter(this,android.R.layout.simple_list_item_1,shown.map { (if(it.getString("id") in fav) "★ " else "")+it.getString("name") })
+            val state=store.read()
+            val fav=Domain.strings(state.getJSONArray("favourites")).toSet()
+            val filtered=filteredChannels(state)
+            val labels=mutableListOf<String>()
+            val channelsByRow=mutableListOf<JSONObject?>()
+            val keys=mutableListOf<String?>()
+            val grouped=filtered.groupBy { it.optString("country","Unspecified") }
+            for(country in grouped.keys.sortedWith(compareBy<String> { it=="Unspecified" }.thenBy { it })) {
+                val members=grouped[country].orEmpty()
+                labels.add("▾ $country (${members.size})")
+                channelsByRow.add(null); keys.add("country:$country")
+                if(country in collapsedCountries) continue
+                for(section in members.groupBy(Domain::section).keys.sorted()) {
+                    val sectionMembers=members.filter { Domain.section(it)==section }
+                        .sortedBy { Domain.displayName(it.optString("name")).lowercase() }
+                    val groupKey="section:$country:$section"
+                    labels.add("    ▸ $section (${sectionMembers.size})")
+                    channelsByRow.add(null); keys.add(groupKey)
+                    if(groupKey in collapsedSections) continue
+                    for(ch in sectionMembers) {
+                        labels.add("        "+(if(ch.getString("id") in fav) "★ " else "")+Domain.displayName(ch.getString("name")))
+                        channelsByRow.add(ch); keys.add(null)
+                    }
+                }
+            }
+            channelRows=channelsByRow
+            rowKeys=keys
+            list.adapter=ArrayAdapter(this,android.R.layout.simple_list_item_1,labels)
         }
-        body.addView(categoryFilters { populate() },2)
-        input.addTextChangedListener(object:TextWatcher { override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}; override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) { search=s.toString(); populate() }; override fun afterTextChanged(s:Editable?){} })
+        body.addView(categoryFilters { render() },2)
+        input.addTextChangedListener(object:TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) { search=s.toString(); populate() }
+            override fun afterTextChanged(s:Editable?){}
+        })
         filter.setOnCheckedChangeListener { _,checked->onlyFavourites=checked; populate() }
-        list.setOnItemClickListener { _,_,position,_->selected=shown[position]; page="Live"; render(); play() }
-        list.setOnItemLongClickListener { _,_,position,_->toggleFavourite(shown[position]); populate(); true }; populate()
+        list.setOnItemClickListener { _,_,position,_->
+            val channel=channelRows.getOrNull(position)
+            if(channel!=null) { selected=channel; page="Live"; render(); play() }
+            else {
+                val key=rowKeys.getOrNull(position).orEmpty()
+                if(key.startsWith("country:")) {
+                    val country=key.removePrefix("country:")
+                    if(!collapsedCountries.add(country)) collapsedCountries.remove(country)
+                } else if(key.startsWith("section:")) {
+                    if(!collapsedSections.add(key)) collapsedSections.remove(key)
+                }
+                populate()
+            }
+        }
+        list.setOnItemLongClickListener { _,_,position,_->
+            val channel=channelRows.getOrNull(position)
+            if(channel!=null) { toggleFavourite(channel); populate(); true } else false
+        }
+        populate()
     }
     private fun live() {
         body.addView(text(selected?.getString("name")?:"Choose a channel first",20f))
