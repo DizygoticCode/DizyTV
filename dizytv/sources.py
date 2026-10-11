@@ -26,6 +26,13 @@ DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]  # Worldwide meg
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
 
+def source_label(url):
+    """Human-readable source name without exposing playlist credentials or query tokens."""
+    for label, preset, _ in FREE_PLAYLISTS:
+        if preset == url:
+            return label
+    return urlparse(url).hostname or "Custom playlist"
+
 
 def configured_playlists(settings):
     """Older installations transparently gain free presets, keeping custom URL first."""
@@ -69,7 +76,7 @@ def refresh_catalogue(settings, old_channels, fetch):
             success += 1
             append(channels)
         except Exception as exc:
-            errors.append((urlparse(url).hostname or "unknown source") + ": " + type(exc).__name__)
+            errors.append(source_label(url) + ": " + type(exc).__name__)
             append(existing.get(url, []))
     if not success:
         if old_channels:

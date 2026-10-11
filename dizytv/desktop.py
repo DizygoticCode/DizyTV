@@ -13,12 +13,12 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, COUNTRIES, GENRES)
 from .network import download
-from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS
+from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 
@@ -58,7 +58,9 @@ class Task(QRunnable):
 
 
 class GuideGrid(QWidget):
-    programme_clicked = Signal(object,object)
+    channel_clicked = Signal(object)
+    programme_record_requested = Signal(object,object)
+    channel_record_requested = Signal(object)
     def __init__(self):
         super().__init__(); self.rows=[]; self.programmes=[]; self.hitboxes=[]; self.zone='auto'; self.start=0
     def set_data(self,channels,programmes,mappings,zone,start):
@@ -95,9 +97,34 @@ class GuideGrid(QWidget):
         if left<=x<=left+1080:
             p.setPen(QColor('#f4af71')); p.drawLine(int(x),40,int(x),self.height())
     def mousePressEvent(self,event):
-        for rect,ch,item in self.hitboxes:
-            if rect.contains(event.position()):
-                self.programme_clicked.emit(ch,item); break
+        # Row identity does not depend on whether this channel has XMLTV data.
+        row=int((event.position().y()-48)//58)
+        if not (0<=row<len(self.rows)):
+            return super().mousePressEvent(event)
+        channel=self.rows[row]
+        if event.button()==Qt.LeftButton:
+            self.channel_clicked.emit(channel)
+            event.accept()
+            return
+        if event.button()==Qt.RightButton:
+            # Offer recording only through an explicit menu, never by default click.
+            programme=next((p for rect,ch,p in reversed(self.hitboxes)
+                            if ch['id']==channel['id'] and rect.contains(event.position())),None)
+            menu=QMenu(self)
+            watch=menu.addAction('▶ Watch channel')
+            watch.triggered.connect(lambda checked=False,ch=channel:self.channel_clicked.emit(ch))
+            if programme is not None:
+                record=menu.addAction('● Record programme…')
+                record.triggered.connect(lambda checked=False,ch=channel,p=programme:self.programme_record_requested.emit(ch,p))
+            else:
+                record=menu.addAction('● Record now…')
+                record.triggered.connect(lambda checked=False,ch=channel:self.channel_record_requested.emit(ch))
+            # Popup is non-modal: don't stall the EPG event loop while it is open.
+            self.context_menu=menu
+            menu.popup(event.globalPosition().toPoint())
+            event.accept()
+            return
+        return super().mousePressEvent(event)
 
 
 class Settings(QDialog):
@@ -107,6 +134,9 @@ class Settings(QDialog):
         self.playlists=QPlainTextEdit('\n'.join(configured_playlists(self.original)))
         self.playlists.setPlaceholderText('One M3U playlist URL per line; remove a line to disable that source')
         self.playlists.setMaximumHeight(125); form.addRow('Channel playlists',self.playlists)
+        add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
+        add_presets.clicked.connect(self.add_free_playlists)
+        form.addRow(add_presets)
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
@@ -122,6 +152,10 @@ class Settings(QDialog):
         self.reserve=QDoubleSpinBox(); self.reserve.setRange(0,10000); self.reserve.setValue(self.original['reserve_bytes']/1024**3); self.reserve.setSuffix(' GiB'); form.addRow('Keep free space',self.reserve)
         note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
+    def add_free_playlists(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
+
     def pick_folder(self):
         folder=QFileDialog.getExistingDirectory(self,'Recording destination',self.folder.text())
         if folder:self.folder.setText(folder)
@@ -138,18 +172,20 @@ class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''
+        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]
         self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand); top.addStretch()
         self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
-        for label,handler in [('Refresh channels',self.refresh_channels),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
+        for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
         layout.addLayout(top)
         split=QSplitter(); layout.addWidget(split,1)
         sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
-        self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox()
+        self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox(); self.source_filter=QComboBox()
+        self.source_filter.addItem('All playlists','')
+        self.source_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.source_filter)
         for widget,label in ((self.country_filter,'All countries'),(self.genre_filter,'All genres'),(self.kind_filter,'All stream types')):
             widget.addItem(label,''); widget.currentIndexChanged.connect(self.render_channels); side.addWidget(widget)
         self.favourites_only=QCheckBox('★ Favourites only'); self.favourites_only.toggled.connect(self.render_channels); side.addWidget(self.favourites_only)
@@ -167,7 +203,7 @@ class MainWindow(QMainWindow):
         for label,delta in [('← Earlier',-21600),('Now',0),('Later →',21600)]:
             b=QPushButton(label); b.clicked.connect(lambda checked=False,d=delta:self.move_guide(d)); nav.addWidget(b)
         self.guide_date=QLabel(); nav.addWidget(self.guide_date); guide_layout.addLayout(nav)
-        self.grid=GuideGrid(); self.grid.programme_clicked.connect(self.schedule_programme); scroll=QScrollArea(); scroll.setWidget(self.grid); scroll.setWidgetResizable(True); guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
+        self.grid=GuideGrid(); self.grid.channel_clicked.connect(self.play_guide_channel); self.grid.programme_record_requested.connect(self.schedule_programme); self.grid.channel_record_requested.connect(self.record_guide_channel); scroll=QScrollArea(); scroll.setWidget(self.grid); scroll.setWidgetResizable(True); guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
         recordings=QWidget(); rec_layout=QVBoxLayout(recordings)
         self.jobs=QTableWidget(0,5); self.jobs.setHorizontalHeaderLabels(['Programme','Start','End','Status','Size']); self.jobs.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.jobs.setSelectionBehavior(QTableWidget.SelectRows); self.jobs.setSelectionMode(QTableWidget.SingleSelection); rec_layout.addWidget(self.jobs)
         rec_buttons=QHBoxLayout()
@@ -183,10 +219,11 @@ class MainWindow(QMainWindow):
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
         self.guide_clock=QTimer(self); self.guide_clock.timeout.connect(self.refresh_guide); self.guide_clock.start(12*3600*1000)
-        if start_worker and self.state['channels'] and not self.guide['programmes']:
-            QTimer.singleShot(500,self.refresh_guide)
-        if start_worker:ensure_worker(self.store.directory)
-        if start_worker and not self.state['channels']:QTimer.singleShot(200,self.refresh_channels)
+        if start_worker:
+            ensure_worker(self.store.directory)
+            # Previously cached Ace channels hid newly configured public feeds.
+            # Always refresh on startup, retaining cached channels until success.
+            QTimer.singleShot(200,self.refresh_channels)
     def error(self,message):
         self.status.setText(message); QMessageBox.warning(self,'DizyTV',message)
     def load_guide(self):
@@ -195,11 +232,57 @@ class MainWindow(QMainWindow):
             if path.exists() and path.stat().st_size<=100*1024**2:
                 self.guide=json.loads(path.read_text(encoding='utf-8'))
         except (OSError,ValueError):pass
+    def show_source_status(self):
+        state=self.store.read(); counts={}
+        for ch in state['channels']:
+            key=ch.get('source','https://search-ace.stream/playlist')
+            counts[key]=counts.get(key,0)+1
+        lines=['Saved unique channels per configured playlist (not guaranteed playable):']
+        for url in configured_playlists(state['settings']):
+            lines.append(f'{source_label(url)}: {counts.get(url,0)}')
+        lines.append('Zero means none saved from that source. Click Refresh channels to retry.')
+        if self.source_errors:
+            lines.append('Last refresh failures (old cache preserved when possible):')
+            lines.extend(self.source_errors)
+        QMessageBox.information(self,'DizyTV playlist import status','\n'.join(lines))
+
+    def guide_index(self):
+        # 85,000+ XMLTV entries were being re-scanned for each filter change
+        # and each periodic EPG redraw. Cache by guide object identity and
+        # invalidate naturally when Refresh guide replaces the guide dict.
+        if getattr(self, '_indexed_guide', None) is not self.guide:
+            by_channel={}
+            genres={}
+            for programme in self.guide['programmes']:
+                cid=programme['channel']
+                by_channel.setdefault(cid,[]).append(programme)
+                categories=programme.get('categories',[])
+                if categories:
+                    genres.setdefault(cid,set()).update(normalise_genre(c) for c in categories)
+            self._programme_by_channel=by_channel
+            self._genre_by_channel=genres
+            self._indexed_guide=self.guide
+        return self._programme_by_channel,self._genre_by_channel
+
     def render_channels(self,*_):
         previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
-        genre_by_id={}
-        for p in self.guide['programmes']:
-            genre_by_id.setdefault(p['channel'],set()).update(normalise_genre(v) for v in p.get('categories',[]))
+        # Give free HTTP/HLS channels prominence, without removing Ace streams.
+        source.sort(key=lambda ch:(ch.get('transport')=='Ace Stream',ch.get('country')!='United Kingdom',ch['name'].casefold()))
+        selected_source=self.source_filter.currentData()
+        urls=configured_playlists(self.state['settings'])
+        counts={}
+        for ch in source:
+            source_url=ch.get('source','https://search-ace.stream/playlist')
+            counts[source_url]=counts.get(source_url,0)+1
+        self.source_filter.blockSignals(True); self.source_filter.clear()
+        self.source_filter.addItem('All playlists','')
+        self.source_filter.addItem('HTTP/HLS (no Ace engine)','<http>')
+        self.source_filter.addItem('Ace Stream only','<ace>')
+        for url in urls:
+            self.source_filter.addItem(f'{source_label(url)} ({counts.get(url,0)})',url)
+        self.source_filter.setCurrentIndex(max(0,self.source_filter.findData(selected_source)))
+        self.source_filter.blockSignals(False)
+        _,genre_by_id=self.guide_index()
         for widget,key,label in ((self.country_filter,'country','All countries'),(self.genre_filter,'genre','All genres'),(self.kind_filter,'kind','All stream types')):
             chosen=widget.currentData(); values={c.get(key,'TV' if key=='kind' else 'Unspecified') for c in source}
             if key=='genre':values.update(g for genres in genre_by_id.values() for g in genres)
@@ -208,7 +291,13 @@ class MainWindow(QMainWindow):
             for value in sorted(values):widget.addItem(value,value)
             widget.setCurrentIndex(max(0,widget.findData(chosen))); widget.blockSignals(False)
         query=self.search.text().casefold(); favs=set(self.state['favourites'])
+        active_source=self.source_filter.currentData()
         for ch in source:
+            transport=ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')
+            source_url=ch.get('source','https://search-ace.stream/playlist')
+            if active_source=='<http>' and transport=='Ace Stream': continue
+            if active_source=='<ace>' and transport!='Ace Stream': continue
+            if active_source not in ('','<http>','<ace>') and active_source!=source_url: continue
             if query not in (ch['name']+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
@@ -223,14 +312,27 @@ class MainWindow(QMainWindow):
     def render_now(self):
         if not self.selected:return
         cid=match_guide(self.selected,self.state['mappings'],self.guide['names']); now=time.time()
-        items=[p for p in self.guide['programmes'] if p['channel']==cid and p['end']>now][:2]
+        by_channel,_=self.guide_index()
+        items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(self.selected['name']+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else self.selected['name']+' — no guide match')
     def render_guide(self):
-        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(self.channels.count())]
+        # The grid only paints 250 visible channels within a six-hour window;
+        # never pass the complete XMLTV cache to its paintEvent.
+        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(min(self.channels.count(),250))]
         genre=self.genre_filter.currentData()
-        source_genre_ids={match_guide(ch,self.state['mappings'],self.guide['names']) for ch in channels if ch.get('genre','Unspecified')==genre}
-        programmes=[p for p in self.guide['programmes'] if not genre or p['channel'] in source_genre_ids or genre in {normalise_genre(c) for c in p.get('categories',[])}]
-        resolved={ch['id']:match_guide(ch,self.state['mappings'],self.guide['names']) for ch in channels}
+        by_channel,_=self.guide_index()
+        resolved={}
+        programmes=[]
+        end=self.guide_start+6*3600
+        for ch in channels:
+            key=match_guide(ch,self.state['mappings'],self.guide['names'])
+            resolved[ch['id']]=key
+            for p in by_channel.get(key,()):
+                if not (p['start']<end and p['end']>self.guide_start):
+                    continue
+                if genre and ch.get('genre','Unspecified')!=genre and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
+                    continue
+                programmes.append(p)
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
     def move_guide(self,delta):
@@ -259,9 +361,10 @@ class MainWindow(QMainWindow):
         current=self.store.read(); self.status.setText('Importing free channel sources…')
         def done(result):
             channels,success,errors=result
+            self.source_errors=errors
             if success:self.store.update(lambda s:s.update(channels=channels))
             self.render_channels()
-            self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (cached entries kept)' if errors else ''))
+            self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (open Source status)' if errors else '')+' • use playlist filter to view free HTTP/HLS')
             if not self.guide['programmes'] and self.state['settings']['xmltv_urls']:
                 QTimer.singleShot(300,self.refresh_guide)
         self.async_task(lambda:refresh_catalogue(current['settings'],current['channels'],download),done)
@@ -341,6 +444,25 @@ class MainWindow(QMainWindow):
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.tabs.setCurrentIndex(0); self.status.setText('Connecting… engine availability and peers may affect playback')
         except Exception as exc:self.error('Playback could not start. Install VLC 3 for this app architecture and check the Ace engine. '+str(exc))
+    def select_guide_channel(self,ch):
+        self.selected=ch
+        # Keep the sidebar and Now/Next label in step with the programme grid.
+        for idx in range(self.channels.count()):
+            item=self.channels.item(idx)
+            if item.data(Qt.UserRole)['id']==ch['id']:
+                self.channels.setCurrentItem(item)
+                break
+        self.render_now()
+
+    def play_guide_channel(self,ch):
+        self.select_guide_channel(ch)
+        self.tabs.setCurrentIndex(0)
+        self.play()
+
+    def record_guide_channel(self,ch):
+        self.select_guide_channel(ch)
+        self.record_now()
+
     def play(self):
         if not self.selected:return
         active=[j for j in self.store.read()['jobs'] if j['status']=='recording' and j['channel_id']!=self.selected['id']]

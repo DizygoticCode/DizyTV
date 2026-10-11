@@ -33,7 +33,22 @@ class MainActivity:Activity() {
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
     private var search=""; private var onlyFavourites=false; private var refreshing=false; private var guide=JSONObject().put("names",JSONObject()).put("programmes",JSONArray())
     private var countryFilter=""; private var genreFilter=""; private var typeFilter=""
+    private var sourceErrors=emptyList<String>()
     private var displayedZone=""
+    // XMLTV guide may have tens of thousands of programmes. Build grouping
+    // only once per freshly imported guide, not on every keypress or page.
+    private var indexedGuide:JSONObject?=null
+    private var indexedProgrammes:Map<String,List<JSONObject>> = emptyMap()
+    private var indexedGenres:Map<String,Set<String>> = emptyMap()
+    private fun indexGuide() {
+        if(indexedGuide===guide) return
+        val grouped=Domain.objects(guide.getJSONArray("programmes")).groupBy { it.getString("channel") }
+        indexedProgrammes=grouped
+        indexedGenres=grouped.mapValues { (_,rows)->
+            rows.flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }.toSet()
+        }
+        indexedGuide=guide
+    }
     private val executor=Executors.newSingleThreadExecutor(); private val handler=Handler(Looper.getMainLooper())
     private val ticker=object:Runnable { override fun run() { val changed=updateZone(); if(page=="Recordings" || changed && page=="Guide") render(); handler.postDelayed(this,5000) } }
     private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
@@ -54,8 +69,8 @@ class MainActivity:Activity() {
         status=text("Native alpha • Install/open Ace Stream, configure XMLTV and choose recording storage",12f); root.addView(status); setContentView(root)
         runCatching { val file=File(filesDir,"guide.json"); if(file.exists() && file.length()<=100*1024*1024) guide=JSONObject(file.readText()) }
         render(); if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),20)
-        if(store.read().getJSONArray("channels").length()==0) refreshChannels()
-        else if(guide.getJSONArray("programmes").length()==0) refreshGuide()
+        // Import newly added free playlists on upgrades even if old Ace entries were cached.
+        refreshChannels()
     }
     override fun onResume() { super.onResume(); attempt { Scheduler.recover(this) }; handler.post(ticker) }
     override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
@@ -68,7 +83,8 @@ class MainActivity:Activity() {
     }
     private fun scroller():LinearLayout { val scroll=ScrollView(this); val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; scroll.addView(column); body.addView(scroll,LinearLayout.LayoutParams(-1,-1)); return column }
     private fun filteredChannels(state:JSONObject):List<JSONObject> {
-        val fav=Domain.strings(state.getJSONArray("favourites")); val programmeGenres=Domain.objects(guide.getJSONArray("programmes")).groupBy { it.getString("channel") }.mapValues { entry->entry.value.flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }.toSet() }
+        indexGuide()
+        val fav=Domain.strings(state.getJSONArray("favourites")); val programmeGenres=indexedGenres
         return Domain.catalogue(state).filter { ch->
             val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names"))
             (ch.getString("name")+" "+ch.getString("group")).contains(search,true) && (!onlyFavourites || ch.getString("id") in fav) &&
@@ -79,7 +95,8 @@ class MainActivity:Activity() {
     }
     private fun categoryFilters(onChange:()->Unit):LinearLayout {
         val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val channels=Domain.catalogue(store.read())
-        val guideGenres=Domain.objects(guide.getJSONArray("programmes")).flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }
+        indexGuide()
+        val guideGenres=indexedGenres.values.flatMap { it }
         for(key in listOf("country","genre","kind")) {
             val values=(channels.map { it.optString(key,if(key=="kind") "TV" else "Unspecified") }+if(key=="genre") guideGenres else if(key=="kind") channels.map { it.optString("transport",if(it.getString("stream").startsWith("acestream:")) "Ace Stream" else "HTTP") } else emptyList()).distinct().sorted()
             val label=when(key) { "country"->"All countries"; "genre"->"All genres"; else->"All stream types" }; val options=listOf(label)+values
@@ -103,6 +120,14 @@ class MainActivity:Activity() {
         val input=EditText(this).apply { hint="Search channels or groups"; setText(search); setSingleLine(true) }; body.addView(input)
         val filter=CheckBox(this).apply { text="★ Favourites only"; isChecked=onlyFavourites }; body.addView(filter)
         val refresh=button("Refresh channel catalogue") { refreshChannels() }; body.addView(refresh)
+        body.addView(button("Source counts / import errors") {
+            val s=store.read()
+            val counts=Domain.objects(s.getJSONArray("channels")).groupingBy { it.optString("source",Sources.legacy) }.eachCount()
+            val lines=Sources.urls(s.getJSONObject("settings")).map { "${Sources.label(it)}: ${counts[it]?:0} saved channels" }
+            AlertDialog.Builder(this).setTitle("DizyTV playlist sources")
+                .setMessage((lines+listOf("Refresh channels to update these counts.")+sourceErrors).joinToString("\n"))
+                .setPositiveButton("OK",null).show()
+        })
         val list=ListView(this); body.addView(list,LinearLayout.LayoutParams(-1,0,1f)); var shown=listOf<JSONObject>()
         fun populate() {
             val state=store.read(); val fav=Domain.strings(state.getJSONArray("favourites")).toSet()
@@ -119,7 +144,8 @@ class MainActivity:Activity() {
         body.addView(text(selected?.getString("name")?:"Choose a channel first",20f))
         selected?.let { ch->
             val state=store.read(); val key=state.getJSONObject("mappings").optString(ch.getString("id"),ch.getString("tvg_id")); val now=Instant.now().epochSecond
-            val programmes=Domain.objects(guide.getJSONArray("programmes")).filter { it.getString("channel")==key && it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
+            indexGuide()
+            val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
             body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
         }
         val layout=VLCVideoLayout(this); video=layout; body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
@@ -130,7 +156,8 @@ class MainActivity:Activity() {
     private fun play()=attempt {
         val ch=selected?:return@attempt; val s=store.read()
         require(Domain.objects(s.getJSONArray("jobs")).none { it.getString("status")=="recording" && it.getString("channel_id")!=ch.getString("id") }) { "Another channel is recording. Finish or stop it before changing playback." }
-        val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings")))); player.media=media; media.release(); player.play(); status.text="Connecting to engine…"
+        val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings")))); player.media=media; media.release(); player.play()
+        status.text=if(ch.getString("stream").startsWith("acestream:")) "Connecting to Ace engine…" else "Connecting to HTTP/HLS stream…"
     }
     private fun toggleFavourite(ch:JSONObject) {
         store.update { s->val fav=Domain.strings(s.getJSONArray("favourites")).toMutableList(); if(!fav.remove(ch.getString("id"))) fav.add(ch.getString("id")); s.put("favourites",JSONArray(fav)) }
@@ -156,23 +183,30 @@ class MainActivity:Activity() {
     }
     private fun guidePage() {
         body.addView(categoryFilters { render() })
+        body.addView(text("Tap a programme to watch its channel • long-press to record",13f))
         body.addView(button("Refresh XMLTV guide") { refreshGuide() }); val s=store.read(); val timezone=s.getJSONObject("settings").getString("timezone")
         val start=Instant.now().epochSecond/3600*3600; body.addView(text(Domain.time(start,timezone)+" • next six hours"))
         val outer=ScrollView(this); val horizontal=HorizontalScrollView(this); val grid=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         val headings=row(); headings.addView(text("Channel"),LinearLayout.LayoutParams(dp(140),dp(50)))
         for(i in 0..5) headings.addView(text(Domain.time(start+i*3600,timezone,true)),LinearLayout.LayoutParams(dp(180),dp(50)))
-        grid.addView(headings); val all=Domain.objects(guide.getJSONArray("programmes"))
-        val favourites=Domain.strings(s.getJSONArray("favourites"))
+        grid.addView(headings)
+        indexGuide()
         val catalogue=filteredChannels(s).take(250)
         for(ch in catalogue) {
-            val r=row(); r.addView(text(ch.getString("name")),LinearLayout.LayoutParams(dp(140),dp(68)))
+            val r=row()
+            val channelName=text(ch.getString("name"))
+            channelName.setOnClickListener { selected=ch; page="Live"; render(); play() }
+            channelName.setOnLongClickListener { selected=ch; recordNow(); true }
+            r.addView(channelName,LinearLayout.LayoutParams(dp(140),dp(68)))
             val timeline=android.widget.FrameLayout(this); r.addView(timeline,LinearLayout.LayoutParams(dp(1080),dp(68)))
             val key=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
-            val programmes=all.filter { it.getString("channel")==key && it.getLong("end")>start && it.getLong("start")<start+21600 && (genreFilter.isEmpty() || ch.optString("genre","Unspecified")==genreFilter || genreFilter in Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre)) }
+            val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>start && it.getLong("start")<start+21600 && (genreFilter.isEmpty() || ch.optString("genre","Unspecified")==genreFilter || genreFilter in Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre)) }
             if(programmes.isEmpty()) timeline.addView(text("No guide match — choose Map EPG"))
             for(p in programmes) {
                 val left=maxOf(p.getLong("start"),start)-start; val width=minOf(p.getLong("end"),start+21600)-maxOf(p.getLong("start"),start)
-                val b=button(p.getString("title")) { scheduleProgramme(ch,p) }; b.textSize=12f
+                val b=button(p.getString("title")) { selected=ch; page="Live"; render(); play() }
+                b.setOnLongClickListener { attempt { scheduleProgramme(ch,p) }; true }
+                b.textSize=12f
                 val params=android.widget.FrameLayout.LayoutParams(maxOf(dp(20),dp((width*180/3600).toInt())),dp(64)); params.leftMargin=dp((left*180/3600).toInt()); timeline.addView(b,params)
             }
             grid.addView(r)
@@ -243,7 +277,12 @@ class MainActivity:Activity() {
     private fun settingsPage() {
         val list=scroller(); val original=store.read().getJSONObject("settings"); val fields=mutableMapOf<String,EditText>()
         fun field(key:String,label:String,value:String) { list.addView(text(label)); val input=EditText(this).apply { setText(value); maxLines=if(key=="xmltv_urls" || key=="playlist_urls") 8 else 1 }; fields[key]=input; list.addView(input) }
-        field("playlist_urls","Channel playlists (one URL per line; remove to disable)",Sources.urls(original).joinToString("\n")); field("engine_url","Ace engine URL",original.getString("engine_url"))
+        field("playlist_urls","Channel playlists (one URL per line; remove to disable)",Sources.urls(original).joinToString("\n"))
+        list.addView(button("Add built-in free playlists") {
+            val existing=fields["playlist_urls"]!!.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            fields["playlist_urls"]!!.setText((existing+Sources.presets).distinct().joinToString("\n"))
+        })
+        field("engine_url","Ace engine URL",original.getString("engine_url"))
         field("xmltv_urls","XMLTV URLs — one per line",Domain.strings(original.getJSONArray("xmltv_urls")).joinToString("\n"))
         field("timezone","Timezone — auto or IANA name",original.getString("timezone")); list.addView(button("Choose timezone") { val zones=(listOf("auto")+ZoneId.getAvailableZoneIds().sorted()).toTypedArray(); AlertDialog.Builder(this).setTitle("Display timezone").setItems(zones) { _,i->fields["timezone"]!!.setText(zones[i]) }.show() })
         field("epg_offset_minutes","EPG correction in minutes (new imports only)",original.getInt("epg_offset_minutes").toString())
@@ -273,6 +312,7 @@ class MainActivity:Activity() {
             handler.post {
                 refreshing=false
                 result.onSuccess { refreshed->attempt {
+                    sourceErrors=refreshed.errors
                     if(refreshed.succeeded>0) store.update { it.put("channels",refreshed.channels) }
                     status.text="${refreshed.channels.length()} channels • ${refreshed.succeeded} sources updated • ${refreshed.errors.size} failed (cached)"
                     render()

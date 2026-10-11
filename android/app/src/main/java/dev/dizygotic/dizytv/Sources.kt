@@ -19,6 +19,15 @@ object Sources {
         "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_lite.xml.gz"
     )
     private val countryHints=mapOf(presets[1] to "United Kingdom",presets[2] to "United Kingdom",presets[3] to "United States")
+    fun label(url:String):String = when(url) {
+        presets[0]->"Ace Stream public directory"
+        presets[1]->"UK free television"
+        presets[2]->"IPTV-org United Kingdom"
+        presets[3]->"IPTV-org United States"
+        presets[4]->"Free-TV international"
+        optionalWorld->"IPTV-org worldwide"
+        else->runCatching { java.net.URI(url).host }.getOrNull()?:"Custom source"
+    }
 
     fun urls(settings:JSONObject):List<String> {
         val source=if(settings.has("playlist_urls")) Domain.strings(settings.getJSONArray("playlist_urls"))
@@ -46,7 +55,7 @@ object Sources {
                 }
                 append(rows); success++
             } catch(e:Exception) {
-                errors.add("Source failed: "+(runCatching { java.net.URI(url).host }.getOrNull()?:"unknown"))
+                errors.add("${label(url)}: ${e.javaClass.simpleName}")
                 append(old[url].orEmpty())
             }
         }
