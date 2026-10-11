@@ -42,6 +42,23 @@ class FreeSourceTests(unittest.TestCase):
         rows,_,_=refresh_catalogue(settings,[],lambda _:feed('https://example.com/uk.m3u8'))
         self.assertEqual('United Kingdom',rows[0]['country'])
 
+    def test_existing_alpha_state_gets_preset_sources_and_guides(self):
+        import tempfile
+        from dizytv.storage import Store, atomic_json
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(folder)
+            old = default_state()
+            old['settings'].pop('playlist_urls')
+            old['settings']['xmltv_urls'] = []
+            old['settings']['playlist_url'] = 'https://example.com/my-list.m3u'
+            atomic_json(store.path, old)
+            migrated = store.read()['settings']
+            self.assertEqual('https://example.com/my-list.m3u', migrated['playlist_urls'][0])
+            self.assertIn('https://example.com/my-list.m3u', migrated['playlist_urls'])
+            self.assertEqual(DEFAULT_GUIDE_URLS, migrated['xmltv_urls'])
+            store.update(lambda state: state['settings'].update(epg_offset_minutes=0))
+            self.assertEqual(DEFAULT_GUIDE_URLS, store.read()['settings']['xmltv_urls'])
+
     def test_guide_match_is_exact_and_does_not_guess_regions(self):
         ch={'id':'a'*40,'tvg_id':'','name':'BBC News HD'}
         self.assertEqual('bbc-news',match_guide(ch,{}, {'bbc-news':'BBC News','bbc-one':'BBC One'}))
