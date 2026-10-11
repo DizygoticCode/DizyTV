@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, COUNTRIES, GENRES)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, COUNTRIES, GENRES)
 from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
@@ -262,8 +262,13 @@ class MainWindow(QMainWindow):
                     genres.setdefault(cid,set()).update(normalise_genre(c) for c in categories)
             self._programme_by_channel=by_channel
             self._genre_by_channel=genres
+            self._guide_name_lookup=guide_lookup(self.guide['names'])
             self._indexed_guide=self.guide
         return self._programme_by_channel,self._genre_by_channel
+
+    def matched_guide(self,ch):
+        self.guide_index()
+        return match_guide(ch,self.state['mappings'],self.guide['names'],self._guide_name_lookup)
 
     def render_channels(self,*_):
         previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
@@ -303,7 +308,7 @@ class MainWindow(QMainWindow):
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
             if kind and kind not in (ch.get('kind','TV'),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
-            key=match_guide(ch,self.state['mappings'],self.guide['names'])
+            key=self.matched_guide(ch)
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
             item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+ch['name']); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
@@ -312,7 +317,7 @@ class MainWindow(QMainWindow):
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
     def render_now(self):
         if not self.selected:return
-        cid=match_guide(self.selected,self.state['mappings'],self.guide['names']); now=time.time()
+        cid=self.matched_guide(self.selected); now=time.time()
         by_channel,_=self.guide_index()
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(self.selected['name']+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else self.selected['name']+' — no guide match')
@@ -326,7 +331,7 @@ class MainWindow(QMainWindow):
         programmes=[]
         end=self.guide_start+6*3600
         for ch in channels:
-            key=match_guide(ch,self.state['mappings'],self.guide['names'])
+            key=self.matched_guide(ch)
             resolved[ch['id']]=key
             for p in by_channel.get(key,()):
                 if not (p['start']<end and p['end']>self.guide_start):
@@ -523,7 +528,7 @@ class MainWindow(QMainWindow):
         if not ok:return
         now=int(time.time()); title=self.selected['name']; end=now+{'30 minutes':1800,'60 minutes':3600,'120 minutes':7200}.get(value,86400)
         if value.startswith('Until current'):
-            key=match_guide(self.selected,self.state['mappings'],self.guide['names']); programme=next((p for p in self.guide['programmes'] if p['channel']==key and p['start']<=now<p['end']),None)
+            key=self.matched_guide(self.selected); programme=next((p for p in self.guide['programmes'] if p['channel']==key and p['start']<=now<p['end']),None)
             if not programme:self.error('No current programme is mapped for this channel'); return
             end=programme['end']+self.state['settings']['padding_after']*60; title=programme['title']
         self.add_job(make_job(self.selected['id'],title,now,end,0,0))

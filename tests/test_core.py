@@ -61,6 +61,15 @@ class CoreTests(unittest.TestCase):
         self.assertEqual('Unspecified', parse_playlist(PLAYLIST.replace('group-title="UK"',''))[0]['country'])
 
 
+    def test_guide_lookup_is_equivalent_and_rejects_ambiguous_labels(self):
+        from dizytv.core import guide_lookup, match_guide
+        names={'bbc-north':'BBC One','bbc-south':'BBC One','bbc-two':'BBC Two HD'}
+        lookup=guide_lookup(names)
+        channel={'id':'a'*40,'tvg_id':'','name':'BBC One Ⓖ'}
+        self.assertEqual('',match_guide(channel,{},names,lookup))
+        channel['tvg_id']='bbc-two'
+        self.assertEqual('bbc-two',match_guide(channel,{},names,lookup))
+
     def test_freeview_uk_aliases_markers_and_regional_ambiguity(self):
         from dizytv.core import match_guide
         names={
