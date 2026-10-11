@@ -27,12 +27,12 @@ jobs:
       - name: Verify APK signature and checksum
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.1-alpha-android-universal-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.2-alpha-android-universal-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/*.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.1-alpha-android
+          name: DizyTV-0.1.2-alpha-android
           path: dist/
           if-no-files-found: error
           retention-days: 30
@@ -72,6 +72,27 @@ jobs:
         run: |
           $process = Start-Process dist/DizyTV/DizyTV.exe -ArgumentList '--smoke-test','--data-dir','smoke-packaged' -PassThru -Wait
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed to launch' }
+
+          # Regression: 0.1.1-style hidden recorder keeps the packaged EXE open.
+          # The upgrade helper must refuse an active job and stop only an idle worker.
+          $workerRoot = Join-Path $PWD 'smoke-upgrade'
+          $exePath = (Resolve-Path dist/DizyTV/DizyTV.exe).Path
+          New-Item -Path $workerRoot -ItemType Directory -Force | Out-Null
+          $worker = Start-Process -FilePath $exePath -ArgumentList @('--worker','--data-dir', ('"' + $workerRoot + '"')) -PassThru
+          Start-Sleep -Seconds 2
+          $worker.Refresh()
+          if ($worker.HasExited) { throw 'Recorder worker did not stay running' }
+          python -c "import time; from dizytv.storage import Store; from dizytv.core import make_job; s=Store(r'$workerRoot'); j=make_job('a'*40,'Future',int(time.time())+3600,int(time.time())+3700,0,0); j['status']='recording'; s.update(lambda state: state['jobs'].append(j))"
+          & powershell -NoProfile -NonInteractive -File scripts/windows-stop-worker.ps1 -InstalledExePath $exePath -DataDirectory $workerRoot
+          if ($LASTEXITCODE -ne 2) { throw 'Busy worker was not protected by installer check' }
+          $worker.Refresh()
+          if ($worker.HasExited) { throw 'Busy recorder must not be stopped' }
+          python -c "from dizytv.storage import Store; Store(r'$workerRoot').update(lambda s: s['jobs'][0].update(status='queued'))"
+          & powershell -NoProfile -NonInteractive -File scripts/windows-stop-worker.ps1 -InstalledExePath $exePath -DataDirectory $workerRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Idle recorder could not be stopped' }
+          $worker.WaitForExit(8000) | Out-Null
+          $worker.Refresh()
+          if (-not $worker.HasExited) { throw 'Recorder still holds installation executable' }
           & 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' scripts/windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
           Get-FileHash dist/*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS.txt
@@ -83,7 +104,7 @@ jobs:
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.1-alpha-${{ matrix.target }}
+          name: DizyTV-0.1.2-alpha-${{ matrix.target }}
           path: |
             dist/*.exe
             dist/*.pkg
@@ -102,7 +123,7 @@ jobs:
       - name: Download verified installers
         uses: actions/download-artifact@v4
         with:
-          pattern: DizyTV-0.1.1-alpha-*
+          pattern: DizyTV-0.1.2-alpha-*
           path: native-artifacts
       - name: Collect native files and generate release checksums
         shell: bash
@@ -111,10 +132,10 @@ jobs:
           mkdir -p release
           find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' \) -exec cp -- '{}' release/ \;
           for asset in \
-            DizyTV-Setup-0.1.1-alpha-windows-x64.exe \
-            DizyTV-0.1.1-alpha-android-universal-debug.apk \
-            DizyTV-0.1.1-alpha-macos-arm64.pkg \
-            DizyTV-0.1.1-alpha-macos-x86_64.pkg; do
+            DizyTV-Setup-0.1.2-alpha-windows-x64.exe \
+            DizyTV-0.1.2-alpha-android-universal-debug.apk \
+            DizyTV-0.1.2-alpha-macos-arm64.pkg \
+            DizyTV-0.1.2-alpha-macos-x86_64.pkg; do
             test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
           done
           test "$(find release -type f | wc -l)" -eq 4
@@ -126,13 +147,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.1.1-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'v0.1.1-alpha already exists; refusing to silently replace published binaries.'
+          if gh release view v0.1.2-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.2-alpha already exists; refusing to silently replace published binaries.'
             exit 0
           fi
-          gh release create v0.1.1-alpha release/* \
+          gh release create v0.1.2-alpha release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DizyTV 0.1.1 alpha — free TV source testing' \
+            --title 'DizyTV 0.1.2 alpha — Windows upgrade safety' \
             --prerelease \
-            --notes 'Early device-testing builds, not a stable release. Installers are direct .exe/.apk/.pkg files (no Actions ZIP and no GitHub login needed). Windows and macOS packages are not publicly trusted-signed/notarized, and the Android APK uses an ephemeral CI debug signing key; browser or operating-system warnings may still occur. For Android upgrades, uninstalling the previous build may be necessary (back up app settings first). Ace Stream engine and desktop VLC are separate prerequisites. Verify downloads using SHA256SUMS.txt. See the README and docs/DISTRIBUTION.md for requirements and known limitations.'
+            --notes 'Windows installer preflight now stops only a verified idle background DizyTV recorder and blocks updates during active/imminent recording; the 0.1.1 free IPTV/EPG sources remain available. Early device-testing builds, not a stable release. Installers are direct .exe/.apk/.pkg files (no Actions ZIP and no GitHub login needed). Windows and macOS packages are not publicly trusted-signed/notarized, and the Android APK uses an ephemeral CI debug signing key; browser or operating-system warnings may still occur. For Android upgrades, uninstalling the previous build may be necessary (back up app settings first). Ace Stream engine and desktop VLC are separate prerequisites. Verify downloads using SHA256SUMS.txt. See the README and docs/DISTRIBUTION.md for requirements and known limitations.'

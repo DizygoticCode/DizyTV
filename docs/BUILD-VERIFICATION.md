@@ -44,3 +44,7 @@ No review findings were deferred. Android's compile SDK was raised to 36 because
 - Concurrent multi-channel recording, catch-up, series recording or server recording.
 
 The Windows installer and Mac PKGs are unsigned development packages; the Mac app uses an ad-hoc signature. Android's debug signature verifies the build, rather than establishing a retained release/update identity. Licence notices/texts are packaged, but public redistribution/source-offer work and the owner-selected DizyTV source licence remain release tasks.
+
+## 0.1.2-alpha upgrade validation (pending CI and device confirmation)
+
+The 0.1.2 Windows upgrade preflight adds an isolated native Windows CI scenario: start the packaged detached worker, check that an active job blocks the upgrade helper without killing the worker, clear the job, and verify that the helper terminates the now-idle worker before installer creation. The existing 0.1.0 checks above are historical, not evidence for 0.1.2. Native CI and real install-over-0.1.1 still need confirmation. Mac and Android installers continue to be versioned independently; Windows and Android package signing limitations remain.

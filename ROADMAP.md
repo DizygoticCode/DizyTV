@@ -44,3 +44,7 @@ Simultaneous multi-channel recording, series recording, timeshift and catch-up/V
 ## Free playlist and XMLTV import (0.1.1-alpha)
 
 Implemented for Windows, macOS and Android: selectable public playlist URLs, source-aware refresh with last-good fallback, UK/US/free international preset sources, UK/US XMLTV guide presets and conservative EPG matching. Streams are user-accessed on-device without redistributing feeds. Stream validation, licensing review, stable Android release signing, Ace engine integration, Xtream Codes accounts, broader EPG guide collection and the self-hosted metadata service remain separate work.
+
+## Windows upgrade repair (0.1.2-alpha)
+
+Added Windows installer preflight for hidden DizyTV background recorder processes after the UI closes. Only exactly matched idle workers are terminated; active or near-due recordings prevent installation. Native Windows CI exercises this upgrade helper against a running packaged worker; physical-machine upgrade confirmation is still pending. Bundled Ace Stream engine, VLC binary distribution and Xtream credentials are **not** part of this installer-focused change.
