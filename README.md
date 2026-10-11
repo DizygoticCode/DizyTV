@@ -27,7 +27,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Current stage: native alpha development.** The repository now includes the Python catalogue/XMLTV core, native Qt desktop client, detached local recorder, portable backup format and automated tests. Android implementation and platform packaging are underway. No signed public release or deployed backend is claimed. Live engine playback, storage permissions and unattended recording still require real-device validation.
+> **Current stage: native alpha development.** The repository now includes the Python catalogue/XMLTV core, native Qt desktop client, detached local recorder, portable backup format and automated tests. Native Android source is included; Android compilation/lint is being checked. Windows and both Mac architectures have completed their first automated package/launch checks. No signed public release or deployed backend is claimed. Live engine playback, storage permissions and unattended recording still require real-device validation.
 
 ## Planned features
 
@@ -44,6 +44,7 @@
 | ⭐ **Favourites** | A persistent favourites list and favourites-only channel browser, preserved during catalogue refresh |
 | 📦 **Local backup / restore** | Save settings, channels, favourites, guide mappings and timers as a local JSON file; reselect storage and rearm restored timers |
 | 🌍 **Your timezone** | Automatic device detection, manual IANA timezone selection and an EPG offset; UTC timers stay fixed through daylight-saving changes |
+| 🗂️ **Country, genre & stream type** | Filter both channels and the EPG by metadata country, genre, TV/radio and Ace Stream/HTTP; XMLTV programme categories also inform genre filters |
 
 The first release targets **one recording at a time per device**. Same-channel viewing may share a session where supported; viewing another channel while recording needs engine validation. Instant recording starts from the available live stream and does not provide retrospective recording.
 

@@ -10,6 +10,19 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_country_genre_filter_also_filters_epg_rows(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory)
+            source='#EXTM3U\n#EXTINF:-1 tvg-country="GB" group-title="Sports",Sport\nacestream://'+'a'*40+'\n#EXTINF:-1 tvg-country="US" group-title="News",News\nacestream://'+'b'*40
+            store.update(lambda s:s.update(channels=parse_playlist(source)))
+            window=MainWindow(store,start_worker=False)
+            window.country_filter.setCurrentIndex(window.country_filter.findData('United Kingdom'))
+            window.genre_filter.setCurrentIndex(window.genre_filter.findData('Sport'))
+            self.assertEqual(1,window.channels.count())
+            self.assertEqual('Sport',window.grid.rows[0]['name'])
+            window.close()
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])

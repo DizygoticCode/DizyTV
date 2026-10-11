@@ -17,6 +17,43 @@ MAX_FEED = 32 * 1024 * 1024
 TERMINAL = {'completed', 'partial', 'failed', 'cancelled', 'missed'}
 ACTIVE = {'queued', 'starting', 'recording'}
 STATUSES = ACTIVE | TERMINAL | {'paused'}
+COUNTRIES = {'GB':'United Kingdom','UK':'United Kingdom','US':'United States','USA':'United States',
+             'CA':'Canada','AU':'Australia','NZ':'New Zealand','IE':'Ireland','FR':'France',
+             'DE':'Germany','ES':'Spain','IT':'Italy','PT':'Portugal','NL':'Netherlands',
+             'BE':'Belgium','CH':'Switzerland','AT':'Austria','PL':'Poland','CZ':'Czechia',
+             'SE':'Sweden','NO':'Norway','DK':'Denmark','FI':'Finland','GR':'Greece',
+             'TR':'Turkey','UA':'Ukraine','RU':'Russia','IN':'India','PK':'Pakistan',
+             'BR':'Brazil','MX':'Mexico','AR':'Argentina','JP':'Japan','CN':'China',
+             'KR':'South Korea','ZA':'South Africa','IL':'Israel','AE':'United Arab Emirates'}
+GENRES = [('Sport',r'sports?'),('News',r'news|current affairs'),('Movies',r'movies?|films?|cinema'),
+          ('Kids',r'kids|children|cartoons?'),('Music',r'music'),('Documentary',r'documentar(?:y|ies)|factual'),
+          ('Entertainment',r'entertainment'),('Education',r'education'),('General',r'general')]
+
+
+def normalise_genre(value):
+    for genre, pattern in GENRES:
+        if re.search(r'\b(?:'+pattern+r')\b',value,re.I):
+            return genre
+    return value.strip()[:512] or 'Unspecified'
+
+
+def channel_categories(attrs, stream):
+    group = attrs.get('group-title','')
+    explicit = attrs.get('tvg-country',attrs.get('country','')).strip()
+    country = COUNTRIES.get(explicit.upper(), explicit) if explicit else 'Unspecified'
+    if not explicit:
+        aliases = {**COUNTRIES, **{name:name for name in COUNTRIES.values()}}
+        for alias, name in sorted(aliases.items(),key=lambda pair:-len(pair[0])):
+            if re.search(r'(?<!\w)'+re.escape(alias)+r'(?!\w)',group,re.I):
+                country = name; break
+    genre = attrs.get('tvg-genre',attrs.get('genre','')).strip()
+    if not genre:
+        candidate = normalise_genre(group)
+        genre = candidate if candidate in {g for g,_ in GENRES} else 'Unspecified'
+    else:
+        genre = normalise_genre(genre)
+    return {'country':country,'genre':genre,'kind':'Radio' if attrs.get('radio','').lower() in ('true','1','yes') else 'TV',
+            'transport':'Ace Stream' if ace_id(stream) else 'HTTP'}
 
 
 def default_state():
@@ -79,7 +116,8 @@ def parse_playlist(text):
                 channels.append({'id': cid, 'name': (name or attrs.get('tvg-name') or cid)[:512],
                                  'group': attrs.get('group-title', '')[:512],
                                  'tvg_id': attrs.get('tvg-id', '')[:512],
-                                 'stream': 'acestream://' + aid if aid else line})
+                                 'stream': 'acestream://' + aid if aid else line,
+                                 **channel_categories(attrs,line)})
             attrs, name = {}, ''
     if not channels:
         raise ValueError('No supported channels found; cached catalogue was retained')
@@ -121,7 +159,8 @@ def parse_xmltv(text, offset_minutes=0):
                 continue
             programmes.append({'channel': node.get('channel'), 'start': start, 'end': end,
                                'title': node.findtext('title', 'Untitled')[:1024],
-                               'description': node.findtext('desc', '')[:8192]})
+                               'description': node.findtext('desc', '')[:8192],
+                               'categories':[c.text[:512] for c in node.findall('category') if c.text][:32]})
         except (KeyError, ValueError):
             continue
         if len(programmes) > 200000:
@@ -202,6 +241,9 @@ def validate_state(state):
         if not re.fullmatch('[a-f0-9]{40}', ch['id']) or ch['id'] in ids:
             raise ValueError('Duplicate or invalid channel identifier')
         ids.add(ch['id'])
+        for key in ('country','genre','kind','transport'):
+            if key in ch and (not isinstance(ch[key],str) or len(ch[key])>512):
+                raise ValueError('Invalid channel category')
         if not ace_id(ch['stream']):
             http_url(ch['stream'])
     if any(not isinstance(f, str) or not re.fullmatch('[a-f0-9]{40}', f) for f in state['favourites']):

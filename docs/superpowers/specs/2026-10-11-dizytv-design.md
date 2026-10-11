@@ -107,3 +107,7 @@ Each client has a persistent favourites list and a favourites-only channel filte
 Automatic device timezone is the default, with manual IANA timezone selection. An EPG offset in minutes corrects newly imported listings. Programme and timer instants remain UTC; DST, travel and display changes do not shift accepted recordings. Guide labels include the local timezone abbreviation so repeated clock-change hours are distinguishable.
 
 The desktop alpha uses a detached recording worker: closing the UI leaves it running. After a reboot users must reopen the app to restart it. Per-user auto-start/wake integration is a later validation gate. Android uses native exact-alarm permission and a visible foreground recording service; reboot recovery rechecks destination grants.
+
+## EPG country, genre and stream categories
+
+The channel browser and guide expose shared country, genre and stream-type filters. Country uses explicit playlist country metadata or recognized country tags in source groups; missing data stays Unspecified. Genre uses playlist groups/genre fields plus XMLTV programme categories. TV/radio and Ace Stream/HTTP are independent stream classifications. Channel names and languages are not treated as proof of country. Filters never alter saved timers or favourites.

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre)
 from .network import download
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
@@ -144,6 +144,9 @@ class MainWindow(QMainWindow):
         layout.addLayout(top)
         split=QSplitter(); layout.addWidget(split,1)
         sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
+        self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox()
+        for widget,label in ((self.country_filter,'All countries'),(self.genre_filter,'All genres'),(self.kind_filter,'All stream types')):
+            widget.addItem(label,''); widget.currentIndexChanged.connect(self.render_channels); side.addWidget(widget)
         self.favourites_only=QCheckBox('★ Favourites only'); self.favourites_only.toggled.connect(self.render_channels); side.addWidget(self.favourites_only)
         self.channels=QListWidget(); self.channels.currentItemChanged.connect(self.choose_channel); self.channels.itemDoubleClicked.connect(lambda:self.play()); side.addWidget(self.channels,1)
         for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel)]:
@@ -175,6 +178,7 @@ class MainWindow(QMainWindow):
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
         if start_worker:ensure_worker(self.store.directory)
+        if start_worker and not self.state['channels']:QTimer.singleShot(200,self.refresh_channels)
     def error(self,message):
         self.status.setText(message); QMessageBox.warning(self,'DizyTV',message)
     def load_guide(self):
@@ -185,9 +189,24 @@ class MainWindow(QMainWindow):
         except (OSError,ValueError):pass
     def render_channels(self,*_):
         previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); self.channels.blockSignals(True); self.channels.clear()
+        genre_by_id={}
+        for p in self.guide['programmes']:
+            genre_by_id.setdefault(p['channel'],set()).update(normalise_genre(v) for v in p.get('categories',[]))
+        for widget,key,label in ((self.country_filter,'country','All countries'),(self.genre_filter,'genre','All genres'),(self.kind_filter,'kind','All stream types')):
+            chosen=widget.currentData(); values={c.get(key,'TV' if key=='kind' else 'Unspecified') for c in self.state['channels']}
+            if key=='genre':values.update(g for genres in genre_by_id.values() for g in genres)
+            if key=='kind':values.update(c.get('transport','Ace Stream' if c['stream'].startswith('acestream:') else 'HTTP') for c in self.state['channels'])
+            widget.blockSignals(True); widget.clear(); widget.addItem(label,'')
+            for value in sorted(values):widget.addItem(value,value)
+            widget.setCurrentIndex(max(0,widget.findData(chosen))); widget.blockSignals(False)
         query=self.search.text().casefold(); favs=set(self.state['favourites'])
         for ch in self.state['channels']:
             if query not in (ch['name']+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
+            country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
+            if country and ch.get('country','Unspecified')!=country:continue
+            if kind and kind not in (ch.get('kind','TV'),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
+            key=self.state['mappings'].get(ch['id'],ch['tvg_id'])
+            if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
             item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+ch['name']); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
             if ch['id']==previous:self.channels.setCurrentItem(item)
         self.channels.blockSignals(False); self.render_guide()
@@ -200,7 +219,10 @@ class MainWindow(QMainWindow):
         self.now.setText(self.selected['name']+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else self.selected['name']+' — no guide match')
     def render_guide(self):
         channels=[self.channels.item(i).data(Qt.UserRole) for i in range(self.channels.count())]
-        self.grid.set_data(channels,self.guide['programmes'],self.state['mappings'],self.state['settings']['timezone'],self.guide_start)
+        genre=self.genre_filter.currentData()
+        source_genre_ids={self.state['mappings'].get(ch['id'],ch['tvg_id']) for ch in channels if ch.get('genre','Unspecified')==genre}
+        programmes=[p for p in self.guide['programmes'] if not genre or p['channel'] in source_genre_ids or genre in {normalise_genre(c) for c in p.get('categories',[])}]
+        self.grid.set_data(channels,programmes,self.state['mappings'],self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
     def move_guide(self,delta):
         self.guide_start=self.guide_start+delta if delta else int(time.time()/3600)*3600; self.render_guide()
@@ -234,7 +256,7 @@ class MainWindow(QMainWindow):
                 n,p=parse_xmltv(download(url),settings['epg_offset_minutes']); names.update(n); programmes.extend(p)
             return {'names':names,'programmes':sorted(programmes,key=lambda p:(p['channel'],p['start']))}
         def done(guide):
-            atomic_json(self.store.directory/'guide.json',guide); self.guide=guide; self.render_guide(); self.render_now(); self.status.setText(f"Imported {len(guide['programmes'])} programmes • accepted timers keep their UTC times")
+            atomic_json(self.store.directory/'guide.json',guide); self.guide=guide; self.render_channels(); self.render_now(); self.status.setText(f"Imported {len(guide['programmes'])} programmes • accepted timers keep their UTC times")
         self.async_task(fetch,done)
     def settings(self):
         dialog=Settings(self.store.read(),self)

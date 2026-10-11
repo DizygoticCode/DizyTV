@@ -23,6 +23,21 @@ XML = '''<?xml version="1.0"?><tv>
 
 
 class CoreTests(unittest.TestCase):
+    def test_country_genre_and_stream_categories(self):
+        source = f'#EXTM3U\n#EXTINF:-1 tvg-country="GB" group-title="Sports",Local Sport\nacestream://{ACE}\n#EXTINF:-1 tvg-country="US" radio="true" group-title="Music",Radio\nhttps://example.com/live.ts\n'
+        channels = parse_playlist(source)
+        self.assertEqual('United Kingdom', channels[0]['country'])
+        self.assertEqual('Sport', channels[0]['genre'])
+        self.assertEqual('TV', channels[0]['kind'])
+        self.assertEqual('Ace Stream', channels[0]['transport'])
+        self.assertEqual('United States', channels[1]['country'])
+        self.assertEqual('Radio', channels[1]['kind'])
+        self.assertEqual('Unspecified', parse_playlist(PLAYLIST.replace('group-title="UK"',''))[0]['country'])
+
+    def test_xmltv_preserves_programme_genres(self):
+        xml = XML.replace('<title>Clock change</title>','<title>Clock change</title><category>News</category><category>Current affairs</category>')
+        self.assertEqual(['News','Current affairs'], parse_xmltv(xml)[1][0]['categories'])
+
     def test_catalogue_stable_ids_deduplication(self):
         channels = parse_playlist(PLAYLIST)
         self.assertEqual(1, len(channels))
