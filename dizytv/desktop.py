@@ -119,7 +119,9 @@ class GuideGrid(QWidget):
             else:
                 record=menu.addAction('● Record now…')
                 record.triggered.connect(lambda checked=False,ch=channel:self.channel_record_requested.emit(ch))
-            menu.exec(event.globalPosition().toPoint())
+            # Popup is non-modal: don't stall the EPG event loop while it is open.
+            self.context_menu=menu
+            menu.popup(event.globalPosition().toPoint())
             event.accept()
             return
         return super().mousePressEvent(event)

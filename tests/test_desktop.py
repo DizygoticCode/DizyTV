@@ -2,7 +2,6 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import tempfile
 import unittest
-from unittest.mock import patch
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -66,16 +65,20 @@ class DesktopTests(unittest.TestCase):
             self.app.processEvents()
             window.grid.repaint()
             # Right-click opens menu; choosing Record must not play the stream.
-            with patch('dizytv.desktop.QMenu.exec',lambda menu,*args:menu.actions()[-1].trigger()):
-                QTest.mouseClick(window.grid,Qt.RightButton,Qt.NoModifier,QPoint(230,75))
+            QTest.mouseClick(window.grid,Qt.RightButton,Qt.NoModifier,QPoint(230,75))
+            actions=window.grid.context_menu.actions()
+            self.assertEqual('● Record programme…',actions[-1].text())
+            actions[-1].trigger()
             self.assertEqual([(ch['id'],'Current show')],scheduled)
             self.assertEqual([ch['id']],watched)
             # Right-click on a channel with no current programme can record now.
             window.guide={'names':{},'programmes':[]}
             window.render_channels()
             recorded_now=[]; window.record_now=lambda:recorded_now.append(window.selected['id'])
-            with patch('dizytv.desktop.QMenu.exec',lambda menu,*args:menu.actions()[-1].trigger()):
-                QTest.mouseClick(window.grid,Qt.RightButton,Qt.NoModifier,QPoint(25,75))
+            QTest.mouseClick(window.grid,Qt.RightButton,Qt.NoModifier,QPoint(25,75))
+            actions=window.grid.context_menu.actions()
+            self.assertEqual('● Record now…',actions[-1].text())
+            actions[-1].trigger()
             self.assertEqual([ch['id']],recorded_now)
             window.close()
 
