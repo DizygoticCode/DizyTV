@@ -18,15 +18,15 @@
 </p>
 
 > [!IMPORTANT]
-> **0.1.0 alpha is a development build.** The features below are implemented. Package checks run on native Windows/Mac hosts and Android CI; live Ace Stream playback, physical-device storage, unattended recording and installer upgrades still need device testing. Desktop packages are unsigned for public distribution; Android uses a debug key. See [verification and known limits](docs/BUILD-VERIFICATION.md).
+> **0.1.1 alpha is a development build.** The features below are implemented. Package checks run on native Windows/Mac hosts and Android CI; live Ace Stream playback, physical-device storage, unattended recording and installer upgrades still need device testing. Desktop packages are unsigned for public distribution; Android uses a debug key. See [verification and known limits](docs/BUILD-VERIFICATION.md).
 
 ## Features
 
 | Feature | Included in the native alpha |
 | --- | --- |
 | 📺 **Live TV** | Embedded libVLC player, channel search and now/next information |
-| 🔎 **Imported channels** | Automatic first import from the search-ace.stream playlist, refresh and last-good cache |
-| 🗓️ **XMLTV guide** | Programme grid, multiple XMLTV URLs and editable channel mappings |
+| 🔎 **Imported channels** | Five built-in free M3U sources: Ace directory, two UK playlists, USA playlist, and curated worldwide channels; individually configurable with per-source last-good fallback |
+| 🗓️ **XMLTV guide** | UK Freeview and US-lite XMLTV presets, automatic ID/unique-name mapping, manual overrides and periodic refresh |
 | 🗂️ **Country, genre & type** | Filter channels and EPG by country, genre, TV/radio and Ace Stream/HTTP; save category edits |
 | ⭐ **Favourites** | Persistent favourites and a favourites-only channel browser and guide |
 | ⏺️ **Record now** | Choose 30/60/120 minutes, the current programme's end, or manual stop with a 24-hour cap |
@@ -41,23 +41,23 @@ One recording runs at a time per device. The recorder saves the available live M
 
 ## Downloads
 
-**Direct native installers:** these links download the actual executable/package, **not a ZIP**. The `0.1.0-alpha` pre-release is for early device testing; installation, live playback and unattended recording still need real-world validation.
+**Direct native installers:** these links download the actual executable/package, **not a ZIP**. The `0.1.1-alpha` pre-release is for early device testing; installation, live playback and unattended recording still need real-world validation.
 
 | Platform | Direct download | Target |
 | --- | --- | --- |
-| **Windows** | [DizyTV Windows installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-Setup-0.1.0-alpha-windows-x64.exe) | x64 |
-| **Android** | [DizyTV Android installer (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-android-universal-debug.apk) | Android 8+ / API 26+ |
-| **MacBook / Apple Silicon** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-arm64.pkg) | macOS 13+ / arm64 |
-| **MacBook / Intel** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-x86_64.pkg) | macOS 13+ / x86_64 |
+| **Windows** | [DizyTV Windows installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-Setup-0.1.1-alpha-windows-x64.exe) | x64 |
+| **Android** | [DizyTV Android installer (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-0.1.1-alpha-android-universal-debug.apk) | Android 8+ / API 26+ |
+| **MacBook / Apple Silicon** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-0.1.1-alpha-macos-arm64.pkg) | macOS 13+ / arm64 |
+| **MacBook / Intel** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-0.1.1-alpha-macos-x86_64.pkg) | macOS 13+ / x86_64 |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-Setup-0.1.0-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-Setup-0.1.1-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-0.1.1-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-0.1.1-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/DizyTV-0.1.1-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
 </p>
 
-[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/SHA256SUMS.txt) · [Native CI evidence](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Build checks](docs/BUILD-VERIFICATION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.1-alpha/SHA256SUMS.txt) · [Native CI evidence](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Build checks](docs/BUILD-VERIFICATION.md)
 
 **Browser/security note:** Direct asset links solve the Actions ZIP/sign-in/expiry problem, **not** security reputation. The Windows installer is unsigned, the Mac PKGs are not Developer ID signed/notarized, and Android is signed with a build-specific CI debug key. Chrome, SmartScreen, Gatekeeper or Android may still warn or block a download/install. Do not disable security software to install DizyTV; see [distribution guidance](docs/DISTRIBUTION.md) and check the published checksum. Android test builds may require uninstalling before an update because the debug signing key is not retained. Back up settings first.
 
@@ -66,17 +66,17 @@ One recording runs at a time per device. The recorder saves the available live M
 1. Install DizyTV for your platform.
 2. **Windows:** install VLC 3 x64 and separately install/open Ace Stream. **Android:** separately install/open the engine; libVLC is included in the APK.
 3. **Mac:** install VLC 3 for the app's CPU architecture and configure a reachable Windows/Linux Ace Stream engine in Settings. The PKG includes the native Mac client and does not include a Mac engine.
-4. Let channels import. Add XMLTV URLs in **Settings**, press **Refresh guide**, and use **Map EPG** for unmatched channels.
+4. Let the default free playlists import on first launch. UK Freeview and US-lite XMLTV guide URLs are preconfigured; refresh the guide and use **Map EPG** when a name is ambiguous or no programme data exists. You can enable/disable any playlist or guide URL in **Settings**.
 5. Choose your recording folder and leave timezone on **auto**, or choose an IANA zone. Android also needs exact-alarm access when scheduling and permission for recording notifications.
 6. Use country/genre/type filters and favourites. **Edit categories** fills gaps in source metadata; **Use source categories** clears an edit.
 
 ## Channels and the guide
 
-Import uses the [documented playlist export](https://search-ace.stream/doc). Stable stream IDs preserve favourites, manual mappings and category edits during refreshes. The feed is imported on the device; no dataset is bundled.
+DizyTV imports several public playlists directly on the device: [search-ace.stream](https://search-ace.stream/doc), [Free-TV UK / worldwide](https://github.com/Free-TV/IPTV), and [IPTV-org UK / US](https://github.com/iptv-org/iptv). An optional, much larger IPTV-org worldwide index can be added to Settings. Each source refreshes independently; a failed source retains its cached entries. Identical stream identifiers/URLs are deduplicated, and stable IDs preserve favourites, mappings and category edits across refreshes. No channel dataset is bundled. Public links can be broken, geo-restricted, or subject to broadcaster access requirements.
 
 Country filters use explicit M3U metadata, recognised country groups and bracketed country tags such as `[RU]` and `[UK]`. Genres use source metadata and mapped XMLTV programme categories. TV/radio follows source metadata or saved edits; transport follows the stream. Missing metadata appears as **Unspecified**. Quality tags such as `[HD]` are not countries.
 
-XMLTV URLs are configurable because one global feed may not cover every channel or regional variant. Times are parsed into UTC and displayed locally; channels can play without a guide match. Listings do not establish stream availability or distribution rights.
+Built-in guide URLs point to [Freeview-EPG](https://github.com/dp247/Freeview-EPG) (UK) and [EPGTalk](https://github.com/acidjesuz/EPGTalk) (US lite). These are public third-party services queried directly by the app, not copied or redistributed in the release. Guide refresh runs automatically on initial use and periodically on desktop; Android supports manual refresh. Matching is exact by TVG-ID or by a unique normalized name; ambiguous regional variants require manual mapping. Times are parsed into UTC and displayed locally; channels can play without a guide match. Listings do not establish stream availability or distribution rights.
 
 ## Recording and backups
 
