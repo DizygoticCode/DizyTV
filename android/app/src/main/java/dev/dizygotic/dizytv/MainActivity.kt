@@ -284,11 +284,31 @@ class MainActivity:Activity() {
     private fun refreshGuide() {
         if(refreshing) return; val settings=store.read().getJSONObject("settings"); val urls=Domain.strings(settings.getJSONArray("xmltv_urls")); require(urls.isNotEmpty()) { "Add XMLTV source URLs in Settings" }
         refreshing=true; status.text="Importing XMLTV…"
-        executor.execute { val result=runCatching {
-            val names=JSONObject(); val programmes=JSONArray()
-            for(url in urls) { val data=Feeds.xmltv(Feeds.download(url),settings.getInt("epg_offset_minutes")); data.getJSONObject("names").keys().forEach { names.put(it,data.getJSONObject("names").get(it)) }; Domain.objects(data.getJSONArray("programmes")).forEach { programmes.put(it) } }
-            JSONObject().put("names",names).put("programmes",programmes)
-        }; handler.post { refreshing=false; result.onSuccess { fresh->attempt { JsonCache.write(File(filesDir,"guide.json"),fresh.toString()); guide=fresh; status.text="Imported ${fresh.getJSONArray("programmes").length()} programmes • saved UTC timers unchanged"; render() } }.onFailure { status.text="Guide refresh failed; cache retained: ${it.message}" } } }
+        executor.execute {
+            val result=runCatching {
+                val names=JSONObject(); val programmes=JSONArray(); var ok=0; var failed=0
+                for(url in urls) {
+                    try {
+                        val data=Feeds.xmltv(Feeds.download(url),settings.getInt("epg_offset_minutes"))
+                        val sourceNames=data.getJSONObject("names")
+                        sourceNames.keys().forEach { names.put(it,sourceNames.get(it)) }
+                        Domain.objects(data.getJSONArray("programmes")).forEach { programmes.put(it) }
+                        ok++
+                    } catch(_:Exception) { failed++ }
+                }
+                require(ok>0) { "All ${urls.size} guide sources failed; cached guide retained" }
+                Pair(JSONObject().put("names",names).put("programmes",programmes),failed)
+            }
+            handler.post {
+                refreshing=false
+                result.onSuccess { (fresh,failed)->attempt {
+                    JsonCache.write(File(filesDir,"guide.json"),fresh.toString())
+                    guide=fresh
+                    status.text="Imported ${fresh.getJSONArray("programmes").length()} programmes • ${failed} source(s) failed • UTC timers unchanged"
+                    render()
+                } }.onFailure { status.text="Guide refresh failed; cache retained: ${it.message}" }
+            }
+        }
     }
     @Deprecated("Native document picker compatibility")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
