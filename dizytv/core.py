@@ -321,7 +321,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
