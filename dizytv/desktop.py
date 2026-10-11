@@ -22,6 +22,7 @@ from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready
+from .timeshift import RollingTimeshift
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -131,7 +132,11 @@ class GuideGrid(QWidget):
 class Settings(QDialog):
     def __init__(self,state,parent):
         super().__init__(parent); self.setWindowTitle('DizyTV settings'); self.resize(690,640)
-        self.original=state['settings'].copy(); form=QFormLayout(self)
+        self.original=state['settings'].copy()
+        root=QVBoxLayout(self)
+        page=QWidget(self); form=QFormLayout(page)
+        scroll=QScrollArea(self);scroll.setWidgetResizable(True);scroll.setWidget(page)
+        root.addWidget(scroll,1)
         self.playlists=QPlainTextEdit('\n'.join(configured_playlists(self.original)))
         self.playlists.setPlaceholderText('One M3U playlist URL per line; remove a line to disable that source')
         self.playlists.setMaximumHeight(125); form.addRow('Channel playlists',self.playlists)
@@ -151,8 +156,34 @@ class Settings(QDialog):
         self.folder=QLineEdit(self.original['recording_dir']); self.folder.setReadOnly(True); pick=QPushButton('Choose folder'); pick.clicked.connect(self.pick_folder)
         layout.addWidget(self.folder); layout.addWidget(pick); form.addRow('Local recording folder',row)
         self.reserve=QDoubleSpinBox(); self.reserve.setRange(0,10000); self.reserve.setValue(self.original['reserve_bytes']/1024**3); self.reserve.setSuffix(' GiB'); form.addRow('Keep free space',self.reserve)
+        self.timeshift_enabled=QCheckBox('Keep a temporary on-device rolling buffer while watching')
+        self.timeshift_enabled.setChecked(self.original.get('timeshift_enabled',False))
+        form.addRow('Live pause / rewind (opt-in)',self.timeshift_enabled)
+        self.timeshift_minutes=QSpinBox()
+        self.timeshift_minutes.setRange(1,240)
+        self.timeshift_minutes.setValue(self.original.get('timeshift_minutes',30))
+        self.timeshift_minutes.setSuffix(' minutes (max 240)')
+        form.addRow('Rolling buffer duration',self.timeshift_minutes)
+        self.timeshift_limit=QDoubleSpinBox()
+        self.timeshift_limit.setRange(.25,32)
+        self.timeshift_limit.setDecimals(2)
+        self.timeshift_limit.setSingleStep(.25)
+        self.timeshift_limit.setValue(self.original.get('timeshift_max_bytes',4*1024**3)/1024**3)
+        self.timeshift_limit.setSuffix(' GiB')
+        form.addRow('Rolling buffer storage cap',self.timeshift_limit)
+        ts_row=QWidget(); ts_layout=QHBoxLayout(ts_row);ts_layout.setContentsMargins(0,0,0,0)
+        self.timeshift_folder=QLineEdit(self.original.get('timeshift_dir',''))
+        self.timeshift_folder.setReadOnly(True)
+        self.timeshift_folder.setPlaceholderText('App data folder on this device')
+        ts_button=QPushButton('Choose folder')
+        ts_button.clicked.connect(self.pick_timeshift_folder)
+        ts_layout.addWidget(self.timeshift_folder);ts_layout.addWidget(ts_button)
+        form.addRow('Temporary buffer location',ts_row)
+        warning=QLabel('Timeshift requires available disk space and clear MPEG-TS or TS/HLS video. This is NOT a saved recording. The oldest data is automatically discarded; the buffer is deleted when playback stops. Encrypted/fMP4 streams fall back to live playback.')
+        warning.setWordWrap(True)
+        form.addRow(warning)
         note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
-        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
@@ -160,20 +191,27 @@ class Settings(QDialog):
     def pick_folder(self):
         folder=QFileDialog.getExistingDirectory(self,'Recording destination',self.folder.text())
         if folder:self.folder.setText(folder)
+    def pick_timeshift_folder(self):
+        folder=QFileDialog.getExistingDirectory(self,'Temporary timeshift folder',self.timeshift_folder.text())
+        if folder:self.timeshift_folder.setText(folder)
     def values(self):
         urls=list(dict.fromkeys(u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()))
         if not urls:raise ValueError('Add at least one channel playlist URL')
         return dict(self.original,playlist_url=urls[0],playlist_urls=urls,engine_url=self.engine.text().strip(),
                     xmltv_urls=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()],timezone=self.zone.currentData(),
                     epg_offset_minutes=self.offset.value(),padding_before=self.before.value(),padding_after=self.after.value(),
-                    reserve_bytes=int(self.reserve.value()*1024**3),recording_dir=self.folder.text())
+                    reserve_bytes=int(self.reserve.value()*1024**3),recording_dir=self.folder.text(),
+                    timeshift_enabled=self.timeshift_enabled.isChecked(),
+                    timeshift_minutes=self.timeshift_minutes.value(),
+                    timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
+                    timeshift_dir=self.timeshift_folder.text())
 
 
 class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None
+        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
         self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
@@ -480,10 +518,11 @@ class MainWindow(QMainWindow):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
         if self.player and self.playback_started:
-            seekable=bool(self.player.is_seekable())
+            local_active=self.timeshift is not None and bool(self.timeshift.window.snapshot())
+            seekable=bool(self.player.is_seekable()) or local_active
             length=self.player.get_length()
             position=self.player.get_time()
-            self.seek_slider.setEnabled(seekable and length>0)
+            self.seek_slider.setEnabled(local_active or (seekable and length>0))
             if seekable and length>0 and position>=0 and not self.seek_slider.isSliderDown():
                 self.seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
             if self.screen_seek_slider is not None:
@@ -492,7 +531,13 @@ class MainWindow(QMainWindow):
                     self.screen_seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
             self.rewind_button.setEnabled(seekable)
             self.pause_button.setEnabled(seekable)
-            self.seek_notice.setText('DVR window available — pause, rewind or scrub' if seekable else 'LIVE — no time-shift window reported by this stream')
+            if local_active:
+                available=self.timeshift.window.latest_seconds()
+                self.seek_notice.setText('Device buffer: '+str(int(available//60))+' min cached of '+str(self.timeshift.window.minutes)+' min / '+str(round(self.timeshift.window.total/1024**3,2))+' GiB; max '+str(round(self.timeshift.window.max_bytes/1024**3,1))+' GiB')
+                if not self.seek_slider.isSliderDown():
+                    self.seek_slider.setValue(max(0,1000-int(self.timeshift_lag/max(1,available)*1000)))
+            else:
+                self.seek_notice.setText('DVR window available' if seekable else 'LIVE — no local time-shift enabled')
         if self.player and self.playback_started and not self.playback_reported:
             state=str(self.player.get_state())
             if state.endswith('.Playing'):
@@ -644,6 +689,54 @@ class MainWindow(QMainWindow):
         if not QDesktopServices.openUrl(QUrl('https://docs.acestream.net/products/')):
             self.error('Could not open the official Ace Stream products page in your browser.')
 
+    def close_timeshift(self):
+        prior=self.timeshift
+        self.timeshift=None
+        self.timeshift_task=None
+        self.timeshift_lag=0
+        if prior:
+            prior.close()
+
+    def play_stream(self,url):
+        # Capture/loopback starts off the GUI thread; unsupported sources fail
+        # open to ordinary live video. No cache is created unless opted in.
+        self.close_timeshift()
+        settings=self.state['settings']
+        if not settings.get('timeshift_enabled',False):
+            self.play_url(url)
+            return
+        folder=settings.get('timeshift_dir') or str(self.store.directory/'timeshift')
+        try:
+            session=RollingTimeshift(
+                url,folder,settings.get('timeshift_minutes',30),
+                settings.get('timeshift_max_bytes',4*1024**3),
+                max(1024**3,settings.get('reserve_bytes',1024**3)))
+        except (OSError,ValueError) as exc:
+            self.status.setText('Timeshift unavailable: '+str(exc)+' — watching live')
+            self.play_url(url)
+            return
+        self.timeshift=session
+        self.status.setText('Preparing temporary local timeshift buffer…')
+        job=Task(session.start)
+        self.timeshift_task=job
+        def ready(local_url):
+            if self.timeshift is not session:
+                session.close()
+                return
+            self.timeshift_task=None
+            self.play_url(local_url)
+            self.seek_notice.setText('Temporary on-device timeshift is recording; up to '+str(session.window.minutes)+' minutes')
+        def failed(message):
+            if self.timeshift is not session:return
+            self.timeshift=None
+            self.timeshift_task=None
+            session.close()
+            self.play_url(url)
+            self.seek_notice.setText('Timeshift unavailable ('+message+'); playing original stream')
+        job.signals.success.connect(ready)
+        job.signals.failure.connect(failed)
+        self.pool.start(job)
+
     def play(self):
         if not self.selected:return
         active=[j for j in self.store.read()['jobs'] if j['status']=='recording' and j['channel_id']!=self.selected['id']]
@@ -659,7 +752,7 @@ class MainWindow(QMainWindow):
             def ready(_):
                 self.engine_task=None
                 if self.selected and self.selected['id']==ch['id']:
-                    self.play_url(url)
+                    self.play_stream(url)
             def failed(message):
                 self.engine_task=None
                 self.status.setText('Ace Stream unavailable: '+message)
@@ -667,7 +760,7 @@ class MainWindow(QMainWindow):
             self.pool.start(task)
         else:
             # Ordinary HTTP/HLS streams play without the Ace Stream engine.
-            self.play_url(url)
+            self.play_stream(url)
     def eventFilter(self,obj,event):
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
@@ -678,6 +771,15 @@ class MainWindow(QMainWindow):
         if self.player:self.player.audio_set_volume(volume)
 
     def seek_from_slider(self):
+        if self.timeshift is not None:
+            available=self.timeshift.window.latest_seconds()
+            lag=available*(1000-self.seek_slider.value())/1000
+            try:
+                self.play_url(self.timeshift.replay_url(lag))
+                self.timeshift_lag=lag
+                self.seek_notice.setText('Playing cached live TV, ~'+str(int(lag))+'s behind live')
+            except RuntimeError as exc:self.seek_notice.setText(str(exc))
+            return
         if self.player and self.player.is_seekable() and self.player.get_length()>0:
             position=max(0,min(1000,self.seek_slider.value()))
             self.player.set_time(self.player.get_length()*position//1000)
@@ -693,8 +795,8 @@ class MainWindow(QMainWindow):
         if not self.player or not self.playback_started:
             self.status.setText('Select and play a channel first.')
             return
-        if not self.player.is_seekable():
-            self.seek_notice.setText('This live source has no seekable DVR window. Full rolling local timeshift is not enabled for it.')
+        if not self.timeshift and not self.player.is_seekable():
+            self.seek_notice.setText('This source has no seekable DVR window. Enable on-device timeshift in Settings.')
             return
         paused=bool(self.player.get_state()==__import__('vlc').State.Paused)
         self.player.set_pause(0 if paused else 1)
@@ -702,7 +804,17 @@ class MainWindow(QMainWindow):
         self.status.setText('Playback resumed' if paused else 'Live TV paused in the available DVR window')
 
     def seek_relative(self,delta_ms):
-        if not self.player or not self.playback_started or not self.player.is_seekable():
+        if not self.player or not self.playback_started:return
+        if self.timeshift is not None:
+            seconds_back=max(0,self.timeshift_lag)+abs(delta_ms)/1000
+            try:
+                self.play_url(self.timeshift.replay_url(seconds_back))
+                self.timeshift_lag=seconds_back
+                self.seek_notice.setText('Playing from device cache, about '+str(int(seconds_back))+' seconds behind LIVE')
+            except (ValueError,RuntimeError) as exc:
+                self.seek_notice.setText('Rewind not ready: '+str(exc))
+            return
+        if not self.player.is_seekable():
             self.seek_notice.setText('Rewind is unavailable: this stream has no seekable DVR window.')
             return
         current=self.player.get_time()
@@ -717,6 +829,11 @@ class MainWindow(QMainWindow):
 
     def jump_to_live(self):
         if not self.player or not self.playback_started:return
+        if self.timeshift is not None:
+            self.play_url(self.timeshift.live_url())
+            self.timeshift_lag=0
+            self.seek_notice.setText('LIVE — playing most recently cached stream')
+            return
         if self.player.is_seekable() and self.player.get_length()>0:
             self.player.set_time(max(0,self.player.get_length()-1000))
             self.player.set_pause(0)
@@ -837,11 +954,12 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def stop_playback(self):
+        if self.player:self.player.stop()
+        self.close_timeshift()
         self.playback_started=0
         self.seek_slider.setEnabled(False)
         self.rewind_button.setEnabled(False)
         self.pause_button.setEnabled(False)
-        if self.player:self.player.stop()
     def add_job(self,job):
         def change(s):
             if not s['settings']['recording_dir'] or not Path(s['settings']['recording_dir']).is_dir():raise ValueError('Choose an available recording folder in Settings first')

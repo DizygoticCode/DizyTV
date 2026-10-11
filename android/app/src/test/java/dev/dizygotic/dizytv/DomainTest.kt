@@ -21,6 +21,22 @@ class DomainTest {
         assertEquals("Radio",Domain.section(JSONObject().put("genre","Music").put("name","Radio 1").put("kind","Radio")))
     }
 
+    @Test fun timeshiftSettingsBoundedAndBackwardsCompatible() {
+        val state=Domain.defaults()
+        val settings=state.getJSONObject("settings")
+        assertFalse(settings.getBoolean("timeshift_enabled"))
+        settings.put("timeshift_enabled",true).put("timeshift_minutes",240)
+            .put("timeshift_max_bytes",32L*1024*1024*1024)
+        Domain.validate(state)
+        settings.put("timeshift_minutes",241)
+        try { Domain.validate(state);fail("Expected limit validation") }
+        catch(_:IllegalArgumentException) {}
+        settings.remove("timeshift_minutes")
+        settings.remove("timeshift_max_bytes")
+        settings.remove("timeshift_enabled")
+        Domain.validate(state)
+    }
+
     @Test fun freeviewGuideAliasesKeepRegionalVariantsUnambiguous() {
         val names=JSONObject().put("BBCTwoHD.uk","BBC Two HD").put("BBCFourHD.uk","BBC Four HD")
             .put("5.uk","5 HD").put("BBCOneSouth.uk","BBC One South HD")

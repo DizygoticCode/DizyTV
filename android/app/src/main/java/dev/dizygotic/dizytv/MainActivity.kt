@@ -32,6 +32,11 @@ class MainActivity:Activity() {
     private lateinit var store:DeviceStore; private lateinit var body:LinearLayout; private lateinit var status:TextView
     private lateinit var zoneLabel:TextView; private lateinit var lib:LibVLC; private lateinit var player:MediaPlayer
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
+    private var timeshift:DeviceTimeshift?=null
+    private var pendingTimeshift:DeviceTimeshift?=null
+    private var timeshiftGeneration=0
+    private var timeshiftLag=0.0
+    private var timeshiftPausedAt=0L
     private lateinit var brandRow:LinearLayout; private lateinit var mainNav:HorizontalScrollView
     private var cinemaMode=false; private var screenMode=false
     private var seekBar:SeekBar?=null; private var seekInfo:TextView?=null
@@ -40,10 +45,22 @@ class MainActivity:Activity() {
             if(page=="Live") {
                 val length=player.length
                 val current=player.time
-                seekBar?.isEnabled=player.isSeekable && length>0
-                if(length>0 && current>=0) seekBar?.progress=((current.coerceAtMost(length)*1000L)/length).toInt()
-                seekInfo?.text=if(player.isSeekable) "DVR position: ${current.coerceAtLeast(0)/1000}s / ${length.coerceAtLeast(0)/1000}s"
-                                   else "LIVE • No rewind buffer available for this stream"
+                val cached=timeshift
+                val available=cached?.ring?.availableSeconds()?:0.0
+                seekBar?.isEnabled=(cached!=null && available>0) || (player.isSeekable && length>0)
+                if(cached!=null) {
+                    if(timeshiftPausedAt>0) {
+                        timeshiftLag+=(System.currentTimeMillis()-timeshiftPausedAt)/1000.0
+                        timeshiftPausedAt=System.currentTimeMillis()
+                    }
+                    seekBar?.progress=(1000.0*(1.0-timeshiftLag/maxOf(1.0,available))).toInt().coerceIn(0,1000)
+                    seekInfo?.text="On-device buffer: "+(available/60).toInt()+" / "+cached.ring.minutes+
+                        " min • "+(cached.ring.currentBytes()/1024/1024)+" MiB; oldest video expires automatically"
+                } else {
+                    if(length>0 && current>=0) seekBar?.progress=((current.coerceAtMost(length)*1000L)/length).toInt()
+                    seekInfo?.text=if(player.isSeekable) "DVR position: "+(current.coerceAtLeast(0)/1000)+"s / "+(length.coerceAtLeast(0)/1000)+"s"
+                        else "LIVE • Enable local timeshift in Settings to pause/rewind"
+                }
             }
             handler.postDelayed(this,1200)
         }
@@ -93,8 +110,14 @@ class MainActivity:Activity() {
         refreshChannels()
     }
     override fun onResume() { super.onResume(); attempt { Scheduler.recover(this) }; handler.post(ticker) }
-    override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
-    override fun onDestroy() { handler.removeCallbacks(playbackTicker); handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); super.onDestroy() }
+    override fun onPause() {
+        handler.removeCallbacks(ticker)
+        // Never spool video secretly while the viewing Activity is in the background.
+        if(timeshift!=null || pendingTimeshift!=null)player.stop()
+        clearTimeshift()
+        super.onPause()
+    }
+    override fun onDestroy() { clearTimeshift();handler.removeCallbacks(playbackTicker); handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); super.onDestroy() }
     private fun updateZone():Boolean {
         val zone=store.read().getJSONObject("settings").getString("timezone")
         val effective=Domain.zone(zone); val key=effective.id+effective.rules.getOffset(Instant.now()).id; val changed=key!=displayedZone; displayedZone=key
@@ -143,6 +166,10 @@ class MainActivity:Activity() {
         }; return column
     }
     private fun render() {
+        if(page!="Live" && (timeshift!=null || pendingTimeshift!=null)) {
+            player.stop()
+            clearTimeshift()
+        }
         player.detachViews(); video=null; seekBar=null; seekInfo=null; body.removeAllViews(); updateZone()
         brandRow.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         mainNav.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
@@ -252,7 +279,15 @@ class MainActivity:Activity() {
         scrub.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seekBar:SeekBar?){}
             override fun onStopTrackingTouch(seekBar:SeekBar?) {
-                if(player.isSeekable && player.length>0 && seekBar!=null) player.time=player.length*seekBar.progress/1000L
+                val cached=timeshift
+                if(cached!=null && seekBar!=null) {
+                    val lag=cached.ring.availableSeconds()*(1000-seekBar.progress)/1000.0
+                    runCatching {
+                        playMediaUrl(selected?:return@runCatching,store.read(),false,cached.replayUrl(lag))
+                        timeshiftLag=lag
+                    }.onFailure { status.text="Timeshift seek unavailable: "+it.message }
+                } else if(player.isSeekable && player.length>0 && seekBar!=null)
+                    player.time=player.length*seekBar.progress/1000L
             }
             override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean){}
         })
@@ -268,7 +303,7 @@ class MainActivity:Activity() {
         volumeBar.addView(volume,LinearLayout.LayoutParams(0,dp(44),1f));body.addView(volumeBar)
         if(!compact) {
             val more=row()
-            more.addView(button("■ Stop") { player.stop() })
+            more.addView(button("■ Stop") { player.stop(); clearTimeshift() })
             more.addView(button("● Record now") { recordNow() })
             more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } })
             more.addView(button("Map EPG") { mapChannel() })
@@ -290,17 +325,41 @@ class MainActivity:Activity() {
         page="Live";render()
     }
     private fun pauseLive() {
-        if(!player.isSeekable) {
-            status.text="Live pause unavailable on this stream: no DVR buffer"
+        if(timeshift==null && !player.isSeekable) {
+            status.text="Live pause is unavailable: enable on-device timeshift in Settings"
             return
         }
-        if(player.isPlaying)player.pause() else player.play()
+        if(player.isPlaying) {
+            player.pause()
+            if(timeshift!=null) timeshiftPausedAt=System.currentTimeMillis()
+            status.text="Paused • local capture continues within your storage limit"
+        } else {
+            player.play()
+            timeshiftPausedAt=0L
+        }
     }
     private fun rewindLive() {
-        if(!player.isSeekable || player.time<0) { status.text="This live stream has no rewindable DVR window"; return }
+        val cached=timeshift
+        if(cached!=null) {
+            val lag=timeshiftLag+30
+            runCatching {
+                playMediaUrl(selected?:return@runCatching,store.read(),false,cached.replayUrl(lag))
+                timeshiftLag=lag
+                timeshiftPausedAt=0L
+            }.onFailure { status.text="Rewind not ready: "+it.message }
+            return
+        }
+        if(!player.isSeekable || player.time<0) { status.text="This stream has no rewindable DVR window"; return }
         player.time=(player.time-30000L).coerceAtLeast(0L)
     }
     private fun jumpLive() {
+        val cached=timeshift
+        if(cached!=null) {
+            selected?.let { playMediaUrl(it,store.read(),false,cached.liveUrl) }
+            timeshiftLag=0.0
+            timeshiftPausedAt=0L
+            return
+        }
         if(player.isSeekable && player.length>0L) {
             player.time=(player.length-1000L).coerceAtLeast(0L);player.play()
         } else play()
@@ -393,8 +452,58 @@ class MainActivity:Activity() {
             startMedia(ch,s,isAce=false)
         }
     }
+    private fun clearTimeshift() {
+        timeshiftGeneration++
+        pendingTimeshift?.close()
+        pendingTimeshift=null
+        timeshift?.close()
+        timeshift=null
+        timeshiftLag=0.0
+        timeshiftPausedAt=0L
+    }
     private fun startMedia(ch:JSONObject,s:JSONObject,isAce:Boolean) {
-        val media=Media(lib,Uri.parse(Domain.stream(ch,s.getJSONObject("settings"))))
+        clearTimeshift()
+        val source=Domain.stream(ch,s.getJSONObject("settings"))
+        val settings=s.getJSONObject("settings")
+        if(!settings.optBoolean("timeshift_enabled",false)) {
+            playMediaUrl(ch,s,isAce,source)
+            return
+        }
+        val generation=timeshiftGeneration
+        val candidate=runCatching {
+            DeviceTimeshift(source,File(cacheDir,"timeshift"),settings.optInt("timeshift_minutes",30),
+                           settings.optLong("timeshift_max_bytes",4L*1024*1024*1024),
+                           settings.optLong("reserve_bytes",1024L*1024*1024))
+        }.getOrElse {
+            status.text="Timeshift unavailable: "+it.message
+            playMediaUrl(ch,s,isAce,source)
+            return
+        }
+        pendingTimeshift=candidate
+        status.text="Preparing on-device temporary timeshift buffer…"
+        executor.execute {
+            val result=runCatching { candidate.start() }
+            handler.post {
+                if(generation!=timeshiftGeneration || pendingTimeshift!==candidate ||
+                   selected?.optString("id")!=ch.getString("id") || page!="Live") {
+                    candidate.close()
+                    return@post
+                }
+                pendingTimeshift=null
+                result.onSuccess {
+                    timeshift=candidate
+                    playMediaUrl(ch,s,isAce,it)
+                    status.text="Local rolling buffer active (up to "+candidate.ring.minutes+" min)"
+                }.onFailure {
+                    candidate.close()
+                    playMediaUrl(ch,s,isAce,source)
+                    status.text="Timeshift source not supported ("+it.message+"); playing live"
+                }
+            }
+        }
+    }
+    private fun playMediaUrl(ch:JSONObject,s:JSONObject,isAce:Boolean,source:String) {
+        val media=Media(lib,Uri.parse(source))
         player.media=media; media.release(); player.play()
         val guideKey=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
         indexGuide()
@@ -402,7 +511,8 @@ class MainActivity:Activity() {
         val current=indexedProgrammes[guideKey].orEmpty().firstOrNull { it.getLong("start")<=now && it.getLong("end")>now }
         android.widget.Toast.makeText(this,Domain.displayName(ch.getString("name"))+
             (current?.let { " — Now: "+it.getString("title") }?:" — LIVE"),android.widget.Toast.LENGTH_LONG).show()
-        status.text=if(isAce) "Connecting to Ace Stream…" else "Connecting to HTTP/HLS stream…"
+        status.text=if(source.startsWith("http://127.0.0.1:") && timeshift!=null) "Playing local rolling timeshift…"
+            else if(isAce) "Connecting to Ace Stream…" else "Connecting to HTTP/HLS stream…"
         val channelId=ch.getString("id")
         handler.postDelayed({
             if(selected?.optString("id")==channelId && page=="Live" && !player.isPlaying)
@@ -538,15 +648,28 @@ class MainActivity:Activity() {
         field("epg_offset_minutes","EPG correction in minutes (new imports only)",original.getInt("epg_offset_minutes").toString())
         field("padding_before","Minutes before programme",original.getInt("padding_before").toString()); field("padding_after","Minutes after programme",original.getInt("padding_after").toString())
         field("reserve_bytes","Free-space reserve in bytes",original.getLong("reserve_bytes").toString())
+        val timeshiftEnabled=CheckBox(this).apply {
+            text="Enable temporary live pause/rewind on this device"
+            isChecked=original.optBoolean("timeshift_enabled",false)
+        }
+        list.addView(timeshiftEnabled)
+        field("timeshift_minutes","Rolling buffer length in minutes (1–240)",
+              original.optInt("timeshift_minutes",30).toString())
+        field("timeshift_max_gib","Maximum temporary buffer size in GiB (0.25–32)",
+              (original.optLong("timeshift_max_bytes",4L*1024*1024*1024).toDouble()/(1024*1024*1024)).toString())
+        list.addView(text("Temporary TV fragments are saved in DizyTV's private device cache. At least 1 GiB of storage stays free, and data is deleted when watching stops. Only clear MPEG-TS and TS/HLS channels can be buffered.",12f))
         list.addView(text("Recording folder: "+original.getString("recording_dir").ifEmpty { "Not selected" })); list.addView(button("Choose recording folder") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION),100) })
         list.addView(button("Save settings") {
-            store.update { state->val settings=state.getJSONObject("settings"); for((key,input) in fields) when(key) {
+            store.update { state->val settings=state.getJSONObject("settings")
+                settings.put("timeshift_enabled",timeshiftEnabled.isChecked)
+                for((key,input) in fields) when(key) {
                 "xmltv_urls","playlist_urls"-> {
                     val urls=input.text.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
                     settings.put(key,JSONArray(urls))
                     if(key=="playlist_urls" && urls.isNotEmpty()) settings.put("playlist_url",urls.first())
                 }
-                "epg_offset_minutes","padding_before","padding_after"->settings.put(key,input.text.toString().toInt())
+                "epg_offset_minutes","padding_before","padding_after","timeshift_minutes"->settings.put(key,input.text.toString().toInt())
+                "timeshift_max_gib"->settings.put("timeshift_max_bytes",(input.text.toString().toDouble()*1024*1024*1024).toLong())
                 "reserve_bytes"->settings.put(key,input.text.toString().toLong())
                 else->settings.put(key,input.text.toString().trim())
             } }; status.text="Settings saved • existing UTC timers unchanged"; updateZone()

@@ -113,6 +113,26 @@ class CoreTests(unittest.TestCase):
         self.assertEqual('Sport',channel_section({'name':'ESPN','genre':'Sport','group':'USA','kind':'TV'}))
         self.assertEqual('Radio',channel_section({'name':'Radio 1','genre':'Music','group':'UK','kind':'Radio'}))
 
+    def test_optional_timeshift_settings_are_bounded(self):
+        from dizytv.core import default_state,validate_state
+        s=default_state()
+        self.assertFalse(s['settings']['timeshift_enabled'])
+        s['settings']['timeshift_enabled']=True
+        s['settings']['timeshift_minutes']=240
+        s['settings']['timeshift_max_bytes']=32*1024**3
+        validate_state(s)
+        s['settings']['timeshift_minutes']=241
+        with self.assertRaises(ValueError):validate_state(s)
+        s['settings']['timeshift_minutes']=30
+        s['settings']['timeshift_max_bytes']=128*1024**2
+        with self.assertRaises(ValueError):validate_state(s)
+        del s['settings']['timeshift_enabled']
+        del s['settings']['timeshift_minutes']
+        del s['settings']['timeshift_max_bytes']
+        del s['settings']['timeshift_dir']
+        # Old installations remain valid without new keys.
+        validate_state(s)
+
     def test_xmltv_preserves_programme_genres(self):
         xml = XML.replace('<title>Clock change</title>','<title>Clock change</title><category>News</category><category>Current affairs</category>')
         self.assertEqual(['News','Current affairs'], parse_xmltv(xml)[1][0]['categories'])

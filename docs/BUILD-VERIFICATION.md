@@ -76,3 +76,11 @@ Native Windows/macOS: distinct **Cinema** (maximized player in window, with embe
 Android: Cinema and immersive full-screen modes (Back exits), quick guide and programme info, video controls, scrub bar, volume. No streaming credentials or channel IDs change.
 
 **Important functional restriction:** Pause/rewind/scrub use libVLC's actual `is_seekable` / `isSeekable` state. If a source exposes no DVR window they refuse to fake a pause/rewind. **This version does not yet implement a universal disk-based rolling live buffer.** The existing detached recording system only accepts direct MPEG-TS for recording; ordinary HLS channel playback works independently, but automatic multi-segment HLS timeshift is a separate future engineering task. No video stream is recorded covertly. Test one seekable and one nonseekable stream on Windows and Android before claiming the DVR functions are reliable.
+
+## 0.1.7-alpha rolling timeshift test gate (experimental)
+
+- Python: bounded ring timestamps, quotas/free-space reserve, packet alignment, direct MPEG-TS HTTP ingest, HLS/TS HTTP ingest and loopback manifest/fragment access, token check, crash cleanup and preservation of unrelated user files.
+- Android: native rolling ring cleanup and validation, config migration/defaults, native build and lint; real-world player seek/pause still needs validation on a physical phone.
+- Both: storage is opt-in, restricted to 1–240 minutes with up to 32 GiB disk quota; never starts recording in the background on Android when the Activity is paused.
+- Windows: preserve 0.1.6 installer idle-recorder upgrade verification; timeshift buffer must not interfere with permanent recording workers.
+- Release is an **experimental alpha** requiring device testing. Do not claim universal HLS DVR; VideoLAN live HLS clients may interpret EXT-X-START and sliding playlist windows differently.

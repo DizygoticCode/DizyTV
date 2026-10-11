@@ -115,7 +115,9 @@ def default_state():
                          'xmltv_urls': list(DEFAULT_GUIDE_URLS), 'engine_url': 'http://127.0.0.1:6878',
                          'timezone': 'auto', 'epg_offset_minutes': 0,
                          'padding_before': 2, 'padding_after': 5,
-                         'reserve_bytes': 1073741824, 'recording_dir': ''},
+                         'reserve_bytes': 1073741824, 'recording_dir': '',
+                         'timeshift_enabled': False, 'timeshift_minutes': 30,
+                         'timeshift_max_bytes': 4*1024**3, 'timeshift_dir': ''},
             'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
 
 
@@ -319,7 +321,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -343,6 +345,16 @@ def validate_state(state):
     _integer(settings['reserve_bytes'], 0, 1024**5, 'storage reserve')
     if not isinstance(settings['recording_dir'], str) or len(settings['recording_dir']) > 4096:
         raise ValueError('Invalid destination')
+    # Optional for old 0.1.x settings and portable backups.
+    if 'timeshift_enabled' in settings and type(settings['timeshift_enabled']) is not bool:
+        raise ValueError('Timeshift enabled must be boolean')
+    if 'timeshift_minutes' in settings:
+        _integer(settings['timeshift_minutes'], 1, 240, 'timeshift minutes')
+    if 'timeshift_max_bytes' in settings:
+        _integer(settings['timeshift_max_bytes'], 256*1024**2, 32*1024**3, 'timeshift disk quota')
+    if 'timeshift_dir' in settings and (not isinstance(settings['timeshift_dir'],str) or
+                                     len(settings['timeshift_dir'])>4096):
+        raise ValueError('Invalid timeshift folder')
     for key, limit in (('channels', 100000), ('favourites', 100000), ('jobs', 10000)):
         if not isinstance(state[key], list) or len(state[key]) > limit:
             raise ValueError('Invalid ' + key)
@@ -426,6 +438,8 @@ def restore_backup(payload, now=None):
         raise ValueError('Unsupported DizyTV backup version')
     state = copy.deepcopy(validate_state(backup.get('data')))
     state['settings']['recording_dir'] = ''
+    state['settings']['timeshift_dir'] = ''
+    state['settings']['timeshift_enabled'] = False
     now = int(time.time()) if now is None else now
     state['jobs']=[{k:j[k] for k in ('id','channel_id','title','start','end','status')} for j in state['jobs']]
     for job in state['jobs']:

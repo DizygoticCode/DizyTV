@@ -60,7 +60,7 @@ object Domain {
         val explicitGenre=(attrs["tvg-genre"]?:attrs["genre"]).orEmpty(); val genre=if(explicitGenre.isNotEmpty()) normaliseGenre(explicitGenre) else normaliseGenre(group).takeIf { g->genres.any { it.first==g } }?:"Unspecified"
         return JSONObject().put("country",country).put("genre",genre).put("kind",if(attrs["radio"].orEmpty().lowercase() in listOf("true","1","yes")) "Radio" else "TV").put("transport",if(aceId(stream)!=null) "Ace Stream" else "HTTP")
     }
-    fun defaults()=JSONObject("""{"settings":{"playlist_url":"https://search-ace.stream/playlist","xmltv_urls":[],"engine_url":"http://127.0.0.1:6878","timezone":"auto","epg_offset_minutes":0,"padding_before":2,"padding_after":5,"reserve_bytes":1073741824,"recording_dir":""},"channels":[],"favourites":[],"mappings":{},"jobs":[]}""").apply {
+    fun defaults()=JSONObject("""{"settings":{"playlist_url":"https://search-ace.stream/playlist","xmltv_urls":[],"engine_url":"http://127.0.0.1:6878","timezone":"auto","epg_offset_minutes":0,"padding_before":2,"padding_after":5,"reserve_bytes":1073741824,"recording_dir":"","timeshift_enabled":false,"timeshift_minutes":30,"timeshift_max_bytes":4294967296},"channels":[],"favourites":[],"mappings":{},"jobs":[]}""").apply {
         getJSONObject("settings").put("playlist_urls",JSONArray(Sources.presets)).put("xmltv_urls",JSONArray(Sources.guides))
     }
     fun catalogue(state:JSONObject)=objects(state.getJSONArray("channels")).map { original->
@@ -185,6 +185,9 @@ object Domain {
             zone(settings.getString("timezone")); number(settings,"epg_offset_minutes",-1440,1440)
             number(settings,"padding_before",0,240); number(settings,"padding_after",0,240); number(settings,"reserve_bytes",0,1125899906842624)
             require(settings.getString("recording_dir").length<=4096)
+            if(settings.has("timeshift_enabled")) require(settings.get("timeshift_enabled") is Boolean)
+            if(settings.has("timeshift_minutes")) number(settings,"timeshift_minutes",1,240)
+            if(settings.has("timeshift_max_bytes")) number(settings,"timeshift_max_bytes",256L*1024*1024,32L*1024*1024*1024)
             val channels=s.getJSONArray("channels"); require(channels.length()<=100000); val ids=mutableSetOf<String>()
             for(ch in objects(channels)) {
                 require(ch.getString("id").matches(Regex("[a-f0-9]{40}")) && ids.add(ch.getString("id")))
@@ -233,7 +236,7 @@ object Domain {
         try {
             require(text.toByteArray().size<=MAX_BACKUP) { "Backup exceeds 16 MiB" }; val backup=JSONObject(text)
             require(backup.getString("app")=="DizyTV" && backup.get("version") is Int && backup.getInt("version")==1) { "Unsupported backup version" }
-            val s=validate(backup.getJSONObject("data")); s.getJSONObject("settings").put("recording_dir","")
+            val s=validate(backup.getJSONObject("data")); s.getJSONObject("settings").put("recording_dir","").put("timeshift_enabled",false)
             val jobs=JSONArray()
             for(original in objects(s.getJSONArray("jobs"))) {
                 val j=JSONObject(); for(k in listOf("id","channel_id","title","start","end","status")) j.put(k,original.get(k))

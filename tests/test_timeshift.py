@@ -1,0 +1,181 @@
+"""Deterministic rolling buffer tests: bounded storage, playlists and local serving."""
+import tempfile
+import unittest
+from pathlib import Path
+from urllib.request import urlopen
+from unittest.mock import patch
+
+from dizytv.timeshift import MAX_SEGMENT_BYTES, RollingWindow, RollingTimeshift, parse_hls
+
+PACKET = bytes([0x47]) + bytes(187)
+
+
+class TestTimeshift(unittest.TestCase):
+    def test_buffer_eviction_by_time_and_size(self):
+        now=[1000.]
+        with tempfile.TemporaryDirectory() as path:
+            w=RollingWindow(path, minutes=1,max_bytes=256*1024**2,
+                            clock=lambda:now[0],free=lambda:1024**4)
+            a=w.append(PACKET*10,4)
+            now[0]+=30
+            b=w.append(PACKET*10,4)
+            now[0]+=31
+            c=w.append(PACKET*10,4)
+            self.assertEqual([b.seq,c.seq],[x.seq for x in w.snapshot()])
+            self.assertFalse(a.path.exists())
+            self.assertIn('#EXT-X-MEDIA-SEQUENCE:1',w.playlist(from_seq=b.seq))
+            self.assertNotIn('#EXT-X-ENDLIST',w.playlist())
+            self.assertIn('s/2.ts',w.playlist())
+            w.close()
+            self.assertFalse(c.path.exists())
+
+    def test_free_space_reserve_blocks_more_data(self):
+        with tempfile.TemporaryDirectory() as path:
+            w=RollingWindow(path, free=lambda:1024, reserve_bytes=1024**3)
+            with self.assertRaisesRegex(OSError,'reserve'):
+                w.append(PACKET,1)
+            w.close()
+
+    def test_size_duration_boundaries(self):
+        with tempfile.TemporaryDirectory() as path:
+            with self.assertRaises(ValueError):
+                RollingWindow(path,minutes=241)
+            with self.assertRaises(ValueError):
+                RollingWindow(path,max_bytes=33*1024**3)
+            w=RollingWindow(path,free=lambda:1024**4)
+            with self.assertRaises(ValueError):
+                w.append(b'',4)
+            with self.assertRaises(ValueError):
+                w.append(b'x'*(MAX_SEGMENT_BYTES+1),4)
+            w.close()
+
+    def test_manifest_and_segments_reachable_only_with_token(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,session_id='test-token')
+            session.window.append(PACKET*10,4)
+            session._server=__import__('http.server',fromlist=['ThreadingHTTPServer']).ThreadingHTTPServer(('127.0.0.1',0),session._handler())
+            try:
+                worker=__import__('threading').Thread(target=session._server.serve_forever,daemon=True)
+                worker.start()
+                with urlopen(session.live_url()) as res:
+                    manifest=res.read().decode()
+                self.assertIn('#EXTM3U',manifest)
+                with urlopen(session.base_url+'s/0.ts') as res:
+                    self.assertEqual(PACKET*10,res.read())
+                with self.assertRaises(Exception):
+                    urlopen(session.base_url.replace('/test-token/','/wrong-token/')+'live.m3u8')
+                with urlopen(session.replay_url(30)) as res:
+                    self.assertIn('EXT-X-START',res.read().decode())
+            finally:
+                session.close()
+
+    def test_hls_parser_rejects_encryption_and_fmp4(self):
+        kind,urls=parse_hls('#EXTM3U\n#EXTINF:4,\na.ts\n', 'https://example.com/live/playlist.m3u8')
+        self.assertEqual('segments',kind)
+        self.assertEqual('https://example.com/live/a.ts',urls[0][0])
+        with self.assertRaisesRegex(ValueError,'encrypted'):
+            parse_hls('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:4,\na.ts','https://example.com')
+        with self.assertRaisesRegex(ValueError,'Fragmented'):
+            parse_hls('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:4,\na.m4s','https://example.com')
+
+    def test_actual_clear_hls_ingest_replay_and_local_cleanup(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from threading import Thread
+        class Origin(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path=='/live.m3u8':
+                    payload=b'#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:1\n#EXTINF:4,\n/one.ts\n'
+                    mime='application/vnd.apple.mpegurl'
+                elif self.path=='/one.ts':
+                    payload=PACKET*100
+                    mime='video/mp2t'
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type',mime)
+                self.send_header('Content-Length',str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            def log_message(self,*_):
+                pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Origin)
+        Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                session=RollingTimeshift('http://127.0.0.1:'+str(server.server_port)+'/live.m3u8',
+                                         root,session_id='hls-test')
+                live=session.start(timeout=5)
+                with urlopen(live) as response:
+                    self.assertIn('s/0.ts',response.read().decode())
+                self.assertGreater(session.window.latest_seconds(),0)
+                with urlopen(session.replay_url(30)) as response:
+                    self.assertIn('EXT-X-START',response.read().decode())
+                session.close()
+                self.assertFalse((Path(root)/'session-hls-test').exists())
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_real_direct_ts_short_http_response_still_enters_buffer(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from threading import Thread
+        class Origin(BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload=PACKET*100
+                self.send_response(200)
+                self.send_header('Content-Type','video/mp2t')
+                self.send_header('Content-Length',str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            def log_message(self,*_):pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Origin)
+        Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                session=RollingTimeshift('http://127.0.0.1:'+str(server.server_port)+'/live.ts',
+                                         root,session_id='ts-test')
+                self.assertIn('/live.m3u8',session.start(timeout=5))
+                self.assertTrue(session.window.snapshot())
+                session.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_quota_evicts_oldest_without_touching_unrelated_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            other=Path(root)/'keep-me.txt'
+            other.write_text('user file',encoding='utf-8')
+            w=RollingWindow(Path(root)/'session',free=lambda:1024**4)
+            w.max_bytes=len(PACKET)*12
+            a=w.append(PACKET*10,4)
+            b=w.append(PACKET*10,4)
+            self.assertFalse(a.path.exists())
+            self.assertEqual([b.seq],[p.seq for p in w.snapshot()])
+            w.close()
+            self.assertEqual('user file',other.read_text(encoding='utf-8'))
+
+    def test_crash_cleanup_only_removes_older_timeshift_segments(self):
+        import os
+        import time
+        with tempfile.TemporaryDirectory() as root:
+            cache=Path(root)/'cache'
+            stale=cache/'session-old'
+            stale.mkdir(parents=True)
+            orphan=stale/'000000000000.ts'
+            orphan.write_bytes(PACKET)
+            os.utime(stale,(time.time()-90000,time.time()-90000))
+            unrelated=cache/'my-recording.ts'
+            unrelated.write_bytes(PACKET)
+            session=RollingTimeshift('https://example.com/a.ts',cache,session_id='new-session')
+            self.assertFalse(orphan.exists())
+            self.assertTrue(unrelated.exists())
+            session.close()
+
+    def test_on_device_only_no_persistent_recordings(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/video.ts',root,session_id='bounded')
+            session.window.append(PACKET*20,4)
+            self.assertEqual(1,len(session.window.snapshot()))
+            session.close()
+            self.assertFalse((Path(root)/'session-bounded').exists())
