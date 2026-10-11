@@ -68,3 +68,11 @@ These entries describe intended code coverage only. A real Windows/Android playb
 - Countries > categories > channels navigator in Windows/macOS and Android. Category fallback derives from genre or safe channel-name/group hints; nothing is silently relabelled in original metadata.
 - Optional (unchecked) Windows setup task opens the **official** Ace Stream download site. We do **not** redistribute, download or execute their installer, and normal HLS/HTTP playback never depends on Ace Stream. Installed Windows engine auto-launch is retained; users accept third-party terms themselves.
 - CI coverage: Qt country tree, EPG and identity preservation; Android domain naming and categories; explicit external provider setup link; Inno installer upgrade integration. Real video playback and provider engine setup still require device validation.
+
+## 0.1.6-alpha TV player controls — build candidate
+
+Native Windows/macOS: distinct **Cinema** (maximized player in window, with embedded controls) and **Screen** (a Qt fullscreen output window containing the same VLC video frame) modes. Double-click video enters/exits screen fullscreen. The fullscreen surface has dedicated Pause, 30-second rewind, Live, Quick Guide, Info and Exit buttons; the main player has a seek slider and a volume slider. Playing a channel briefly shows its current programme when XMLTV has a match. Searchable Quick Guide chooses another channel in-place. Fullscreen rebinds the existing libVLC video surface; it must not destroy the media player or a detached recorder.
+
+Android: Cinema and immersive full-screen modes (Back exits), quick guide and programme info, video controls, scrub bar, volume. No streaming credentials or channel IDs change.
+
+**Important functional restriction:** Pause/rewind/scrub use libVLC's actual `is_seekable` / `isSeekable` state. If a source exposes no DVR window they refuse to fake a pause/rewind. **This version does not yet implement a universal disk-based rolling live buffer.** The existing detached recording system only accepts direct MPEG-TS for recording; ordinary HLS channel playback works independently, but automatic multi-segment HLS timeshift is a separate future engineering task. No video stream is recorded covertly. Test one seekable and one nonseekable stream on Windows and Android before claiming the DVR functions are reliable.

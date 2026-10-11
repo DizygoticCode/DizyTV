@@ -13,6 +13,51 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_tv_player_modes_and_seekable_dvr_controls(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.player=Mock()
+            window.player.is_seekable.return_value=True
+            window.player.get_length.return_value=300000
+            window.player.get_time.return_value=120000
+            window.player.get_state.return_value=Mock()
+            window.playback_started=1
+            window.seek_relative(-30000)
+            window.player.set_time.assert_called_with(90000)
+            window.seek_slider.setValue(500)
+            window.seek_from_slider()
+            window.player.set_time.assert_called_with(150000)
+            window.player.is_seekable.return_value=False
+            window.player.set_time.reset_mock()
+            window.seek_relative(-30000)
+            window.player.set_time.assert_not_called()
+            window.toggle_cinema()
+            self.assertTrue(window.cinema_mode)
+            self.assertFalse(window.sidebar.isVisible())
+            window.toggle_cinema()
+            self.assertFalse(window.cinema_mode)
+            window.player=None
+            window.close()
+
+    def test_fullscreen_restores_embedded_video_without_discarding_player(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.show()
+            self.app.processEvents()
+            fake=Mock()
+            window.player=fake
+            window.toggle_screen_fullscreen()
+            self.assertIsNotNone(window.screen_dialog)
+            self.assertIs(window.video.parentWidget(),window.screen_dialog)
+            window.exit_screen_fullscreen()
+            self.assertIsNone(window.screen_dialog)
+            self.assertIs(window.video.parentWidget(),window.tabs.widget(0))
+            self.assertIs(window.player,fake)
+            window.player=None
+            window.close()
+
     def test_ace_setup_opens_verified_official_provider_without_download(self):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
