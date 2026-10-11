@@ -13,6 +13,27 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_guide_index_reuses_programmes_and_limits_painting_to_visible_window(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            ch=parse_playlist('#EXTM3U\n#EXTINF:-1 tvg-id="bbc",BBC\nhttps://example.com/bbc.m3u8')[0]
+            store.update(lambda s:s.update(channels=[ch]))
+            window=MainWindow(store,start_worker=False)
+            start=window.guide_start
+            window.guide={'names':{'bbc':'BBC'},
+                'programmes':[
+                    {'channel':'bbc','start':start,'end':start+3600,'title':'On now','categories':['News']},
+                    *[{'channel':'other','start':start,'end':start+3600,'title':'Not in grid','categories':['Sports']}
+                        for _ in range(3000)],
+                    {'channel':'bbc','start':start+86400,'end':start+90000,'title':'Tomorrow','categories':['News']}]}
+            by_channel,genres=window.guide_index()
+            self.assertIs(window.guide_index()[0],by_channel)
+            self.assertEqual({'News'},genres['bbc'])
+            window.render_channels()
+            self.assertEqual(['On now'],[p['title'] for p in window.grid.programmes])
+            window.close()
+
     def test_epg_left_click_watches_and_right_click_offers_recording(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:

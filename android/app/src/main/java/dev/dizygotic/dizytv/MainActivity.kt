@@ -35,6 +35,20 @@ class MainActivity:Activity() {
     private var countryFilter=""; private var genreFilter=""; private var typeFilter=""
     private var sourceErrors=emptyList<String>()
     private var displayedZone=""
+    // XMLTV guide may have tens of thousands of programmes. Build grouping
+    // only once per freshly imported guide, not on every keypress or page.
+    private var indexedGuide:JSONObject?=null
+    private var indexedProgrammes:Map<String,List<JSONObject>> = emptyMap()
+    private var indexedGenres:Map<String,Set<String>> = emptyMap()
+    private fun indexGuide() {
+        if(indexedGuide===guide) return
+        val grouped=Domain.objects(guide.getJSONArray("programmes")).groupBy { it.getString("channel") }
+        indexedProgrammes=grouped
+        indexedGenres=grouped.mapValues { (_,rows)->
+            rows.flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }.toSet()
+        }
+        indexedGuide=guide
+    }
     private val executor=Executors.newSingleThreadExecutor(); private val handler=Handler(Looper.getMainLooper())
     private val ticker=object:Runnable { override fun run() { val changed=updateZone(); if(page=="Recordings" || changed && page=="Guide") render(); handler.postDelayed(this,5000) } }
     private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
@@ -69,7 +83,8 @@ class MainActivity:Activity() {
     }
     private fun scroller():LinearLayout { val scroll=ScrollView(this); val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; scroll.addView(column); body.addView(scroll,LinearLayout.LayoutParams(-1,-1)); return column }
     private fun filteredChannels(state:JSONObject):List<JSONObject> {
-        val fav=Domain.strings(state.getJSONArray("favourites")); val programmeGenres=Domain.objects(guide.getJSONArray("programmes")).groupBy { it.getString("channel") }.mapValues { entry->entry.value.flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }.toSet() }
+        indexGuide()
+        val fav=Domain.strings(state.getJSONArray("favourites")); val programmeGenres=indexedGenres
         return Domain.catalogue(state).filter { ch->
             val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names"))
             (ch.getString("name")+" "+ch.getString("group")).contains(search,true) && (!onlyFavourites || ch.getString("id") in fav) &&
@@ -80,7 +95,8 @@ class MainActivity:Activity() {
     }
     private fun categoryFilters(onChange:()->Unit):LinearLayout {
         val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; val channels=Domain.catalogue(store.read())
-        val guideGenres=Domain.objects(guide.getJSONArray("programmes")).flatMap { Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre) }
+        indexGuide()
+        val guideGenres=indexedGenres.values.flatMap { it }
         for(key in listOf("country","genre","kind")) {
             val values=(channels.map { it.optString(key,if(key=="kind") "TV" else "Unspecified") }+if(key=="genre") guideGenres else if(key=="kind") channels.map { it.optString("transport",if(it.getString("stream").startsWith("acestream:")) "Ace Stream" else "HTTP") } else emptyList()).distinct().sorted()
             val label=when(key) { "country"->"All countries"; "genre"->"All genres"; else->"All stream types" }; val options=listOf(label)+values
@@ -128,7 +144,8 @@ class MainActivity:Activity() {
         body.addView(text(selected?.getString("name")?:"Choose a channel first",20f))
         selected?.let { ch->
             val state=store.read(); val key=state.getJSONObject("mappings").optString(ch.getString("id"),ch.getString("tvg_id")); val now=Instant.now().epochSecond
-            val programmes=Domain.objects(guide.getJSONArray("programmes")).filter { it.getString("channel")==key && it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
+            indexGuide()
+            val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
             body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
         }
         val layout=VLCVideoLayout(this); video=layout; body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
@@ -172,8 +189,8 @@ class MainActivity:Activity() {
         val outer=ScrollView(this); val horizontal=HorizontalScrollView(this); val grid=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         val headings=row(); headings.addView(text("Channel"),LinearLayout.LayoutParams(dp(140),dp(50)))
         for(i in 0..5) headings.addView(text(Domain.time(start+i*3600,timezone,true)),LinearLayout.LayoutParams(dp(180),dp(50)))
-        grid.addView(headings); val all=Domain.objects(guide.getJSONArray("programmes"))
-        val favourites=Domain.strings(s.getJSONArray("favourites"))
+        grid.addView(headings)
+        indexGuide()
         val catalogue=filteredChannels(s).take(250)
         for(ch in catalogue) {
             val r=row()
@@ -183,7 +200,7 @@ class MainActivity:Activity() {
             r.addView(channelName,LinearLayout.LayoutParams(dp(140),dp(68)))
             val timeline=android.widget.FrameLayout(this); r.addView(timeline,LinearLayout.LayoutParams(dp(1080),dp(68)))
             val key=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
-            val programmes=all.filter { it.getString("channel")==key && it.getLong("end")>start && it.getLong("start")<start+21600 && (genreFilter.isEmpty() || ch.optString("genre","Unspecified")==genreFilter || genreFilter in Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre)) }
+            val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>start && it.getLong("start")<start+21600 && (genreFilter.isEmpty() || ch.optString("genre","Unspecified")==genreFilter || genreFilter in Domain.strings(it.optJSONArray("categories")?:JSONArray()).map(Domain::normaliseGenre)) }
             if(programmes.isEmpty()) timeline.addView(text("No guide match — choose Map EPG"))
             for(p in programmes) {
                 val left=maxOf(p.getLong("start"),start)-start; val width=minOf(p.getLong("end"),start+21600)-maxOf(p.getLong("start"),start)

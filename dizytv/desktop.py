@@ -244,6 +244,24 @@ class MainWindow(QMainWindow):
             lines.extend(self.source_errors)
         QMessageBox.information(self,'DizyTV playlist import status','\n'.join(lines))
 
+    def guide_index(self):
+        # 85,000+ XMLTV entries were being re-scanned for each filter change
+        # and each periodic EPG redraw. Cache by guide object identity and
+        # invalidate naturally when Refresh guide replaces the guide dict.
+        if getattr(self, '_indexed_guide', None) is not self.guide:
+            by_channel={}
+            genres={}
+            for programme in self.guide['programmes']:
+                cid=programme['channel']
+                by_channel.setdefault(cid,[]).append(programme)
+                categories=programme.get('categories',[])
+                if categories:
+                    genres.setdefault(cid,set()).update(normalise_genre(c) for c in categories)
+            self._programme_by_channel=by_channel
+            self._genre_by_channel=genres
+            self._indexed_guide=self.guide
+        return self._programme_by_channel,self._genre_by_channel
+
     def render_channels(self,*_):
         previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
         # Give free HTTP/HLS channels prominence, without removing Ace streams.
@@ -262,9 +280,7 @@ class MainWindow(QMainWindow):
             self.source_filter.addItem(f'{source_label(url)} ({counts.get(url,0)})',url)
         self.source_filter.setCurrentIndex(max(0,self.source_filter.findData(selected_source)))
         self.source_filter.blockSignals(False)
-        genre_by_id={}
-        for p in self.guide['programmes']:
-            genre_by_id.setdefault(p['channel'],set()).update(normalise_genre(v) for v in p.get('categories',[]))
+        _,genre_by_id=self.guide_index()
         for widget,key,label in ((self.country_filter,'country','All countries'),(self.genre_filter,'genre','All genres'),(self.kind_filter,'kind','All stream types')):
             chosen=widget.currentData(); values={c.get(key,'TV' if key=='kind' else 'Unspecified') for c in source}
             if key=='genre':values.update(g for genres in genre_by_id.values() for g in genres)
@@ -294,14 +310,27 @@ class MainWindow(QMainWindow):
     def render_now(self):
         if not self.selected:return
         cid=match_guide(self.selected,self.state['mappings'],self.guide['names']); now=time.time()
-        items=[p for p in self.guide['programmes'] if p['channel']==cid and p['end']>now][:2]
+        by_channel,_=self.guide_index()
+        items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(self.selected['name']+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else self.selected['name']+' — no guide match')
     def render_guide(self):
-        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(self.channels.count())]
+        # The grid only paints 250 visible channels within a six-hour window;
+        # never pass the complete XMLTV cache to its paintEvent.
+        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(min(self.channels.count(),250))]
         genre=self.genre_filter.currentData()
-        source_genre_ids={match_guide(ch,self.state['mappings'],self.guide['names']) for ch in channels if ch.get('genre','Unspecified')==genre}
-        programmes=[p for p in self.guide['programmes'] if not genre or p['channel'] in source_genre_ids or genre in {normalise_genre(c) for c in p.get('categories',[])}]
-        resolved={ch['id']:match_guide(ch,self.state['mappings'],self.guide['names']) for ch in channels}
+        by_channel,_=self.guide_index()
+        resolved={}
+        programmes=[]
+        end=self.guide_start+6*3600
+        for ch in channels:
+            key=match_guide(ch,self.state['mappings'],self.guide['names'])
+            resolved[ch['id']]=key
+            for p in by_channel.get(key,()):
+                if not (p['start']<end and p['end']>self.guide_start):
+                    continue
+                if genre and ch.get('genre','Unspecified')!=genre and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
+                    continue
+                programmes.append(p)
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
     def move_guide(self,delta):
