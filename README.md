@@ -41,27 +41,25 @@ One recording runs at a time per device. The recorder saves the available live M
 
 ## Downloads
 
-| Platform | Build target | Installer inside the artifact |
+**Direct native installers:** these links download the actual executable/package, **not a ZIP**. The `0.1.0-alpha` pre-release is for early device testing; installation, live playback and unattended recording still need real-world validation.
+
+| Platform | Direct download | Target |
 | --- | --- | --- |
-| **Windows** | x64 | `DizyTV-Setup-0.1.0-alpha-windows-x64.exe` |
-| **Android** | Universal; API 26 / Android 8.0+ | `DizyTV-0.1.0-alpha-android-universal-debug.apk` |
-| **MacBook / macOS** | Apple Silicon; macOS 13+ package target | `DizyTV-0.1.0-alpha-macos-arm64.pkg` |
-| **MacBook / macOS** | Intel; macOS 13+ package target | `DizyTV-0.1.0-alpha-macos-x86_64.pkg` |
+| **Windows** | [DizyTV Windows installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-Setup-0.1.0-alpha-windows-x64.exe) | x64 |
+| **Android** | [DizyTV Android installer (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-android-universal-debug.apk) | Android 8+ / API 26+ |
+| **MacBook / Apple Silicon** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-arm64.pkg) | macOS 13+ / arm64 |
+| **MacBook / Intel** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-x86_64.pkg) | macOS 13+ / x86_64 |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/actions/runs/38148508455/artifacts/11706355501"><img alt="Download Windows EXE" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/actions/runs/38148508455/artifacts/11706585013"><img alt="Download Android APK" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/actions/runs/38148508455/artifacts/11705895526"><img alt="Download Mac Apple Silicon PKG" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/actions/runs/38148508455/artifacts/11705474676"><img alt="Download Mac Intel PKG" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-Setup-0.1.0-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/DizyTV-0.1.0-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
 </p>
 
-Verified [native build run](https://github.com/DizygoticCode/DizyTV/actions/runs/38148508455) · [Build checks](docs/BUILD-VERIFICATION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.0-alpha/SHA256SUMS.txt) · [Native CI evidence](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Build checks](docs/BUILD-VERIFICATION.md)
 
-Open the verified run, choose the platform artifact and extract the ZIP. SHA-256 checksums are included. Actions artifacts require GitHub sign-in and repository access and expire after 30 days; durable public release downloads are a later milestone. Minimum targets reflect build configuration, rather than completed hardware compatibility testing.
-
-Windows has an unsigned installer. The Mac app has an ad-hoc signature; its PKG is not Developer ID signed or notarized. Android uses a CI debug key, with no consistent upgrade signing yet. Operating systems may show trust warnings. Back up your setup before changing development builds.
-
-**The repository is public** (verified 11 October 2026). The buttons above currently download temporary CI artifacts. For durable public downloads, publish the installers and checksums as versioned [GitHub Releases](https://github.com/DizygoticCode/DizyTV/releases), then point these buttons directly to the release assets. The build workflow does not publish releases automatically yet. The About description is still unset; the suggested text is in [repository setup](docs/REPOSITORY-SETUP.md).
+**Browser/security note:** Direct asset links solve the Actions ZIP/sign-in/expiry problem, **not** security reputation. The Windows installer is unsigned, the Mac PKGs are not Developer ID signed/notarized, and Android is signed with a build-specific CI debug key. Chrome, SmartScreen, Gatekeeper or Android may still warn or block a download/install. Do not disable security software to install DizyTV; see [distribution guidance](docs/DISTRIBUTION.md) and check the published checksum. Android test builds may require uninstalling before an update because the debug signing key is not retained. Back up settings first.
 
 ## Getting started
 

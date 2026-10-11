@@ -91,3 +91,48 @@ jobs:
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+  publish-alpha:
+    name: Publish direct installer downloads
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [android, desktop]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: DizyTV-0.1.0-alpha-*
+          path: native-artifacts
+      - name: Collect native files and generate release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' \) -exec cp -- '{}' release/ \;
+          for asset in \
+            DizyTV-Setup-0.1.0-alpha-windows-x64.exe \
+            DizyTV-0.1.0-alpha-android-universal-debug.apk \
+            DizyTV-0.1.0-alpha-macos-arm64.pkg \
+            DizyTV-0.1.0-alpha-macos-x86_64.pkg; do
+            test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
+          done
+          test "$(find release -type f | wc -l)" -eq 4
+          (cd release && sha256sum *.exe *.apk *.pkg > SHA256SUMS.txt)
+          cat release/SHA256SUMS.txt
+      - name: Publish versioned pre-release once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.1.0-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.0-alpha already exists; refusing to silently replace published binaries.'
+            exit 0
+          fi
+          gh release create v0.1.0-alpha release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title 'DizyTV 0.1.0 alpha — device testing' \
+            --prerelease \
+            --notes 'Early device-testing builds, not a stable release. Installers are direct .exe/.apk/.pkg files (no Actions ZIP and no GitHub login needed). Windows and macOS packages are not publicly trusted-signed/notarized, and the Android APK uses an ephemeral CI debug signing key; browser or operating-system warnings may still occur. For Android upgrades, uninstalling the previous build may be necessary (back up app settings first). Ace Stream engine and desktop VLC are separate prerequisites. Verify downloads using SHA256SUMS.txt. See the README and docs/DISTRIBUTION.md for requirements and known limitations.'
