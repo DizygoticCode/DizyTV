@@ -26,6 +26,7 @@ class DesktopTests(unittest.TestCase):
             window.render_channels()
             window.resize(1100,750)
             window.show()
+            window.tabs.setCurrentIndex(1)
             self.app.processEvents()
             window.grid.repaint()
             self.app.processEvents()
@@ -38,6 +39,11 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual([ch['id']],watched)
             self.assertEqual([],scheduled)
             self.assertEqual(0,window.tabs.currentIndex())
+            # Left-click switched to Live TV; return to the guide before
+            # exercising its right-click context menu.
+            window.tabs.setCurrentIndex(1)
+            self.app.processEvents()
+            window.grid.repaint()
             # Right-click opens menu; choosing Record must not play the stream.
             with patch('dizytv.desktop.QMenu.exec',lambda menu,*args:menu.actions()[-1].trigger()):
                 QTest.mouseClick(window.grid,Qt.RightButton,Qt.NoModifier,QPoint(230,75))
