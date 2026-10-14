@@ -1914,7 +1914,7 @@ class MainWindow(QMainWindow):
                 if self.selected and self.selected['id']==ch['id']:
                     self.status.setText('Ace playback failed: '+message)
                     self.error('Ace Stream engine was detected, but could not prepare this channel. '+
-                               message+'\\n\\nTry the channel in the official Ace player to check peers.')
+                               message+'\n\nTry the channel in the official Ace player to check peers.')
             task.signals.success.connect(ready); task.signals.failure.connect(failed)
             self.pool.start(task)
         else:
