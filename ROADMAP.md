@@ -74,3 +74,7 @@ Added on-device bounded short-term MPEG-TS/HLS segment capture and playback brid
 ## 0.1.8-alpha Windows TV polish
 
 The compact/resizable native player and modeless pop-out were developed with a two-phase Windows focus. Improve TV keyboard/remote navigation and consider independent full EPG dock layout after user tests. For sources, keep actionable transport diagnostics distinct from the public playlist's reliability (a listed channel is not a promise it works). Continue device-level timeshift stall/long-duration soak and proper Ace Stream installation validation.
+
+## 0.1.9-alpha guide/search follow-up
+
+Windows global channel/programme search includes all imported sources, current and upcoming EPG, navigable matching programmes, pagination and in-guide tuning. Full guide displays every filtered channel and virtualises painting. Future enhancements: fuzzy multi-term suggestions, remote-control keyboard navigation, category-specific programme facets, scheduled recording from search with storage-state prechecks. No new scraping or paid feeds are introduced.
