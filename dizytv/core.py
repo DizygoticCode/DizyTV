@@ -468,6 +468,8 @@ def export_backup(state):
         ch['stream'] = _redact_url(ch['stream'])
         if 'source' in ch:
             ch['source'] = _redact_url(ch['source'])
+        if 'sources' in ch:
+            ch['sources'] = [_redact_url(url) for url in ch['sources']]
     payload = json.dumps({'app':'DizyTV', 'version':1, 'data':data}, ensure_ascii=False, indent=2)
     if len(payload.encode('utf-8')) > MAX_BACKUP:
         raise ValueError('Backup is too large')
