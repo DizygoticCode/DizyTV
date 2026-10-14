@@ -44,13 +44,13 @@ def verify_caption_engine(model_dir,ffmpeg_path=''):
 def ffmpeg_capture_args(binary,url):
     if not isinstance(url,str) or not url:
         raise ValueError('Choose a playing channel first')
-    if url.startswith(('http://','https://')):
+    if url.lower().startswith(('http://','https://')):
         from .core import http_url
         http_url(url)
     elif not Path(url).is_file():
         raise ValueError('Only an authorised active HTTP stream or local video file can be transcribed')
     args=[binary,'-hide_banner','-loglevel','error','-nostdin','-re']
-    if url.startswith(('http://','https://')):
+    if url.lower().startswith(('http://','https://')):
         # FFmpeg's default Lavf user agent may be rejected by otherwise
         # playable HLS origins; use the same identity as the video player.
         args.extend(['-user_agent',PLAYBACK_USER_AGENT])
