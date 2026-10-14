@@ -336,6 +336,263 @@ class DesktopTests(unittest.TestCase):
             w.timeshift=None;w.player=None
             w.close()
 
+    def test_opt_in_offline_caption_window_and_worker_are_stopped_on_channel_change(self):
+        from unittest.mock import Mock, patch
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            w.show()
+            settings=Settings(store.read(),w)
+            self.assertIsNotNone(settings.auto_model_path)
+            self.assertIsNotNone(settings.auto_ffmpeg_path)
+            w.player=Mock()
+            w.playback_started=1
+            w._playback_url='https://example.com/authorized-live.m3u8'
+            fake=Mock()
+            with patch('dizytv.desktop.verify_caption_engine',
+                       return_value=('ffmpeg','C:/models/vosk')), \
+                 patch('dizytv.desktop.LocalCaptionWorker',return_value=fake):
+                w.toggle_auto_captions()
+                fake.start.assert_called_once()
+                self.assertIs(w._auto_caption_worker,fake)
+                serial=w._auto_caption_seq
+                w.receive_auto_caption(serial,'Some example spoken words')
+                self.assertEqual('Some example spoken words',w._auto_caption_label.text())
+                self.assertEqual(Qt.PlainText,w._auto_caption_label.textFormat())
+                self.assertEqual('autoCaptionOverlay',w._auto_caption_overlay.objectName())
+                # Regression: partial speech updates must not conceal the
+                # visible toolbar in the native Windows pop-out.
+                controls=Mock()
+                controls.isVisible.return_value=True
+                w.screen_dialog=Mock()
+                w.detached_controls=controls
+                w.receive_auto_caption(serial,'Updated recognised words')
+                controls.raise_.assert_called_once()
+                controls.reset_mock()
+                controls.isVisible.return_value=False
+                w.receive_auto_caption(serial,'Another recognised phrase')
+                controls.raise_.assert_not_called()
+                w.screen_dialog=None
+                w.detached_controls=None
+                w.toggle_auto_captions()
+                fake.stop.assert_called_once()
+                self.assertIsNone(w._auto_caption_overlay)
+                self.assertIs(w._auto_caption_worker,fake)
+                self.assertTrue(w._auto_caption_stopping)
+                # The slow previous model must fully exit before another can
+                # begin loading (or video memory usage can double).
+                w.toggle_auto_captions()
+                fake.start.assert_called_once()
+                w.auto_caption_finished(serial,'')
+                self.assertIsNone(w._auto_caption_worker)
+                self.assertFalse(w._auto_caption_stopping)
+                w.toggle_auto_captions()
+                self.assertEqual(2,fake.start.call_count)
+                serial2=w._auto_caption_seq
+                w.stop_auto_captions()
+                w.auto_caption_finished(serial2,'')
+                self.assertIsNone(w._auto_caption_worker)
+            # Late transcription messages cannot resurrect an overlay.
+            w.receive_auto_caption(serial,'stale result')
+            self.assertIsNone(w._auto_caption_overlay)
+            w.player=None
+            settings.close();w.close()
+
+    def test_explicit_srt_file_is_not_replaced_by_next_broadcast_subtitle_tick(self):
+        from unittest.mock import Mock, patch
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'own-caption.srt'
+            path.write_text('1\n00:00:01,000 --> 00:00:04,000\nTest\n',encoding='utf-8')
+            store=Store(folder)
+            store.update(lambda s:s['settings'].update(subtitles_enabled=False))
+            w=MainWindow(store,start_worker=False)
+            w.player=Mock()
+            w.player.get_length.return_value=0
+            w.player.get_time.return_value=0
+            w.player.is_seekable.return_value=False
+            w.playback_started=1
+            w.player.video_set_subtitle_file.return_value=True
+            w.player.video_get_spu_description.return_value=[(1,'English'),(2,'French')]
+            w.player.video_set_spu.return_value=0
+            w._subtitle_auto_applied=True
+            with patch('dizytv.desktop.QFileDialog.getOpenFileName',
+                       return_value=(str(path),'')):
+                w.load_subtitle_file()
+            self.assertEqual('external',w._subtitle_manual_track)
+            self.assertTrue(store.read()['settings']['subtitles_enabled'])
+            w.player.video_set_spu.reset_mock()
+            w.sync_subtitles()
+            w.player.video_set_spu.assert_not_called()
+            # A pure appearance edit must not remove a manual subtitle file.
+            with patch.object(Settings,'exec',lambda d: QDialog.Accepted), \
+                 patch.object(Settings,'values',
+                              lambda d:dict(d.original,subtitle_colour='Yellow')):
+                w.settings()
+            self.assertEqual('external',w._subtitle_manual_track)
+            w.player=None;w.close()
+
+    def test_global_subtitle_toggle_restores_a_valid_track_when_reenabled(self):
+        from unittest.mock import Mock, patch
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda s:s['settings'].update(subtitles_enabled=False))
+            w=MainWindow(store,start_worker=False)
+            w.player=Mock()
+            w.player.get_length.return_value=0
+            w.player.get_time.return_value=0
+            w.player.is_seekable.return_value=False
+            w.playback_started=1
+            w.player.video_get_spu_description.return_value=[(3,'English')]
+            w.player.video_get_spu.return_value=-1
+            w.player.video_set_spu.return_value=0
+            w._subtitle_manual_track=3
+            w._subtitle_auto_applied=True
+            with patch.object(Settings,'exec',lambda d: QDialog.Accepted), \
+                 patch.object(Settings,'values',
+                              lambda d:dict(d.original,subtitles_enabled=True)):
+                w.settings()
+            self.assertIsNone(w._subtitle_manual_track)
+            w.player.video_set_spu.assert_called_with(3)
+            w.player=None;w.close()
+
+    def test_backup_restore_applies_subtitles_off_to_active_player(self):
+        from unittest.mock import Mock, patch
+        from pathlib import Path
+        from PySide6.QtWidgets import QMessageBox
+        from dizytv.core import export_backup
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            state=store.read()
+            state['settings']['subtitles_enabled']=False
+            backup=Path(folder)/'subtitle-backup.json'
+            backup.write_text(export_backup(state),encoding='utf-8')
+            w=MainWindow(store,start_worker=False)
+            w.player=Mock()
+            w.player.get_length.return_value=0
+            w.player.get_time.return_value=0
+            w.player.is_seekable.return_value=False
+            w.player.video_set_spu.return_value=0
+            w.player.video_get_spu_description.return_value=[(3,'English')]
+            w.playback_started=1
+            w._subtitle_auto_applied=True
+            w._subtitle_manual_track=3
+            with patch('dizytv.desktop.QFileDialog.getOpenFileName',
+                       return_value=(str(backup),'')), \
+                 patch('dizytv.desktop.QMessageBox.question',
+                       return_value=QMessageBox.Yes):
+                w.restore()
+            self.assertFalse(store.read()['settings']['subtitles_enabled'])
+            self.assertIsNone(w._subtitle_manual_track)
+            w.player.video_set_spu.assert_called_with(-1)
+            self.assertTrue(w._subtitle_auto_applied)
+            w.player=None;w.close()
+
+    def test_disable_subtitles_retries_after_vlc_initially_rejects_off(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda s:s['settings'].update(subtitles_enabled=False))
+            w=MainWindow(store,start_worker=False)
+            w.player=Mock()
+            w.playback_started=1
+            w.player.video_set_spu.side_effect=[-1,0]
+            w.sync_subtitles()
+            self.assertFalse(w._subtitle_auto_applied)
+            w.sync_subtitles()
+            self.assertTrue(w._subtitle_auto_applied)
+            w.sync_subtitles()
+            self.assertEqual(2,w.player.video_set_spu.call_count)
+            w.player.video_set_spu.assert_called_with(-1)
+            w.player=None;w.close()
+
+    def test_automatic_subtitles_retry_track_until_vlc_accepts_selection(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.playback_started=1
+            w.player.video_get_spu_description.return_value=[(3,'English')]
+            w.player.video_get_spu.return_value=-1
+            w.player.video_set_spu.side_effect=[-1,0]
+            w.sync_subtitles()
+            self.assertFalse(w._subtitle_auto_applied)
+            self.assertEqual((),w._subtitle_track_signature)
+            w.sync_subtitles()
+            self.assertTrue(w._subtitle_auto_applied)
+            self.assertEqual(2,w.player.video_set_spu.call_count)
+            w.sync_subtitles()
+            self.assertEqual(2,w.player.video_set_spu.call_count)
+            w.player=None;w.close()
+
+    def test_caption_overlay_repositions_when_main_window_moves(self):
+        from PySide6.QtWidgets import QFrame
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.show()
+            QApplication.processEvents()
+            w._auto_caption_overlay=QFrame(w.video)
+            with patch.object(w,'position_auto_caption_overlay') as reposition:
+                w.move(w.x()+40,w.y()+32)
+                QApplication.processEvents()
+                self.assertGreater(reposition.call_count,0)
+            w.destroy_auto_caption_overlay()
+            w.close()
+
+    def test_vlc_closed_captions_track_lifecycle_and_preferences(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            self.assertEqual('CC Subtitles',w.subtitle_button.text())
+            settings=Settings(store.read(),w)
+            self.assertTrue(settings.cc_enabled.isChecked())
+            settings.cc_font.setCurrentText('Monospace')
+            settings.cc_position.setCurrentText('Raised')
+            settings.cc_colour.setCurrentText('Cyan')
+            settings.cc_size.setValue(38)
+            self.assertEqual('Cyan',settings.values()['subtitle_colour'])
+            self.assertEqual(38,settings.values()['subtitle_size'])
+            w.player=Mock()
+            w.player.get_state.return_value='State.Playing'
+            w.player.video_get_spu_description.return_value=[(-1,'Disable'),(1,'French'),(3,'English')]
+            w.player.video_get_spu.return_value=-1
+            w.player.video_set_spu.return_value=0
+            w.playback_started=1
+            w.state['settings']['subtitle_language']='English'
+            w.sync_subtitles()
+            w.player.video_set_spu.assert_called_with(3)
+            self.assertTrue(w._subtitle_auto_applied)
+            w.choose_subtitle_track(1)
+            w.player.video_set_spu.assert_called_with(1)
+            self.assertEqual(1,w._subtitle_manual_track)
+            w.state['settings']['subtitles_enabled']=False
+            w._subtitle_auto_applied=False
+            w.sync_subtitles()
+            w.player.video_set_spu.assert_called_with(-1)
+            w.player=None
+            settings.close();w.close()
+
+    def test_subtitle_style_saved_without_restart_or_active_recording_changes(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            initial=store.read()['settings']
+            modified=dict(initial,subtitle_colour='Yellow',subtitle_position='High',
+                          subtitle_size=50,subtitle_font='Serif')
+            w.store.update(lambda s:s.update(settings=modified))
+            w.state=w.store.read()
+            w.apply_interface_scale()
+            self.assertEqual('Yellow',w.state['settings']['subtitle_colour'])
+            from dizytv.subtitles import vlc_subtitle_options
+            opts=vlc_subtitle_options(w.state['settings'])
+            self.assertIn('--sub-margin=135',opts)
+            self.assertIn('--freetype-fontsize=50',opts)
+            self.assertIsNone(w.player)
+            self.assertEqual([],store.read()['jobs'])
+            w.close()
+
     def test_tv_player_modes_and_seekable_dvr_controls(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
