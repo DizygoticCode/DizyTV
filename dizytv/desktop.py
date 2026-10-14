@@ -260,6 +260,8 @@ class MainWindow(QMainWindow):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
         self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
+        self.last_live_recovery=0;self.last_good_video=time.monotonic()
+        self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
@@ -595,6 +597,39 @@ class MainWindow(QMainWindow):
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+20)
 
+    def check_live_timeshift(self,now=None):
+        """Recover VLC buffering/errors only if the local cache is still growing.
+
+        Never interrupt user pause, replay, or a scheduled recording.
+        """
+        if self.timeshift is None or self.player is None or not self.playback_started:
+            return
+        now=time.monotonic() if now is None else now
+        entries=self.timeshift.window.snapshot()
+        if not entries:return
+        if entries[-1].seq!=self.last_capture_seq:
+            self.last_capture_seq=entries[-1].seq
+            self.last_capture_progress=now
+        status=str(self.player.get_state())
+        if status.endswith('.Paused'):
+            self.last_good_video=now
+            return
+        if status.endswith('.Playing'):
+            self.last_good_video=now
+            return
+        if now-self.last_capture_progress>25:
+            self.seek_notice.setText('Timeshift capture is not receiving new video. Source may be offline; you can switch to direct LIVE.')
+            return
+        if (self.timeshift_lag==0 and now-self.last_good_video>=18
+                and now-self.last_live_recovery>=45
+                and (status.endswith('.Buffering') or status.endswith('.Error')
+                     or status.endswith('.Ended'))):
+            self.last_live_recovery=now
+            self.last_good_video=now
+            # Reconnecting the player does not stop or erase the capture ring.
+            self.play_url(self.timeshift.live_url())
+            self.status.setText('Recovered stalled timeshift playback to LIVE automatically.')
+
     def tick(self):
         self.state=self.store.read(); zone=self.state['settings']['timezone']
         label=('Auto: '+detected_zone() if zone=='auto' else zone); local=format_time(time.time(),zone,False,detected_zone()); key=label+' '+local.rsplit(' ',1)[-1]
@@ -606,6 +641,7 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
+        self.check_live_timeshift()
         if self.player and self.playback_started:
             local_active=self.timeshift is not None and bool(self.timeshift.window.snapshot())
             seekable=bool(self.player.is_seekable()) or local_active
@@ -788,6 +824,9 @@ class MainWindow(QMainWindow):
         self.timeshift=None
         self.timeshift_task=None
         self.timeshift_lag=0
+        self.last_capture_seq=-1
+        self.last_capture_progress=time.monotonic()
+        self.last_good_video=time.monotonic()
         if prior:
             prior.close()
 
@@ -810,6 +849,9 @@ class MainWindow(QMainWindow):
             self.play_url(url)
             return
         self.timeshift=session
+        self.last_capture_seq=-1
+        self.last_capture_progress=time.monotonic()
+        self.last_good_video=time.monotonic()
         self.status.setText('Preparing temporary local timeshift buffer…')
         job=Task(session.start)
         self.timeshift_task=job

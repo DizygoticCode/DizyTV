@@ -31,6 +31,28 @@ class DesktopTests(unittest.TestCase):
             self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
             s.close();window.close()
 
+    def test_stalled_local_timeshift_recovers_only_when_unpaused(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            ring=Mock()
+            ring.snapshot.return_value=[Mock(seq=20)]
+            w.timeshift=Mock(window=ring)
+            w.timeshift.live_url.return_value='http://127.0.0.1:3333/token/live.m3u8'
+            w.player=Mock()
+            w.player.get_state.return_value='State.Buffering'
+            w.playback_started=1
+            w.last_good_video=10;w.last_live_recovery=10
+            w.last_capture_progress=40;w.last_capture_seq=20
+            with patch.object(w,'play_url') as play:
+                w.check_live_timeshift(now=60)
+                play.assert_called_once()
+                play.reset_mock()
+                w.player.get_state.return_value='State.Paused'
+                w.check_live_timeshift(now=120)
+                play.assert_not_called()
+            w.timeshift=None;w.player=None;w.close()
+
     def test_tv_player_modes_and_seekable_dvr_controls(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:

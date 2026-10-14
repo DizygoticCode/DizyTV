@@ -29,6 +29,16 @@ class TestTimeshift(unittest.TestCase):
             w.close()
             self.assertFalse(c.path.exists())
 
+    def test_live_playlist_keeps_multiple_segments_for_vlc_buffering(self):
+        with tempfile.TemporaryDirectory() as root:
+            w=RollingWindow(root,free=lambda:1024**4)
+            for i in range(15):
+                w.append(PACKET*100,4)
+            manifest=w.playlist()
+            self.assertIn('#EXT-X-MEDIA-SEQUENCE:3',manifest)
+            self.assertEqual(12,manifest.count('#EXTINF:'))
+            w.close()
+
     def test_free_space_reserve_blocks_more_data(self):
         with tempfile.TemporaryDirectory() as path:
             w=RollingWindow(path, free=lambda:1024, reserve_bytes=1024**3)
