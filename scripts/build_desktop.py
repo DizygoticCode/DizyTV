@@ -1,6 +1,6 @@
 """Build on the target OS: a native EXE or macOS app, never cross-compile."""
 import hashlib
-from importlib.metadata import distribution
+from importlib.metadata import PackageNotFoundError, distribution
 import os
 import platform
 import shutil
@@ -13,13 +13,25 @@ os.chdir(ROOT)
 from PIL import Image
 licences=ROOT/'assets'/'licenses'
 shutil.copyfile(ROOT/'THIRD-PARTY-NOTICES.md',licences/'NOTICES.md')
-for package in ('python-vlc','tzdata','pyinstaller','vosk'):
-    wheel=distribution(package)
+# Include every explicitly bundled speech dependency, plus its runtime
+# HTTP support distributions. colorama is Windows-only (tqdm dependency).
+licence_packages=('python-vlc','tzdata','pyinstaller','vosk',
+                  'requests','srt','tqdm','charset-normalizer','idna',
+                  'urllib3','certifi','Pillow')
+for package in (*licence_packages,'colorama'):
+    try:wheel=distribution(package)
+    except PackageNotFoundError:
+        if package=='colorama':continue
+        raise
+    found=0
     for entry in wheel.files or []:
         if any(word in entry.name.lower() for word in ('license','licence','copying')):
             target=licences/'components'/package/entry.name
             target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(wheel.locate_file(entry),target)
+            found+=1
+    if package in ('vosk','requests','srt','tqdm') and not found:
+        raise RuntimeError('Missing upstream licence file for '+package)
 image=Image.open('assets/branding/dizytv-logo.png')
 image.save('assets/branding/dizytv.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
 image.save('assets/branding/dizytv.icns')
