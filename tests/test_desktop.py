@@ -124,6 +124,45 @@ class DesktopTests(unittest.TestCase):
         self.assertLess(grid.minimumWidth(),default)
         self.assertLess(grid.geometry_units()[0],58)
 
+    def test_appearance_picker_and_settings_restyle_guide_without_losing_channels(self):
+        from dizytv.desktop import desktop_style,overlay_theme_style
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            channel=parse_playlist('#EXTM3U\\n#EXTINF:-1,BBC One\\nhttps://example.com/bbc.m3u8')[0]
+            store.update(lambda s:s.update(channels=[channel]))
+            w=MainWindow(store,start_worker=False)
+            self.assertEqual('Green',w.theme_picker.currentText())
+            self.assertEqual(3,w.tabs.count())
+            self.assertEqual(['Live TV','TV Guide','Recordings'],
+                             [w.tabs.tabText(i) for i in range(w.tabs.count())])
+            self.assertFalse(w.tabs.tabBar().expanding())
+            self.assertTrue(w.tabs.tabBar().usesScrollButtons())
+            self.assertTrue(w.tools_button.menu().actions())
+            w.channels.setCurrentRow(0)
+            w.theme_picker.setCurrentText('Dark')
+            self.assertEqual('Dark',store.read()['settings']['theme'])
+            self.assertEqual('Dark',w.grid.theme)
+            self.assertIn('#17191f',QApplication.instance().styleSheet())
+            self.assertEqual(channel['id'],w.selected['id'])
+            self.assertNotIn('#151e19',desktop_style(theme='Light'))
+            self.assertIn('#f7f9fc',desktop_style(theme='Light'))
+            self.assertEqual('#f1f5fb',__import__('dizytv.desktop',fromlist=['theme_color']).theme_color('#15221a','Light'))
+            self.assertIn('#17263b',overlay_theme_style('color:#edfff0;', 'Light'))
+            settings=Settings(w.store.read(),w)
+            self.assertEqual('Dark',settings.theme.currentText())
+            settings.theme.setCurrentText('Light')
+            self.assertEqual('Light',settings.values()['theme'])
+            settings.close()
+            w.theme_picker.setCurrentText('Light')
+            self.assertEqual('Light',store.read()['settings']['theme'])
+            self.assertEqual('Light',w.grid.theme)
+            w.close()
+            again=MainWindow(store,start_worker=False)
+            self.assertEqual('Light',again.theme_picker.currentText())
+            self.assertEqual(1,again.channels.count())
+            again.close()
+
     def test_compact_scaling_and_smaller_resizable_window(self):
         from dizytv.desktop import desktop_style
         with tempfile.TemporaryDirectory() as folder:
@@ -602,7 +641,7 @@ class DesktopTests(unittest.TestCase):
             window.show(); self.app.processEvents()
             self.assertEqual('DizyTV', window.windowTitle())
             self.assertIn('auto', window.timezone_label.text().lower())
-            self.assertEqual(4, window.tabs.count())
+            self.assertEqual(3, window.tabs.count())
             self.assertEqual(0, window.channels.count())
             window.close()
 
