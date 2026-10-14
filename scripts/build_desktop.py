@@ -30,8 +30,16 @@ for package in (*licence_packages,'colorama'):
             target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(wheel.locate_file(entry),target)
             found+=1
+    if package=='vosk' and not found:
+        # Vosk's published Python wheel currently omits a LICENSE entry.
+        # Its Apache-2.0 terms are already shipped in our tracked licences;
+        # explicitly copy the canonical text into its attribution folder.
+        target=licences/'components'/'vosk'/'Apache-2.0.txt'
+        target.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(licences/'Apache-2.0.txt',target)
+        found=1
     if package in ('vosk','requests','srt','tqdm') and not found:
-        raise RuntimeError('Missing upstream licence file for '+package)
+        raise RuntimeError('Missing license terms for bundled dependency '+package)
 image=Image.open('assets/branding/dizytv-logo.png')
 image.save('assets/branding/dizytv.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
 image.save('assets/branding/dizytv.icns')
