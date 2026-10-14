@@ -24,6 +24,7 @@ FREE_PLAYLISTS = (
     ("Free television series channels", "https://iptv-org.github.io/iptv/categories/series.m3u", ""),
     ("Free movie channels", "https://iptv-org.github.io/iptv/categories/movies.m3u", ""),
     ("Free comedy / sitcom channels", "https://iptv-org.github.io/iptv/categories/comedy.m3u", ""),
+    ("Free public sports channels", "https://iptv-org.github.io/iptv/categories/sports.m3u", ""),
     ("Free-TV curated international", "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8", ""),
     ("IPTV-org worldwide", "https://iptv-org.github.io/iptv/index.m3u", ""),
 )
@@ -32,7 +33,7 @@ FREE_GUIDES = (
     ("UK Freeview (seven days)", "https://raw.githubusercontent.com/dp247/Freeview-EPG/master/epg.xml"),
     ("US lightweight XMLTV", "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_lite.xml.gz"),
 )
-# Fifteen bounded free HTTP/Ace/category sources; the worldwide mega-index stays opt-in.
+# Sixteen bounded free HTTP/Ace/category sources; the worldwide mega-index stays opt-in.
 DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
@@ -41,6 +42,7 @@ CATEGORY_HINTS = {
     'https://iptv-org.github.io/iptv/categories/series.m3u': 'Series',
     'https://iptv-org.github.io/iptv/categories/movies.m3u': 'Movies',
     'https://iptv-org.github.io/iptv/categories/comedy.m3u': 'Comedy',
+    'https://iptv-org.github.io/iptv/categories/sports.m3u': 'Sport',
 }
 
 def source_label(url):
