@@ -1318,10 +1318,19 @@ class MainWindow(QMainWindow):
         dialog=Settings(self.store.read(),self)
         if dialog.exec()==QDialog.Accepted:
             try:
-                self.store.update(lambda s:s.update(settings=dialog.values()))
+                before=self.state['settings']
+                updated=dialog.values()
+                self.store.update(lambda s:s.update(settings=updated))
                 self.state=self.store.read()
                 self.apply_interface_scale()
+                # Preserve a manually selected SRT or broadcast track on pure
+                # appearance edits, but reset selection after disabling /
+                # re-enabling or changing the requested caption language.
+                if (before.get('subtitles_enabled',True)!=updated.get('subtitles_enabled',True)
+                        or before.get('subtitle_language','Auto')!=updated.get('subtitle_language','Auto')):
+                    self._subtitle_manual_track=None
                 self._subtitle_auto_applied=False
+                self._subtitle_track_signature=()
                 self.sync_subtitles()
                 self.render_guide()
                 self.tick()
@@ -1543,8 +1552,13 @@ class MainWindow(QMainWindow):
             path=external_subtitle_path(path)
             if not self.player.video_set_subtitle_file(path):
                 raise ValueError('VLC could not read this subtitle file')
-            self._subtitle_auto_applied=False
-            self._subtitle_manual_track=None
+            # File subtitles are an explicit user choice: the periodic
+            # broadcast preference must not replace the newly attached slave.
+            self._subtitle_manual_track='external'
+            self._subtitle_auto_applied=True
+            if not self.state['settings'].get('subtitles_enabled',True):
+                self.state=self.store.update(
+                    lambda s:s['settings'].update(subtitles_enabled=True))
             self.status.setText('Subtitle file attached to current playback (not saved to recordings)')
         except (ValueError,OSError,RuntimeError,AttributeError) as exc:
             self.status.setText('Cannot load subtitles: '+str(exc))
