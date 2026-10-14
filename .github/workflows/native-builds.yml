@@ -150,7 +150,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
-          pkgutil --payload-files dist/*.pkg
+          # Validate the exact release filename in each native build, not only
+          # in publish-alpha after waiting for every other platform to finish.
+          test -s "dist/DizyTV-0.1.13-alpha-${{ matrix.target }}.pkg"
+          pkgutil --payload-files "dist/DizyTV-0.1.13-alpha-${{ matrix.target }}.pkg"
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:

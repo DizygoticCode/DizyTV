@@ -3,7 +3,9 @@ import hashlib
 from importlib.metadata import PackageNotFoundError, distribution
 import os
 import platform
+import re
 import shutil
+import tomllib
 import subprocess
 import sys
 from pathlib import Path
@@ -72,14 +74,21 @@ if sys.platform=='darwin':
     import plistlib
     info=Path('dist/DizyTV.app/Contents/Info.plist')
     value=plistlib.loads(info.read_bytes())
-    value.update(CFBundleShortVersionString='0.1.12',CFBundleVersion='13',LSMinimumSystemVersion='13.0',
+    # Read the packaging version from pyproject instead of keeping a stale
+    # macOS-only number after the Windows/Android release has been bumped.
+    project_version = tomllib.loads((ROOT/'pyproject.toml').read_text(encoding='utf-8'))['project']['version']
+    matched = re.fullmatch(r'([0-9]+[.][0-9]+[.][0-9]+)a[0-9]+', project_version)
+    if not matched:
+        raise RuntimeError('Unsupported alpha project version: '+project_version)
+    mac_version = matched.group(1)
+    value.update(CFBundleShortVersionString=mac_version,CFBundleVersion=mac_version,LSMinimumSystemVersion='13.0',
                  NSLocalNetworkUsageDescription='Connect to your configured Ace Stream engine for live television and local recording.')
     info.write_bytes(plistlib.dumps(value))
     # Re-sign after Info.plist change. Ad-hoc identity is for development only.
     subprocess.run(['codesign','--force','--deep','--sign','-','dist/DizyTV.app'],check=True)
     subprocess.run(['pkgbuild','--component','dist/DizyTV.app','--install-location','/Applications',
-                    '--identifier','dev.dizygotic.dizytv','--version','0.1.12',
-                    f'dist/DizyTV-0.1.12-alpha-macos-{platform.machine()}.pkg'],check=True)
+                    '--identifier','dev.dizygotic.dizytv','--version',mac_version,
+                    f'dist/DizyTV-{mac_version}-alpha-macos-{platform.machine()}.pkg'],check=True)
 
 for file in Path('dist').glob('*'):
     if file.is_file() and file.suffix in ('.pkg','.exe'):
