@@ -1,6 +1,7 @@
 """Native Qt desktop client for Windows and macOS."""
 from __future__ import annotations
 import json
+import re
 import os
 import sys
 import time
@@ -35,7 +36,11 @@ QPushButton:hover { background:#477552; } QPushButton:disabled { color:#8a938b; 
 QLineEdit,QPlainTextEdit,QComboBox,QSpinBox,QDoubleSpinBox { background:#202d24; padding:8px; border:1px solid #405246; border-radius:5px; }
 QListWidget { background:#1a261e; border:0; } QListWidget::item { padding:12px; border-bottom:1px solid #2f4033; }
 QListWidget::item:selected { background:#416248; }
-QTabBar::tab { padding:12px 22px; background:#25362b; } QTabBar::tab:selected { background:#416248; }
+QTabWidget::pane { border:1px solid #405246; border-radius:10px; top:-1px; }
+QTabBar::tab { padding:9px 16px; margin:4px 4px 5px 0; background:#25362b; border:1px solid #405246; border-radius:9px; }
+QTabBar::tab:hover { background:#355b43; }
+QTabBar::tab:selected { background:#416248; border:1px solid #54785b; font-weight:700; }
+QLabel#filterTitle { color:#a8c5ad; }
 QTableWidget { gridline-color:#354638; background:#19251d; }
 QHeaderView::section { background:#2d4133; padding:8px; border:0; }
 QPushButton#tvPrimary { background:#397f51; border:1px solid #64b679; color:white; font-weight:700; }
@@ -53,15 +58,109 @@ QScrollArea#toolbarScroll, QScrollArea#playerControlScroll { border:0; backgroun
 '''
 
 
-def desktop_style(scale=100, button_size='Normal'):
+THEME_COLORS = {
+    'Dark': {
+        '#151e19':'#17191f',
+        '#f3ead5':'#f1f3f7',
+        '#355b43':'#323845',
+        '#54785b':'#59616f',
+        '#8a938b':'#8d96a4',
+        '#477552':'#424a5b',
+        '#202d24':'#242932',
+        '#405246':'#545d6d',
+        '#1a261e':'#1d222b',
+        '#2f4033':'#343c47',
+        '#416248':'#485d79',
+        '#25362b':'#292f3a',
+        '#19251d':'#20252e',
+        '#354638':'#454f5c',
+        '#2d4133':'#333b49',
+        '#397f51':'#385e91',
+        '#64b679':'#6ea0e1',
+        '#4b9963':'#497ab6',
+        '#69352f':'#693c45',
+        '#b26354':'#bf777e',
+        '#713b38':'#8b3e3f',
+        '#cc7771':'#f1a29b',
+        '#ffe2d4':'#ffe9dc',
+        '#355c48':'#66788e',
+        '#21392e':'#2d3542',
+        '#61bd7c':'#679bdc',
+        '#d9f6dd':'#e4edff',
+        '#72df99':'#8bb7f2',
+        '#6b746d':'#747983',
+        '#99a69d':'#a7afbc',
+        '#62adca':'#759dbf',
+        '#a8c5ad':'#c1cada',
+        '#15221a':'#151922',
+        '#47654b':'#465267',
+        '#95a695':'#bbc1cd',
+        '#3c5c42':'#354966',
+        '#283e30':'#272f3e',
+        '#f4af71':'#f2b875',
+        '#304d36':'#303c52',
+        '#101713':'#101219',
+    },
+    'Light': {
+        '#151e19':'#f7f9fc',
+        '#f3ead5':'#1e293b',
+        '#355b43':'#e3e9f2',
+        '#54785b':'#a4b2c6',
+        '#8a938b':'#8490a2',
+        '#477552':'#d3deec',
+        '#202d24':'#ffffff',
+        '#405246':'#c2ccd9',
+        '#1a261e':'#ffffff',
+        '#2f4033':'#dee5ed',
+        '#416248':'#bfd4ee',
+        '#25362b':'#e9eef6',
+        '#19251d':'#ffffff',
+        '#354638':'#d1dbe7',
+        '#2d4133':'#eff3fa',
+        '#397f51':'#2d6cc0',
+        '#64b679':'#1a569e',
+        '#4b9963':'#3d7ed1',
+        '#69352f':'#f7dce0',
+        '#b26354':'#d67e8a',
+        '#713b38':'#fae7e4',
+        '#cc7771':'#d76767',
+        '#ffe2d4':'#842a27',
+        '#355c48':'#a5bfdc',
+        '#21392e':'#e8f0fb',
+        '#61bd7c':'#3b82d5',
+        '#d9f6dd':'#e8f4ff',
+        '#72df99':'#4c94e0',
+        '#6b746d':'#bcc4cf',
+        '#99a69d':'#919cae',
+        '#62adca':'#3480a3',
+        '#a8c5ad':'#51657e',
+        '#15221a':'#f1f5fb',
+        '#47654b':'#ccd7e5',
+        '#95a695':'#526078',
+        '#3c5c42':'#d7e7fb',
+        '#283e30':'#e5edf9',
+        '#f4af71':'#cf6f17',
+        '#304d36':'#dde9fa',
+        '#101713':'#e8eef6',
+    },
+}
+
+
+def theme_color(color, theme='Green'):
+    return THEME_COLORS.get(theme, {}).get(color, color)
+
+
+def desktop_style(scale=100, button_size='Normal', theme='Green'):
     """Respect TV DPI while allowing smaller independent UI/controls."""
     scale=max(75,min(150,int(scale)))/100
     pad={'Compact':(4,8),'Normal':(9,15),'Large':(13,20)}.get(button_size,(9,15))
-    return (STYLE.replace('font-size:14px;',f'font-size:{round(14*scale)}px;')
-                 .replace('font-size:27px;',f'font-size:{round(27*scale)}px;')
-                 .replace('padding:9px 15px;',f'padding:{round(pad[0]*scale)}px {round(pad[1]*scale)}px;')
-                 .replace('padding:12px 22px;',f'padding:{round(10*scale)}px {round(18*scale)}px;')
-                 .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
+    style=(STYLE.replace('font-size:14px;',f'font-size:{round(14*scale)}px;')
+               .replace('font-size:27px;',f'font-size:{round(27*scale)}px;')
+               .replace('padding:9px 15px;',f'padding:{round(pad[0]*scale)}px {round(pad[1]*scale)}px;')
+               .replace('padding:9px 16px;',f'padding:{round(8*scale)}px {round(14*scale)}px;')
+               .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
+    colors=THEME_COLORS.get(theme, {})
+    return re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
 
 
 def detected_zone():
