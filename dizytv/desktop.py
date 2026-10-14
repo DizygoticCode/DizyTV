@@ -860,7 +860,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget();root.setObjectName('appShell');self.setCentralWidget(root);layout=QVBoxLayout(root);layout.setContentsMargins(9,8,9,8);layout.setSpacing(8)
         topbar=QWidget();topbar.setObjectName('appHeader');top=QHBoxLayout(topbar);top.setContentsMargins(4,4,4,4);top.setSpacing(8)
-        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
+        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(54,54,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand)
         theme_label=QLabel('Theme')
         theme_label.setObjectName('filterTitle')
@@ -881,6 +881,8 @@ class MainWindow(QMainWindow):
         tools_menu=QMenu(self.tools_button)
         tools_menu.addAction('Save local backup…',self.backup)
         tools_menu.addAction('Restore local backup…',self.restore)
+        tools_menu.addSeparator()
+        tools_menu.addAction('Set up Ace Stream engine…',self.open_ace_stream_setup)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
@@ -891,7 +893,7 @@ class MainWindow(QMainWindow):
         self.header_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
         topbar.adjustSize()
         self.header_scroll.setWidget(topbar)
-        self.header_scroll.setFixedHeight(topbar.sizeHint().height()+20)
+        self.header_scroll.setFixedHeight(topbar.sizeHint().height()+12)
         layout.addWidget(self.header_scroll)
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
@@ -996,10 +998,6 @@ class MainWindow(QMainWindow):
         self.popout_button.setToolTip('Open a separate resizable TV window while the guide stays available')
         self.popout_button.clicked.connect(self.open_popout)
         controls.addWidget(self.popout_button)
-        setup_engine=QPushButton('Set up Ace Stream engine')
-        setup_engine.setToolTip('Visit the official provider to install the optional P2P engine. Never needed for HTTP/HLS channels.')
-        setup_engine.clicked.connect(self.open_ace_stream_setup)
-        controls.addWidget(setup_engine)
         self.controls_scroll=QScrollArea()
         self.controls_scroll.setObjectName('playerControlScroll')
         self.controls_scroll.setWidgetResizable(False)
@@ -1008,7 +1006,7 @@ class MainWindow(QMainWindow):
         self.controls_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
         controls_widget.adjustSize()
         self.controls_scroll.setWidget(controls_widget)
-        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+20)
+        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+14)
         live_layout.addWidget(self.controls_scroll)
         self.tv_controls=controls
         for item in range(controls.count()):
@@ -1051,7 +1049,7 @@ class MainWindow(QMainWindow):
         for label,handler in [('Stop / cancel',self.cancel_job),('Rearm restored timer',self.rearm_job),('Play file',self.play_file),('Delete file',self.delete_file)]:
             b=QPushButton(label); b.clicked.connect(handler); rec_buttons.addWidget(b)
         rec_layout.addLayout(rec_buttons); hint=QLabel('One recording at a time. Closing this window leaves the recorder running.\nAfter a reboot, open DizyTV to resume future timers. This alpha does not wake a sleeping computer.'); hint.setWordWrap(True); rec_layout.addWidget(hint); self.tabs.addTab(recordings,'Recordings')
-        self.global_search_button=QPushButton('⌕  Search channels and programmes                                    Ctrl+K');self.global_search_button.setObjectName('globalSearch')
+        self.global_search_button=QPushButton('⌕  Search channels and programmes  •  Ctrl+K');self.global_search_button.setObjectName('globalSearch')
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
         layout.insertWidget(1,self.global_search_button)
@@ -1280,7 +1278,7 @@ class MainWindow(QMainWindow):
             widget=scroll.widget()
             if widget:
                 widget.adjustSize()
-                scroll.setFixedHeight(widget.sizeHint().height()+20)
+                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 14))
 
     def playback_light_state(self):
         if not self.player or not self.playback_started:
