@@ -695,8 +695,9 @@ class MainWindow(QMainWindow):
     def show_source_status(self):
         state=self.store.read(); counts={}
         for ch in state['channels']:
-            key=ch.get('source','https://search-ace.stream/playlist')
-            counts[key]=counts.get(key,0)+1
+            for key in set(ch.get('sources') or
+                           [ch.get('source','https://search-ace.stream/playlist')]):
+                counts[key]=counts.get(key,0)+1
         lines=['Saved unique channels per configured playlist (not guaranteed playable):']
         for url in configured_playlists(state['settings']):
             lines.append(f'{source_label(url)}: {counts.get(url,0)}')
@@ -791,8 +792,9 @@ class MainWindow(QMainWindow):
         urls=configured_playlists(self.state['settings'])
         counts={}
         for ch in source:
-            source_url=ch.get('source','https://search-ace.stream/playlist')
-            counts[source_url]=counts.get(source_url,0)+1
+            for source_url in set(ch.get('sources') or
+                                  [ch.get('source','https://search-ace.stream/playlist')]):
+                counts[source_url]=counts.get(source_url,0)+1
         self.source_filter.blockSignals(True); self.source_filter.clear()
         self.source_filter.addItem('All playlists','')
         self.source_filter.addItem('HTTP/HLS (no Ace engine)','<http>')
@@ -822,10 +824,10 @@ class MainWindow(QMainWindow):
         active_source=self.source_filter.currentData()
         for ch in source:
             transport=ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')
-            source_url=ch.get('source','https://search-ace.stream/playlist')
+            source_urls=ch.get('sources') or [ch.get('source','https://search-ace.stream/playlist')]
             if active_source=='<http>' and transport=='Ace Stream': continue
             if active_source=='<ace>' and transport!='Ace Stream': continue
-            if active_source not in ('','<http>','<ace>') and active_source!=source_url: continue
+            if active_source not in ('','<http>','<ace>') and active_source not in source_urls: continue
             if query not in (ch['name']+' '+display_channel_name(ch['name'])+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
             if self.section_filter.currentData() and channel_section(ch)!=self.section_filter.currentData():continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
