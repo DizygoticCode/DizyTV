@@ -1507,8 +1507,8 @@ class MainWindow(QMainWindow):
         so a cheap periodic scan is safer than a one-shot lookup on Play.
         """
         if not self.player or not self.playback_started:return
-        tracks=subtitle_tracks(self.player)
-        signature=tuple(tracks)
+        # Turning captions off does not require enumerating decoder tracks.
+        # Some streams also expose the track list only after startup.
         if not self.state['settings'].get('subtitles_enabled',True):
             if not self._subtitle_auto_applied:
                 try:
@@ -1520,6 +1520,8 @@ class MainWindow(QMainWindow):
             return
         if self._subtitle_manual_track is not None:
             return
+        tracks=subtitle_tracks(self.player)
+        signature=tuple(tracks)
         if not tracks:return
         if self._subtitle_auto_applied and signature==self._subtitle_track_signature:return
         target=suggested_subtitle(tracks,self.state['settings'].get('subtitle_language','Auto'))
