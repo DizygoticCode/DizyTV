@@ -61,8 +61,8 @@ class DesktopTests(unittest.TestCase):
         from PySide6.QtWidgets import QListWidget, QPushButton, QLineEdit
         with tempfile.TemporaryDirectory() as folder:
             store=Store(folder)
-            playlist='#EXTM3U\\n'+''.join(
-                f'#EXTINF:-1,Quick Channel {i:04d}\\nhttps://example.com/{i}.m3u8\\n'
+            playlist='#EXTM3U\n'+''.join(
+                f'#EXTINF:-1,Quick Channel {i:04d}\nhttps://example.com/{i}.m3u8\n'
                 for i in range(321))
             store.update(lambda s:s.update(channels=parse_playlist(playlist)))
             window=MainWindow(store,start_worker=False)
