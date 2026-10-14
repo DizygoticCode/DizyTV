@@ -232,7 +232,77 @@ def desktop_style(scale=100, button_size='Normal', theme='Green'):
                .replace('padding:9px 16px;',f'padding:{round(8*scale)}px {round(14*scale)}px;')
                .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
     colors=THEME_COLORS.get(theme, {})
-    return re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
+    converted=re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
+    return converted+'\n'+modern_desktop_style(theme)
+
+
+
+def modern_desktop_style(theme='Green'):
+    """Kodi/IPTV-style surfaces shared by desktop Windows and macOS."""
+    palettes={
+        'Green': ('#101712','#19251d','#26362b','#47654b','#f1f7f1','#a8c4ae','#65dca0','#327b50','#13221a'),
+        'Dark': ('#121821','#1b2531','#293544','#50627a','#f1f5fb','#a8bad0','#84b4fa','#456daa','#192231'),
+        'Light': ('#f4f7fb','#ffffff','#e9f0f9','#bdcad9','#23364b','#647b91','#2678cb','#225b9b','#eef3fa'),
+    }
+    bg,surface,raised,border,fg,muted,accent,primary,input_bg=palettes.get(theme,palettes['Green'])
+    return f"""
+QMainWindow, QDialog, QWidget#appShell {{ background:{bg}; }}
+QWidget#appHeader, QWidget#livePage, QWidget#playbackControlsRow {{ background:transparent; border:0; }}
+QWidget#appSidebar {{ background:{surface};border:1px solid {border};border-radius:12px; }}
+QLabel#brand {{ color:{fg};font-size:24px;font-weight:800; }}
+QLabel#channelHeading {{color:{fg};font-weight:700;font-size:16px;}}
+QLabel#filterTitle, QLabel#timezoneLabel, QLabel#playbackHint, QLabel#appStatus {{
+    color:{muted};font-size:12px;
+}}
+QPushButton {{ background:{raised};color:{fg};border:1px solid {border};
+    border-radius:9px;padding:8px 13px;font-weight:600; }}
+QPushButton:hover {{background:{border};border-color:{accent};}}
+QPushButton:pressed {{background:{primary};color:white;}}
+QPushButton:disabled {{color:{muted};border-color:{raised};}}
+QPushButton#tvPrimary {{background:{primary};border-color:{primary};color:white;font-weight:700;}}
+QPushButton#tvDanger {{background:{raised};border-color:{border};}}
+QPushButton#globalSearch {{background:{input_bg};color:{muted};border-radius:10px;
+    border:1px solid {border};text-align:left;padding:10px 14px;}}
+QPushButton#globalSearch:hover {{border-color:{accent};color:{fg};}}
+QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+    background:{input_bg};color:{fg};border:1px solid {border};border-radius:8px;
+    padding:7px 9px;selection-background-color:{primary};
+}}
+QLineEdit:focus,QPlainTextEdit:focus,QComboBox:focus {{border-color:{accent};}}
+QComboBox::drop-down {{border:0;width:24px;}}
+QTabWidget::pane {{background:{surface};border:1px solid {border};border-radius:11px;top:0;}}
+QTabBar::tab {{background:transparent;color:{muted};border:0;
+    border-bottom:2px solid transparent;border-radius:0;padding:11px 16px;margin-right:4px;}}
+QTabBar::tab:hover {{background:{raised};color:{fg};}}
+QTabBar::tab:selected {{background:{surface};color:{accent};
+    border-bottom:2px solid {accent};font-weight:700;}}
+QListWidget,QTreeWidget,QTableWidget {{background:{surface};color:{fg};
+    border:1px solid {border};border-radius:8px;alternate-background-color:{input_bg};}}
+QListWidget::item {{padding:10px 9px;border-bottom:1px solid {raised};}}
+QListWidget::item:selected,QTreeWidget::item:selected {{background:{raised};color:{accent};}}
+QListWidget::item:hover,QTreeWidget::item:hover {{background:{raised};}}
+QHeaderView::section {{background:{raised};color:{fg};padding:9px;border:0;border-bottom:1px solid {border};}}
+QScrollArea#toolbarScroll,QScrollArea#playerControlScroll {{background:transparent;border:0;}}
+QScrollArea#toolbarScroll > QWidget > QWidget,QScrollArea#playerControlScroll > QWidget > QWidget {{
+    background:transparent;border:0;
+}}
+QScrollBar:vertical {{width:9px;background:transparent;}}
+QScrollBar:horizontal {{height:9px;background:transparent;}}
+QScrollBar::handle {{background:{border};border-radius:4px;min-height:25px;min-width:25px;}}
+QScrollBar::handle:hover {{background:{muted};}}
+QScrollBar::add-line,QScrollBar::sub-line {{width:0;height:0;border:0;}}
+QScrollBar::add-page,QScrollBar::sub-page {{background:transparent;}}
+QSlider#seekBar,QSlider#volumeBar {{background:transparent;border:0;padding:0;margin:0;}}
+QSlider#seekBar::groove:horizontal,QSlider#volumeBar::groove:horizontal {{
+    background:{raised};border:0;border-radius:2px;height:4px;}}
+QSlider#seekBar::add-page:horizontal,QSlider#volumeBar::add-page:horizontal {{
+    background:{raised};border:0;border-radius:2px;}}
+QSlider#seekBar::sub-page:horizontal {{background:{accent};border:0;border-radius:2px;}}
+QSlider#volumeBar::sub-page:horizontal {{background:#69bbd6;border:0;border-radius:2px;}}
+QSlider#seekBar::handle:horizontal,QSlider#volumeBar::handle:horizontal {{
+    background:{fg};border:2px solid {accent};width:14px;border-radius:7px;margin:-7px 0;}}
+QSlider#seekBar:disabled::handle:horizontal {{background:{muted};border-color:{raised};}}
+"""
 
 
 def detected_zone():
@@ -756,8 +826,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
-        root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
-        topbar=QWidget(); top=QHBoxLayout(topbar);top.setContentsMargins(3,3,3,3)
+        root=QWidget();root.setObjectName('appShell');self.setCentralWidget(root);layout=QVBoxLayout(root);layout.setContentsMargins(9,8,9,8);layout.setSpacing(8)
+        topbar=QWidget();topbar.setObjectName('appHeader');top=QHBoxLayout(topbar);top.setContentsMargins(4,4,4,4);top.setSpacing(8)
         logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand)
         theme_label=QLabel('Theme')
@@ -771,7 +841,7 @@ class MainWindow(QMainWindow):
         self.theme_picker.currentTextChanged.connect(self.choose_theme)
         top.addWidget(self.theme_picker)
         top.addStretch()
-        self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
+        self.timezone_label=QLabel();self.timezone_label.setObjectName('timezoneLabel');top.addWidget(self.timezone_label)
         for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
         self.tools_button=QPushButton('Tools ▾')
@@ -794,7 +864,7 @@ class MainWindow(QMainWindow):
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
-        sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
+        sidebar=QWidget();sidebar.setObjectName('appSidebar');side=QVBoxLayout(sidebar);side.setContentsMargins(10,10,10,10);side.setSpacing(7);self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox()
         self.kind_filter=QComboBox(); self.source_filter=QComboBox()
         self.section_filter=QComboBox()
@@ -838,7 +908,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.ElideRight)
         split.addWidget(self.tabs);split.setSizes([270,880])
-        live=QWidget(); live_layout=QVBoxLayout(live); self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
+        live=QWidget();live.setObjectName('livePage');live_layout=QVBoxLayout(live);live_layout.setContentsMargins(8,8,8,8);live_layout.setSpacing(6);self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play');self.now.setObjectName('channelHeading'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
         self.channel_banner.setObjectName('channelBanner')
         self.channel_banner.setWordWrap(True)
@@ -915,7 +985,7 @@ class MainWindow(QMainWindow):
                 if widget in (self.live_button,):widget.setObjectName('tvLive')
                 elif widget in (self.pause_button,self.popout_button):widget.setObjectName('tvPrimary')
                 elif widget.text().startswith(('■','● Record')):widget.setObjectName('tvDanger')
-        self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
+        self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window');self.seek_notice.setObjectName('playbackHint')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
         self.seek_slider=TimeSeekSlider(Qt.Horizontal)
@@ -949,13 +1019,13 @@ class MainWindow(QMainWindow):
         for label,handler in [('Stop / cancel',self.cancel_job),('Rearm restored timer',self.rearm_job),('Play file',self.play_file),('Delete file',self.delete_file)]:
             b=QPushButton(label); b.clicked.connect(handler); rec_buttons.addWidget(b)
         rec_layout.addLayout(rec_buttons); hint=QLabel('One recording at a time. Closing this window leaves the recorder running.\nAfter a reboot, open DizyTV to resume future timers. This alpha does not wake a sleeping computer.'); hint.setWordWrap(True); rec_layout.addWidget(hint); self.tabs.addTab(recordings,'Recordings')
-        self.global_search_button=QPushButton('⌕ Search all channels & programmes   Ctrl+K')
+        self.global_search_button=QPushButton('⌕  Search channels and programmes                                    Ctrl+K');self.global_search_button.setObjectName('globalSearch')
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
         layout.insertWidget(1,self.global_search_button)
         self.global_search_shortcut=QShortcut(QKeySequence('Ctrl+K'),self)
         self.global_search_shortcut.activated.connect(self.open_global_search)
-        self.status=QLabel('Native alpha • Configure your engine, XMLTV sources and recording storage in Settings'); layout.addWidget(self.status)
+        self.status=QLabel('Ready  •  Configure sources and recording storage in Settings');self.status.setObjectName('appStatus');layout.addWidget(self.status)
         self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
         self.light_timer.start()
