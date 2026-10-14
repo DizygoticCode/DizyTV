@@ -56,6 +56,36 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(65,len(w.grid.rows))
             w.close()
 
+    def test_popout_quick_guide_pages_every_channel_and_searches_final_page(self):
+        from dizytv.core import parse_playlist
+        from PySide6.QtWidgets import QListWidget, QPushButton, QLineEdit
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            playlist='#EXTM3U\\n'+''.join(
+                f'#EXTINF:-1,Quick Channel {i:04d}\\nhttps://example.com/{i}.m3u8\\n'
+                for i in range(321))
+            store.update(lambda s:s.update(channels=parse_playlist(playlist)))
+            window=MainWindow(store,start_worker=False)
+            window.show_tv_guide()
+            dialog=window.guide_popup
+            results=dialog.findChild(QListWidget)
+            more=next(b for b in dialog.findChildren(QPushButton) if 'next 150' in b.text())
+            self.assertEqual(150,results.count())
+            more.click()
+            self.assertEqual(300,results.count())
+            more.click()
+            self.assertEqual(321,results.count())
+            self.assertFalse(more.isEnabled())
+            query=dialog.findChild(QLineEdit)
+            query.setText('Quick Channel 0320')
+            self.assertEqual(1,results.count())
+            self.assertEqual('Quick Channel 0320',results.item(0).data(Qt.UserRole)['name'])
+            self.assertFalse(more.isEnabled())
+            query.clear()
+            self.assertEqual(150,results.count())
+            dialog.close()
+            window.close()
+
     @unittest.skipIf(sys.platform=='darwin', 'Qt offscreen native-window reparenting not validated on macOS')
     def test_global_search_finds_programme_hidden_by_source_filter(self):
         with tempfile.TemporaryDirectory() as folder:
