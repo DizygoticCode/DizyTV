@@ -264,6 +264,7 @@ class MainWindow(QMainWindow):
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
+        self._last_media_activity=None
         self.detached_controls=None;self.detached_hide_timer=QTimer(self)
         self.detached_hide_timer.setSingleShot(True)
         self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
@@ -612,6 +613,21 @@ class MainWindow(QMainWindow):
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+20)
 
+    def media_activity(self):
+        """VLC's decoded picture/audio counters catch freezes with State.Playing.
+
+        Older VLC builds may not provide stats; do not guess in that case.
+        """
+        try:
+            import vlc
+            media=self.player.get_media()
+            if media is None:return None
+            stats=vlc.MediaStats()
+            if not media.get_stats(stats):return None
+            return int(stats.displayed_pictures)+int(stats.played_abuffers)
+        except (AttributeError,TypeError,RuntimeError,OSError):
+            return None
+
     def check_live_timeshift(self,now=None):
         """Recover VLC buffering/errors only if the local cache is still growing.
 
@@ -629,15 +645,22 @@ class MainWindow(QMainWindow):
         if status.endswith('.Paused'):
             self.last_good_video=now
             return
-        if status.endswith('.Playing'):
-            self.last_good_video=now
-            return
+        playing=status.endswith('.Playing')
+        if playing:
+            frames=self.media_activity()
+            if frames is None:
+                self.last_good_video=now
+                return
+            if frames!=self._last_media_activity:
+                self._last_media_activity=frames
+                self.last_good_video=now
+                return
         if now-self.last_capture_progress>25:
             self.seek_notice.setText('Timeshift capture is not receiving new video. Source may be offline; you can switch to direct LIVE.')
             return
         if (self.timeshift_lag==0 and now-self.last_good_video>=18
                 and now-self.last_live_recovery>=45
-                and (status.endswith('.Buffering') or status.endswith('.Error')
+                and (playing or status.endswith('.Buffering') or status.endswith('.Error')
                      or status.endswith('.Ended'))):
             self.last_live_recovery=now
             self.last_good_video=now
@@ -801,6 +824,8 @@ class MainWindow(QMainWindow):
             self.player.set_media(media); media.release()
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.playback_started=time.monotonic(); self.playback_reported=False
+            self._last_media_activity=None
+            self.last_good_video=time.monotonic()
             self.source_check_serial+=1
             self.pause_button.setText('⏸ Pause')
             if self.selected:

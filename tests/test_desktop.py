@@ -31,6 +31,26 @@ class DesktopTests(unittest.TestCase):
             self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
             s.close();window.close()
 
+    def test_vlc_reports_playing_but_picture_counters_frozen_auto_recovers(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.timeshift=Mock()
+            w.timeshift.window.snapshot.return_value=[Mock(seq=7)]
+            w.timeshift.live_url.return_value='http://127.0.0.1:99/token/live.m3u8'
+            w.player=Mock()
+            w.player.get_state.return_value='State.Playing'
+            w.playback_started=1
+            w.last_capture_seq=7
+            w.last_capture_progress=100
+            w.last_good_video=70
+            w.last_live_recovery=0
+            w._last_media_activity=2000
+            with patch.object(w,'media_activity',return_value=2000),patch.object(w,'play_url') as recover:
+                w.check_live_timeshift(now=110)
+                recover.assert_called_once()
+            w.timeshift=None;w.player=None;w.close()
+
     def test_stalled_local_timeshift_recovers_only_when_unpaused(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
