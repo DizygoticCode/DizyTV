@@ -88,6 +88,23 @@ class CoreTests(unittest.TestCase):
         self.assertEqual('',match_guide(make('BBCOne.uk','BBC One Ⓖ'),{'a'*40:''},names))
         self.assertEqual('ITV1.uk',match_guide(make('ITV1.uk','ITV 1'),{},names))
 
+    def test_radio_from_uk_playlist_ids_and_names(self):
+        from dizytv.core import channel_kind,channel_section,parse_playlist
+        m3u=('#EXTM3U\n'
+             '#EXTINF:-1 tvg-id="BBCRadio1.uk" tvg-country="GB" group-title="UK",BBC Radio 1\n'
+             'https://example.com/radio1.m3u8\n'
+             '#EXTINF:-1 tvg-id="BBCRadioAsianNetwork.uk" tvg-country="GB" group-title="UK",BBC Asian Network\n'
+             'https://example.com/asian.m3u8\n'
+             '#EXTINF:-1 tvg-id="BBCOne.uk" tvg-country="GB" group-title="UK",BBC One\n'
+             'https://example.com/tv.m3u8\n')
+        channels=parse_playlist(m3u)
+        self.assertEqual(['Radio','Radio','TV'],[c['kind'] for c in channels])
+        # Cached alpha states have old kind=TV: derive the category at display time.
+        old=dict(channels[0],kind='TV')
+        self.assertEqual('Radio',channel_kind(old))
+        self.assertEqual('Radio',channel_section(old))
+        self.assertEqual('TV',channel_kind(channels[2]))
+
     def test_presentational_name_cleanup_and_country_sections(self):
         from dizytv.core import display_channel_name,channel_section
         samples={
@@ -132,6 +149,17 @@ class CoreTests(unittest.TestCase):
         del s['settings']['timeshift_dir']
         # Old installations remain valid without new keys.
         validate_state(s)
+
+    def test_windows_ui_settings_optional_for_old_backups(self):
+        from dizytv.core import default_state,validate_state
+        s=default_state()
+        for key in ('ui_scale','button_size','engine_executable'):
+            s['settings'].pop(key)
+        validate_state(s)
+        s['settings'].update(ui_scale=74,button_size='Normal')
+        with self.assertRaises(ValueError):validate_state(s)
+        s['settings'].update(ui_scale=90,button_size='Tiny')
+        with self.assertRaises(ValueError):validate_state(s)
 
     def test_xmltv_preserves_programme_genres(self):
         xml = XML.replace('<title>Clock change</title>','<title>Clock change</title><category>News</category><category>Current affairs</category>')

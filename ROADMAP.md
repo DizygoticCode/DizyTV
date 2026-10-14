@@ -70,3 +70,7 @@ Native TV playback: two fullscreen styles, quick programme guide, now/next and a
 ## Rolling timeshift (0.1.7-alpha experimental)
 
 Added on-device bounded short-term MPEG-TS/HLS segment capture and playback bridge (default off). Remaining: real-device long-run soak on Windows/Android, continuous HLS playlist seek accuracy, stream reconnect/discontinuity handling and smooth live↔replay transitions, backfill segment errors, optional hardware-accelerated remux for more formats. Preserve quota and free-space reserve. Issue #9 remains open until reliable pause/resume and rewind on *nonseekable* sources are demonstrated, not merely that segment buffering and playback controls exist.
+
+## 0.1.8-alpha Windows TV polish
+
+The compact/resizable native player and modeless pop-out were developed with a two-phase Windows focus. Improve TV keyboard/remote navigation and consider independent full EPG dock layout after user tests. For sources, keep actionable transport diagnostics distinct from the public playlist's reliability (a listed channel is not a promise it works). Continue device-level timeshift stall/long-duration soak and proper Ace Stream installation validation.

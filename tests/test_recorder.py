@@ -71,8 +71,10 @@ class RecorderTests(unittest.TestCase):
 
     def test_completed_stream_saved_in_chosen_folder(self):
         with tempfile.TemporaryDirectory() as folder:
-            result = record_stream(self.url+'/live', folder, '../News', time.time()+.15, reserve=0)
-            self.assertEqual('completed', result['status'])
+            # Native CI can spend >150 ms opening a local socket under load.
+            # Give the test enough time to receive at least one TS packet.
+            result = record_stream(self.url+'/live', folder, '../News', time.time()+1.5, reserve=0)
+            self.assertEqual('completed', result['status'],result)
             self.assertEqual(Path(folder), Path(result['path']).parent)
             self.assertGreater(result['bytes'], 0)
             self.assertEqual(0, Path(result['path']).stat().st_size % 188)

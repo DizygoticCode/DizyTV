@@ -13,6 +13,66 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_compact_scaling_and_smaller_resizable_window(self):
+        from dizytv.desktop import desktop_style
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            s=Settings(window.state,window)
+            s.ui_scale.setValue(80)
+            s.button_size.setCurrentText('Compact')
+            self.assertEqual(80,s.values()['ui_scale'])
+            self.assertEqual('Compact',s.values()['button_size'])
+            self.assertIn('font-size:11px;',desktop_style(80,'Compact'))
+            window.resize(710,480)
+            window.show()
+            self.app.processEvents()
+            self.assertLessEqual(window.minimumWidth(),480)
+            self.assertLessEqual(window.width(),720)
+            self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
+            s.close();window.close()
+
+    def test_vlc_reports_playing_but_picture_counters_frozen_auto_recovers(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.timeshift=Mock()
+            w.timeshift.window.snapshot.return_value=[Mock(seq=7)]
+            w.timeshift.live_url.return_value='http://127.0.0.1:99/token/live.m3u8'
+            w.player=Mock()
+            w.player.get_state.return_value='State.Playing'
+            w.playback_started=1
+            w.last_capture_seq=7
+            w.last_capture_progress=100
+            w.last_good_video=70
+            w.last_live_recovery=0
+            w._last_media_activity=2000
+            with patch.object(w,'media_activity',return_value=2000),patch.object(w,'play_url') as recover:
+                w.check_live_timeshift(now=110)
+                recover.assert_called_once()
+            w.timeshift=None;w.player=None;w.close()
+
+    def test_stalled_local_timeshift_recovers_only_when_unpaused(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            ring=Mock()
+            ring.snapshot.return_value=[Mock(seq=20)]
+            w.timeshift=Mock(window=ring)
+            w.timeshift.live_url.return_value='http://127.0.0.1:3333/token/live.m3u8'
+            w.player=Mock()
+            w.player.get_state.return_value='State.Buffering'
+            w.playback_started=1
+            w.last_good_video=10;w.last_live_recovery=10
+            w.last_capture_progress=40;w.last_capture_seq=20
+            with patch.object(w,'play_url') as play:
+                w.check_live_timeshift(now=60)
+                play.assert_called_once()
+                play.reset_mock()
+                w.player.get_state.return_value='State.Paused'
+                w.check_live_timeshift(now=120)
+                play.assert_not_called()
+            w.timeshift=None;w.player=None;w.close()
+
     def test_tv_player_modes_and_seekable_dvr_controls(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
@@ -37,6 +97,32 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse(window.sidebar.isVisible())
             window.toggle_cinema()
             self.assertFalse(window.cinema_mode)
+            window.player=None
+            window.close()
+
+    def test_resizable_popout_keeps_player_and_guide_available(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.show()
+            self.app.processEvents()
+            window.player=Mock()
+            window.open_popout()
+            self.assertIsNotNone(window.screen_dialog)
+            self.assertFalse(window.screen_dialog.isFullScreen())
+            self.assertGreaterEqual(window.screen_dialog.minimumWidth(),360)
+            self.assertIs(window.video.parentWidget(),window.screen_dialog)
+            self.assertTrue(window.tabs.isVisible())
+            window.hide_detached_controls()
+            window.show_detached_controls()
+            self.assertTrue(window.detached_controls.isVisible())
+            window.toggle_screen_fullscreen()
+            self.assertTrue(window.screen_dialog.isFullScreen())
+            window.open_popout()
+            self.assertFalse(window.screen_dialog.isFullScreen())
+            window.exit_screen_fullscreen()
+            self.assertIsNone(window.screen_dialog)
+            self.assertIs(window.video.parentWidget(),window.tabs.widget(0))
             window.player=None
             window.close()
 
@@ -197,6 +283,21 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(1,window.channels.count())
             self.assertEqual('Sport',window.grid.rows[0]['name'])
             window.close()
+
+    def test_cached_radio_under_separate_uk_radio_section(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            src=('#EXTM3U\n#EXTINF:-1 tvg-id="BBCRadio2.uk" tvg-country="GB" group-title="UK",BBC Radio 2\nhttps://example.com/r.m3u8\n'
+                 '#EXTINF:-1 tvg-country="GB" group-title="UK",BBC One\nhttps://example.com/tv.m3u8')
+            channels=parse_playlist(src)
+            channels[0]['kind']='TV'  # pre-fix cached data
+            store.update(lambda s:s.update(channels=channels))
+            w=MainWindow(store,start_worker=False)
+            uk=next(w.country_tree.topLevelItem(i) for i in range(w.country_tree.topLevelItemCount()) if 'United Kingdom' in w.country_tree.topLevelItem(i).text(0))
+            names=[uk.child(i).text(0) for i in range(uk.childCount())]
+            self.assertTrue(any('Radio' in name for name in names),names)
+            w.close()
 
     def test_country_tree_and_category_navigation_keeps_source_values(self):
         from dizytv.core import parse_playlist

@@ -16,8 +16,21 @@ class EngineTests(unittest.TestCase):
 
     def test_missing_engine_gives_actionable_error(self):
         with patch.object(engine,'running',return_value=False),patch.object(engine.sys,'platform','win32'),patch.object(engine,'windows_engine_path',return_value=None):
-            with self.assertRaisesRegex(RuntimeError,'not installed'):
+            with self.assertRaisesRegex(RuntimeError,'not detected'):
                 engine.ensure_ready('http://127.0.0.1:6878')
+
+    def test_explicit_engine_selection_rejects_unknown_executables(self):
+        from pathlib import Path
+        with patch.object(engine.sys,'platform','win32'),patch.object(Path,'is_file',return_value=True):
+            with self.assertRaisesRegex(RuntimeError,'Selected Ace engine executable'):
+                engine.windows_engine_path('C:/random/unrelated.exe')
+            self.assertEqual(Path('C:/App/ace_engine.exe'),
+                             engine.windows_engine_path('C:/App/ace_engine.exe'))
+
+    def test_engine_uses_its_install_directory_as_working_directory(self):
+        with patch.object(engine.sys,'platform','win32'),patch.object(engine,'windows_engine_path',return_value=__import__('pathlib').Path('C:/ACEStream/engine/ace_console.exe')),patch.object(engine,'running',side_effect=[False,True]),patch.object(engine.subprocess,'Popen') as spawn:
+            self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
+            self.assertEqual(__import__('os').path.normpath('C:/ACEStream/engine'),__import__('os').path.normpath(spawn.call_args.kwargs['cwd']))
 
     def test_remote_engine_never_autolaunches_local_process(self):
         with patch.object(engine,'running',return_value=False),patch.object(engine,'windows_engine_path') as path:

@@ -37,6 +37,24 @@ def normalise_genre(value):
     return value.strip()[:512] or 'Unspecified'
 
 
+def channel_kind(channel):
+    """Recognize unmistakable audio stations without rewriting saved identities."""
+    if channel.get('kind') == 'Radio':
+        return 'Radio'
+    name = str(channel.get('name',''))
+    tvg = str(channel.get('tvg_id',''))
+    group = str(channel.get('group',''))
+    if re.search(r'(?i)(?:^|[._-])radio\w*',tvg):
+        return 'Radio'
+    if re.search(r'(?i)\b(?:radio|fm station)\b',group):
+        return 'Radio'
+    if re.search(r'(?i)\b(?:radio|fm radio)\b',name):
+        return 'Radio'
+    if re.match(r'(?i)^BBC (?:Asian Network|World Service)\b',name) and tvg.lower().startswith('bbcradio'):
+        return 'Radio'
+    return 'TV'
+
+
 def channel_categories(attrs, stream, name=''):
     group = attrs.get('group-title','')
     explicit = attrs.get('tvg-country',attrs.get('country','')).strip()
@@ -55,7 +73,10 @@ def channel_categories(attrs, stream, name=''):
         genre = candidate if candidate in {g for g,_ in GENRES} else 'Unspecified'
     else:
         genre = normalise_genre(genre)
-    return {'country':country,'genre':genre,'kind':'Radio' if attrs.get('radio','').lower() in ('true','1','yes') else 'TV',
+    kind = 'Radio' if attrs.get('radio','').lower() in ('true','1','yes') else 'TV'
+    kind = channel_kind({'kind':kind,'name':name or attrs.get('tvg-name',''),
+                         'tvg_id':attrs.get('tvg-id',''),'group':group})
+    return {'country':country,'genre':genre,'kind':kind,
             'transport':'Ace Stream' if ace_id(stream) else 'HTTP'}
 
 
@@ -80,7 +101,7 @@ def display_channel_name(name):
 
 def channel_section(channel):
     """Country/category navigator: keep original group-title and IDs intact."""
-    if channel.get('kind')=='Radio':
+    if channel_kind(channel)=='Radio':
         return 'Radio'
     genre=normalise_genre(str(channel.get('genre') or ''))
     sections={'Sport','News','Movies','Kids','Music','Documentary','Entertainment','Education'}
@@ -117,7 +138,8 @@ def default_state():
                          'padding_before': 2, 'padding_after': 5,
                          'reserve_bytes': 1073741824, 'recording_dir': '',
                          'timeshift_enabled': False, 'timeshift_minutes': 30,
-                         'timeshift_max_bytes': 4*1024**3, 'timeshift_dir': ''},
+                         'timeshift_max_bytes': 4*1024**3, 'timeshift_dir': '',
+                         'ui_scale': 100, 'button_size': 'Normal', 'engine_executable': ''},
             'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
 
 
@@ -321,7 +343,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -343,6 +365,12 @@ def validate_state(state):
         _integer(settings[key], 0, 240, key)
     _integer(settings['epg_offset_minutes'], -1440, 1440, 'guide offset')
     _integer(settings['reserve_bytes'], 0, 1024**5, 'storage reserve')
+    if 'ui_scale' in settings:
+        _integer(settings['ui_scale'],75,150,'interface scale')
+    if 'button_size' in settings and settings['button_size'] not in ('Compact','Normal','Large'):
+        raise ValueError('Invalid button size')
+    if 'engine_executable' in settings and (not isinstance(settings['engine_executable'],str) or len(settings['engine_executable'])>4096):
+        raise ValueError('Invalid engine executable path')
     if not isinstance(settings['recording_dir'], str) or len(settings['recording_dir']) > 4096:
         raise ValueError('Invalid destination')
     # Optional for old 0.1.x settings and portable backups.
@@ -440,6 +468,7 @@ def restore_backup(payload, now=None):
     state['settings']['recording_dir'] = ''
     state['settings']['timeshift_dir'] = ''
     state['settings']['timeshift_enabled'] = False
+    state['settings']['engine_executable'] = ''
     now = int(time.time()) if now is None else now
     state['jobs']=[{k:j[k] for k in ('id','channel_id','title','start','end','status')} for j in state['jobs']]
     for job in state['jobs']:

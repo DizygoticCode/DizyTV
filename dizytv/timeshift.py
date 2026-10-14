@@ -120,7 +120,9 @@ class RollingWindow:
         entries = self.snapshot()
         if from_seq is None:
             # Join near live; use a replay URL to start farther back.
-            entries = entries[-3:]
+            # A 3-fragment live playlist gives VLC almost no margin when
+            # fetching over loopback and may stall as fragments expire.
+            entries = entries[-12:]
         else:
             entries = [entry for entry in entries if entry.seq >= from_seq]
         if not entries:

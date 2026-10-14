@@ -8,21 +8,22 @@ from pathlib import Path
 from zoneinfo import available_timezones
 
 from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QDialog)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, COUNTRIES, GENRES)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
 from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready
 from .timeshift import RollingTimeshift
+from .stream_diagnostics import probe_stream
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -36,7 +37,30 @@ QListWidget::item:selected { background:#416248; }
 QTabBar::tab { padding:12px 22px; background:#25362b; } QTabBar::tab:selected { background:#416248; }
 QTableWidget { gridline-color:#354638; background:#19251d; }
 QHeaderView::section { background:#2d4133; padding:8px; border:0; }
+QPushButton#tvPrimary { background:#397f51; border:1px solid #64b679; color:white; font-weight:700; }
+QPushButton#tvPrimary:hover { background:#4b9963; }
+QPushButton#tvDanger { background:#69352f; border:1px solid #b26354; }
+QPushButton#tvLive { background:#713b38; border:1px solid #cc7771; font-weight:700; color:#ffe2d4; }
+QSlider::groove:horizontal { height:8px; border:1px solid #355c48; background:#21392e; border-radius:4px; }
+QSlider::sub-page:horizontal { background:#61bd7c; border-radius:4px; }
+QSlider::handle:horizontal { width:16px; margin:-6px 0; border:2px solid #d9f6dd; background:#72df99; border-radius:8px; }
+QSlider:disabled::handle:horizontal { background:#6b746d; border-color:#99a69d; }
+QSlider#seekBar::groove:horizontal { height:10px; }
+QSlider#seekBar::handle:horizontal { width:20px; margin:-7px 0; border-radius:10px; }
+QSlider#volumeBar::sub-page:horizontal { background:#62adca; }
+QScrollArea#toolbarScroll, QScrollArea#playerControlScroll { border:0; background:transparent; }
 '''
+
+
+def desktop_style(scale=100, button_size='Normal'):
+    """Respect TV DPI while allowing smaller independent UI/controls."""
+    scale=max(75,min(150,int(scale)))/100
+    pad={'Compact':(4,8),'Normal':(9,15),'Large':(13,20)}.get(button_size,(9,15))
+    return (STYLE.replace('font-size:14px;',f'font-size:{round(14*scale)}px;')
+                 .replace('font-size:27px;',f'font-size:{round(27*scale)}px;')
+                 .replace('padding:9px 15px;',f'padding:{round(pad[0]*scale)}px {round(pad[1]*scale)}px;')
+                 .replace('padding:12px 22px;',f'padding:{round(10*scale)}px {round(18*scale)}px;')
+                 .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
 
 
 def detected_zone():
@@ -144,6 +168,23 @@ class Settings(QDialog):
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
+        self.engine_path=QLineEdit(self.original.get('engine_executable',''))
+        self.engine_path.setReadOnly(True)
+        self.engine_path.setPlaceholderText('Auto-detect from Windows registry / AppData')
+        exe_button=QPushButton('Choose installed EXE')
+        exe_button.clicked.connect(self.pick_engine_path)
+        exe_row=QWidget(); exe_layout=QHBoxLayout(exe_row)
+        exe_layout.setContentsMargins(0,0,0,0)
+        exe_layout.addWidget(self.engine_path,1); exe_layout.addWidget(exe_button)
+        form.addRow('Installed Ace engine',exe_row)
+        self.ui_scale=QSpinBox()
+        self.ui_scale.setRange(75,150);self.ui_scale.setSingleStep(5)
+        self.ui_scale.setSuffix(' %');self.ui_scale.setValue(self.original.get('ui_scale',100))
+        form.addRow('Interface scale',self.ui_scale)
+        self.button_size=QComboBox()
+        for size in ('Compact','Normal','Large'):self.button_size.addItem(size)
+        self.button_size.setCurrentText(self.original.get('button_size','Normal'))
+        form.addRow('Button size',self.button_size)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
@@ -188,6 +229,12 @@ class Settings(QDialog):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
 
+    def pick_engine_path(self):
+        path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
+              self.engine_path.text() or os.environ.get('APPDATA',''),
+              'Ace Stream engine (ace_engine.exe ace_console.exe)')
+        if path:self.engine_path.setText(path)
+
     def pick_folder(self):
         folder=QFileDialog.getExistingDirectory(self,'Recording destination',self.folder.text())
         if folder:self.folder.setText(folder)
@@ -204,7 +251,9 @@ class Settings(QDialog):
                     timeshift_enabled=self.timeshift_enabled.isChecked(),
                     timeshift_minutes=self.timeshift_minutes.value(),
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
-                    timeshift_dir=self.timeshift_folder.text())
+                    timeshift_dir=self.timeshift_folder.text(),
+                    ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
+                    engine_executable=self.engine_path.text())
 
 
 class MainWindow(QMainWindow):
@@ -212,16 +261,35 @@ class MainWindow(QMainWindow):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
         self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
-        self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
+        self.last_live_recovery=0;self.last_good_video=time.monotonic()
+        self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
+        self.source_check=None;self.source_check_serial=0
+        self._last_media_activity=None
+        self.detached_controls=None;self.detached_hide_timer=QTimer(self)
+        self.detached_hide_timer.setSingleShot(True)
+        self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
+        self.setWindowTitle('DizyTV'); self.resize(1150,730)
+        self.setMinimumSize(480,360)
+        self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
-        top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
+        topbar=QWidget(); top=QHBoxLayout(topbar);top.setContentsMargins(3,3,3,3)
+        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand); top.addStretch()
         self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
         for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
-        layout.addLayout(top)
+        self.header_scroll=QScrollArea()
+        self.header_scroll.setObjectName('toolbarScroll')
+        self.header_scroll.setWidgetResizable(False)
+        self.header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.header_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
+        topbar.adjustSize()
+        self.header_scroll.setWidget(topbar)
+        self.header_scroll.setFixedHeight(topbar.sizeHint().height()+20)
+        layout.addWidget(self.header_scroll)
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
-        split=QSplitter(); layout.addWidget(split,1)
+        split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
         sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox(); self.source_filter=QComboBox()
@@ -244,15 +312,21 @@ class MainWindow(QMainWindow):
         for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
             b=QPushButton(label); b.clicked.connect(handler); side.addWidget(b)
         self.sidebar=sidebar
-        split.addWidget(sidebar); self.tabs=QTabWidget(); split.addWidget(self.tabs); split.setSizes([300,1000])
+        sidebar.setMinimumWidth(0)
+        sidebar.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
+        split.addWidget(sidebar); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
+        split.addWidget(self.tabs);split.setSizes([270,880])
         live=QWidget(); live_layout=QVBoxLayout(live); self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
         self.channel_banner.setStyleSheet('background:#304d36; color:white; padding:8px;')
         self.channel_banner.setWordWrap(True)
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
-        self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
-        controls=QHBoxLayout()
+        self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
+        controls_widget=QWidget()
+        controls=QHBoxLayout(controls_widget)
+        controls.setContentsMargins(4,2,4,2)
+        controls.setSpacing(6)
         for label,handler in [('▶ Play',self.play),('■ Stop',self.stop_playback),('● Record',self.record_now)]:
             b=QPushButton(label); b.clicked.connect(handler); controls.addWidget(b)
         self.pause_button=QPushButton('⏸ Pause')
@@ -276,16 +350,36 @@ class MainWindow(QMainWindow):
         self.screen_button=QPushButton('⛶ Screen')
         self.screen_button.clicked.connect(self.toggle_screen_fullscreen)
         controls.addWidget(self.screen_button)
+        self.popout_button=QPushButton('▣ Pop out')
+        self.popout_button.setToolTip('Open a separate resizable TV window while the guide stays available')
+        self.popout_button.clicked.connect(self.open_popout)
+        controls.addWidget(self.popout_button)
         setup_engine=QPushButton('Set up Ace Stream engine')
         setup_engine.setToolTip('Visit the official provider to install the optional P2P engine. Never needed for HTTP/HLS channels.')
         setup_engine.clicked.connect(self.open_ace_stream_setup)
         controls.addWidget(setup_engine)
-        live_layout.addLayout(controls)
+        self.controls_scroll=QScrollArea()
+        self.controls_scroll.setObjectName('playerControlScroll')
+        self.controls_scroll.setWidgetResizable(False)
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.controls_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
+        controls_widget.adjustSize()
+        self.controls_scroll.setWidget(controls_widget)
+        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+20)
+        live_layout.addWidget(self.controls_scroll)
         self.tv_controls=controls
+        for item in range(controls.count()):
+            widget=controls.itemAt(item).widget()
+            if isinstance(widget,QPushButton):
+                if widget in (self.live_button,):widget.setObjectName('tvLive')
+                elif widget in (self.pause_button,self.popout_button):widget.setObjectName('tvPrimary')
+                elif widget.text().startswith(('■','● Record')):widget.setObjectName('tvDanger')
         self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
         self.seek_slider=QSlider(Qt.Horizontal)
+        self.seek_slider.setObjectName('seekBar')
         self.seek_slider.setRange(0,1000)
         self.seek_slider.setEnabled(False)
         self.seek_slider.sliderReleased.connect(self.seek_from_slider)
@@ -293,6 +387,7 @@ class MainWindow(QMainWindow):
         volume_row=QHBoxLayout()
         volume_row.addWidget(QLabel('Volume'))
         self.volume_slider=QSlider(Qt.Horizontal)
+        self.volume_slider.setObjectName('volumeBar')
         self.volume_slider.setRange(0,100)
         self.volume_slider.setValue(85)
         self.volume_slider.valueChanged.connect(self.set_tv_volume)
@@ -315,6 +410,7 @@ class MainWindow(QMainWindow):
             b=QPushButton(label); b.clicked.connect(handler); back_layout.addWidget(b)
         back_layout.addStretch(); self.tabs.addTab(backup,'Backup & Restore')
         self.status=QLabel('Native alpha • Configure your engine, XMLTV sources and recording storage in Settings'); layout.addWidget(self.status)
+        self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
@@ -443,7 +539,7 @@ class MainWindow(QMainWindow):
         self.source_filter.blockSignals(False)
         _,genre_by_id=self.guide_index()
         for widget,key,label in ((self.country_filter,'country','All countries'),(self.genre_filter,'genre','All genres'),(self.kind_filter,'kind','All stream types')):
-            chosen=widget.currentData(); values={c.get(key,'TV' if key=='kind' else 'Unspecified') for c in source}
+            chosen=widget.currentData(); values={(channel_kind(c) if key=='kind' else c.get(key,'Unspecified')) for c in source}
             if key=='genre':values.update(g for genres in genre_by_id.values() for g in genres)
             if key=='kind':values.update(c.get('transport','Ace Stream' if c['stream'].startswith('acestream:') else 'HTTP') for c in source)
             widget.blockSignals(True); widget.clear(); widget.addItem(label,'')
@@ -470,7 +566,7 @@ class MainWindow(QMainWindow):
             if self.section_filter.currentData() and channel_section(ch)!=self.section_filter.currentData():continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
-            if kind and kind not in (ch.get('kind','TV'),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
+            if kind and kind not in (channel_kind(ch),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
             key=self.matched_guide(ch)
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
             item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+display_channel_name(ch['name'])); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
@@ -506,6 +602,72 @@ class MainWindow(QMainWindow):
         self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
     def move_guide(self,delta):
         self.guide_start=self.guide_start+delta if delta else int(time.time()/3600)*3600; self.render_guide()
+    def apply_interface_scale(self):
+        settings=self.state['settings']
+        app=QApplication.instance()
+        if app:app.setStyleSheet(desktop_style(settings.get('ui_scale',100),
+                                               settings.get('button_size','Normal')))
+        for scroll in (self.header_scroll,self.controls_scroll):
+            widget=scroll.widget()
+            if widget:
+                widget.adjustSize()
+                scroll.setFixedHeight(widget.sizeHint().height()+20)
+
+    def media_activity(self):
+        """VLC's decoded picture/audio counters catch freezes with State.Playing.
+
+        Older VLC builds may not provide stats; do not guess in that case.
+        """
+        try:
+            import vlc
+            media=self.player.get_media()
+            if media is None:return None
+            stats=vlc.MediaStats()
+            if not media.get_stats(stats):return None
+            return int(stats.displayed_pictures)+int(stats.played_abuffers)
+        except (AttributeError,TypeError,RuntimeError,OSError):
+            return None
+
+    def check_live_timeshift(self,now=None):
+        """Recover VLC buffering/errors only if the local cache is still growing.
+
+        Never interrupt user pause, replay, or a scheduled recording.
+        """
+        if self.timeshift is None or self.player is None or not self.playback_started:
+            return
+        now=time.monotonic() if now is None else now
+        entries=self.timeshift.window.snapshot()
+        if not entries:return
+        if entries[-1].seq!=self.last_capture_seq:
+            self.last_capture_seq=entries[-1].seq
+            self.last_capture_progress=now
+        status=str(self.player.get_state())
+        if status.endswith('.Paused'):
+            self.last_good_video=now
+            return
+        playing=status.endswith('.Playing')
+        if playing:
+            frames=self.media_activity()
+            if frames is None:
+                self.last_good_video=now
+                return
+            if frames!=self._last_media_activity:
+                self._last_media_activity=frames
+                self.last_good_video=now
+                return
+        if now-self.last_capture_progress>25:
+            self.seek_notice.setText('Timeshift capture is not receiving new video. Source may be offline; you can switch to direct LIVE.')
+            return
+        if (self.timeshift_lag==0 and now-self.last_good_video>=18
+                and now-self.last_live_recovery>=45
+                and (playing or status.endswith('.Buffering') or status.endswith('.Error')
+                     or status.endswith('.Ended'))):
+            self.last_live_recovery=now
+            self.last_good_video=now
+            # Reconnecting the player does not stop or erase the capture ring.
+            self.play_url(self.timeshift.live_url())
+            self.status.setText('Recovered stalled timeshift playback to LIVE automatically.')
+
     def tick(self):
         self.state=self.store.read(); zone=self.state['settings']['timezone']
         label=('Auto: '+detected_zone() if zone=='auto' else zone); local=format_time(time.time(),zone,False,detected_zone()); key=label+' '+local.rsplit(' ',1)[-1]
@@ -517,6 +679,7 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
+        self.check_live_timeshift()
         if self.player and self.playback_started:
             local_active=self.timeshift is not None and bool(self.timeshift.window.snapshot())
             seekable=bool(self.player.is_seekable()) or local_active
@@ -545,10 +708,12 @@ class MainWindow(QMainWindow):
                 self.status.setText('Now playing inside DizyTV')
             elif state.endswith('.Error') or state.endswith('.Ended'):
                 self.playback_reported=True
-                self.status.setText('This stream did not play. It may be offline, geoblocked, DRM-protected, or need a different source.')
+                self.status.setText('VLC could not play this source. Checking the provider response…')
+                if self.timeshift is None:self.diagnose_stream()
             elif time.monotonic()-self.playback_started>25:
                 self.playback_reported=True
-                self.status.setText('Playback timed out. Try another channel or check the stream/engine.')
+                self.status.setText('Stream did not begin within 25 seconds; checking host response…')
+                if self.timeshift is None:self.diagnose_stream()
     def async_task(self,function,success):
         if self.task:self.status.setText('A refresh is already running'); return
         self.task=Task(function)
@@ -594,7 +759,12 @@ class MainWindow(QMainWindow):
     def settings(self):
         dialog=Settings(self.store.read(),self)
         if dialog.exec()==QDialog.Accepted:
-            try:self.store.update(lambda s:s.update(settings=dialog.values())); self.state=self.store.read(); self.render_guide(); self.tick()
+            try:
+                self.store.update(lambda s:s.update(settings=dialog.values()))
+                self.state=self.store.read()
+                self.apply_interface_scale()
+                self.render_guide()
+                self.tick()
             except ValueError as exc:self.error(str(exc))
     def favourite(self):
         if not self.selected:return
@@ -647,9 +817,16 @@ class MainWindow(QMainWindow):
             self.init_player()
             self.player.stop()
             media=self.vlc_instance.media_new(url)
+            # Some free HLS origins reject libVLC's default User-Agent.
+            # This is format compatibility, not bypassing geo/DRM restrictions.
+            if url.startswith('http'):
+                media.add_option(':http-user-agent=Mozilla/5.0 (compatible; DizyTV/0.1)')
             self.player.set_media(media); media.release()
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.playback_started=time.monotonic(); self.playback_reported=False
+            self._last_media_activity=None
+            self.last_good_video=time.monotonic()
+            self.source_check_serial+=1
             self.pause_button.setText('⏸ Pause')
             if self.selected:
                 key=self.matched_guide(self.selected)
@@ -689,11 +866,37 @@ class MainWindow(QMainWindow):
         if not QDesktopServices.openUrl(QUrl('https://docs.acestream.net/products/')):
             self.error('Could not open the official Ace Stream products page in your browser.')
 
+    def diagnose_stream(self):
+        if not self.selected:
+            return
+        from .core import ace_id
+        is_ace=ace_id(self.selected['stream']) is not None
+        if is_ace:
+            # Engine streams have peer/engine-specific failures, not a
+            # public channel endpoint that can safely be probed as a HLS URL.
+            self.status.setText('Ace Stream playback failed: check engine status, peers and content ID. Open Settings to locate your installed engine.')
+            return
+        self.source_check_serial+=1
+        serial=self.source_check_serial
+        channel=self.selected['id']
+        diagnostic=Task(lambda:probe_stream(self.selected['stream']))
+        self.source_check=diagnostic
+        def ready(message):
+            if (serial==self.source_check_serial and self.selected and
+                    self.selected['id']==channel):
+                self.status.setText(message)
+        diagnostic.signals.success.connect(ready)
+        diagnostic.signals.failure.connect(lambda _message:None)
+        self.pool.start(diagnostic)
+
     def close_timeshift(self):
         prior=self.timeshift
         self.timeshift=None
         self.timeshift_task=None
         self.timeshift_lag=0
+        self.last_capture_seq=-1
+        self.last_capture_progress=time.monotonic()
+        self.last_good_video=time.monotonic()
         if prior:
             prior.close()
 
@@ -716,6 +919,9 @@ class MainWindow(QMainWindow):
             self.play_url(url)
             return
         self.timeshift=session
+        self.last_capture_seq=-1
+        self.last_capture_progress=time.monotonic()
+        self.last_good_video=time.monotonic()
         self.status.setText('Preparing temporary local timeshift buffer…')
         job=Task(session.start)
         self.timeshift_task=job
@@ -743,11 +949,13 @@ class MainWindow(QMainWindow):
         if active:self.error('A different channel is recording. Stop or finish that recording before switching playback.'); return
         ch=self.selected
         url=stream_url(ch['stream'],self.state['settings']['engine_url'])
-        if ch['stream'].startswith('acestream:'):
+        from .core import ace_id
+        if ace_id(ch['stream']):
             if self.engine_task is not None:
                 self.status.setText('Ace Stream engine startup is already in progress…'); return
             self.status.setText('Checking/starting your installed Ace Stream engine…')
-            task=Task(lambda:ensure_ready(self.state['settings']['engine_url']))
+            task=Task(lambda:ensure_ready(self.state['settings']['engine_url'],
+                                          executable_path=self.state['settings'].get('engine_executable','')))
             self.engine_task=task
             def ready(_):
                 self.engine_task=None
@@ -756,6 +964,8 @@ class MainWindow(QMainWindow):
             def failed(message):
                 self.engine_task=None
                 self.status.setText('Ace Stream unavailable: '+message)
+                self.error('Could not start Ace Stream. '+message+
+                           '\n\nYou can choose the installed engine EXE in Settings.')
             task.signals.success.connect(ready); task.signals.failure.connect(failed)
             self.pool.start(task)
         else:
@@ -765,6 +975,9 @@ class MainWindow(QMainWindow):
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
             return True
+        if self.screen_dialog is not None and obj in (self.video,self.screen_dialog):
+            if event.type() in (QEvent.MouseMove,QEvent.Enter):
+                self.show_detached_controls()
         return super().eventFilter(obj,event)
 
     def set_tv_volume(self,volume):
@@ -854,49 +1067,117 @@ class MainWindow(QMainWindow):
         self.cinema_button.setText('↩ Normal' if self.cinema_mode else '▣ Cinema')
         self.status.setText('Cinema view — use Normal to restore browsing' if self.cinema_mode else 'Normal windowed view')
 
+    def open_popout(self):
+        """Keep TV video visible in a resizable modeless window beside the EPG."""
+        if self.screen_dialog is not None:
+            self.screen_dialog.showNormal()
+            self.screen_dialog.resize(800,520)
+            self.screen_dialog.raise_()
+            self.show_detached_controls()
+            return
+        self.open_video_window(fullscreen=False)
+
     def toggle_screen_fullscreen(self):
         if self.screen_dialog is not None:
-            self.exit_screen_fullscreen()
+            if self.screen_dialog.isFullScreen():
+                self.screen_dialog.showNormal()
+                self.screen_dialog.resize(800,520)
+            else:
+                self.screen_dialog.showFullScreen()
+            self.show_detached_controls()
             return
+        self.open_video_window(fullscreen=True)
+
+    def open_video_window(self,fullscreen=False):
+        if self.screen_dialog is not None:return
         screen=QDialog(self)
-        screen.setWindowTitle('DizyTV — Fullscreen TV')
+        screen.setWindowTitle('DizyTV — TV player')
         screen.setWindowFlag(Qt.Window,True)
-        screen.setStyleSheet('background:#070907; color:white')
+        screen.setModal(False)
+        screen.setMinimumSize(360,240)
+        screen.resize(800,520)
+        screen.setStyleSheet('background:#111a15; color:#eef7ec')
+        screen.setMouseTracking(True)
+        screen.installEventFilter(self)
         vbox=QVBoxLayout(screen)
+        vbox.setContentsMargins(6,6,6,6)
+        vbox.setSpacing(4)
         self.video.setParent(screen)
         vbox.addWidget(self.video,1)
+
+        # The same libVLC player remains attached; do not start a second feed.
+        panel=QFrame(screen)
+        panel.setObjectName('playerControls')
+        panel.setMouseTracking(True)
+        panel_layout=QVBoxLayout(panel)
         bar=QHBoxLayout()
-        for title,callback in (('⏯ Play/Pause',self.toggle_pause),('↶ 30s',lambda:self.seek_relative(-30000)),
-                               ('● LIVE',self.jump_to_live),('☷ Guide',self.show_tv_guide),
-                               ('Info',self.show_tv_info),('⛶ Exit Fullscreen',self.exit_screen_fullscreen)):
-            b=QPushButton(title,screen);b.clicked.connect(callback);bar.addWidget(b)
-        vbox.addLayout(bar)
-        screen_seek=QSlider(Qt.Horizontal,screen)
-        screen_seek.setRange(0,1000)
-        screen_seek.sliderReleased.connect(lambda:self.seek_screen_slider())
-        self.screen_seek_slider=screen_seek
-        vbox.addWidget(screen_seek)
-        volume=QSlider(Qt.Horizontal,screen)
+        for title,callback in (('⏯ Pause / Play',self.toggle_pause),
+                               ('↶ 30s',lambda:self.seek_relative(-30000)),
+                               ('● LIVE',self.jump_to_live),
+                               ('☷ Guide',self.show_tv_guide),
+                               ('Info',self.show_tv_info),
+                               ('⛶ Full screen',self.toggle_screen_fullscreen),
+                               ('↩ Back to app',self.exit_screen_fullscreen)):
+            button=QPushButton(title,panel)
+            button.clicked.connect(callback)
+            if title=='● LIVE':button.setObjectName('tvLive')
+            bar.addWidget(button)
+        panel_layout.addLayout(bar)
+        self.screen_seek_slider=QSlider(Qt.Horizontal,panel)
+        self.screen_seek_slider.setObjectName('seekBar')
+        self.screen_seek_slider.setRange(0,1000)
+        self.screen_seek_slider.sliderReleased.connect(self.seek_screen_slider)
+        panel_layout.addWidget(self.screen_seek_slider)
+        volume_line=QHBoxLayout()
+        volume_line.addWidget(QLabel('Volume',panel))
+        volume=QSlider(Qt.Horizontal,panel)
+        volume.setObjectName('volumeBar')
         volume.setRange(0,100)
         volume.setValue(self.volume_slider.value())
         volume.valueChanged.connect(self.volume_slider.setValue)
         self.volume_slider.valueChanged.connect(volume.setValue)
-        vbox.addWidget(volume)
+        volume_line.addWidget(volume,1)
+        panel_layout.addLayout(volume_line)
+        vbox.addWidget(panel)
+        self.detached_controls=panel
         self.screen_dialog=screen
         screen.finished.connect(self.exit_screen_fullscreen)
-        screen.showFullScreen()
+        escape=QShortcut(QKeySequence('Escape'),screen)
+        escape.activated.connect(self.exit_screen_fullscreen)
+        if fullscreen:screen.showFullScreen()
+        else:screen.show()
         self.video.show()
         self._rebind_video()
+        self.show_detached_controls()
+
+    def show_detached_controls(self):
+        if self.screen_dialog is None or self.detached_controls is None:return
+        self.detached_controls.show()
+        self.detached_hide_timer.start(3500)
+
+    def hide_detached_controls(self):
+        if self.detached_controls is None or self.screen_dialog is None:return
+        if (self.detached_controls.underMouse() or
+                (self.screen_seek_slider is not None and self.screen_seek_slider.isSliderDown())):
+            self.detached_hide_timer.start(1600)
+            return
+        self.detached_controls.hide()
 
     def seek_screen_slider(self):
-        if self.screen_seek_slider and self.player and self.player.is_seekable() and self.player.get_length()>0:
+        if self.screen_seek_slider is None:return
+        if self.timeshift is not None:
+            self.seek_slider.setValue(self.screen_seek_slider.value())
+            self.seek_from_slider()
+        elif self.player and self.player.is_seekable() and self.player.get_length()>0:
             self.player.set_time(self.player.get_length()*self.screen_seek_slider.value()//1000)
 
     def exit_screen_fullscreen(self):
         screen=self.screen_dialog
         if screen is None:return
+        self.detached_hide_timer.stop()
         self.screen_dialog=None
         self.screen_seek_slider=None
+        self.detached_controls=None
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
@@ -1048,7 +1329,7 @@ class MainWindow(QMainWindow):
 
 
 def run(directory=None,smoke=False):
-    app=QApplication(sys.argv); app.setApplicationName('DizyTV'); app.setOrganizationName('DizygoticCode'); app.setStyleSheet(STYLE)
+    app=QApplication(sys.argv); app.setApplicationName('DizyTV'); app.setOrganizationName('DizygoticCode'); app.setStyleSheet(desktop_style())
     window=MainWindow(Store(directory),start_worker=not smoke); window.show()
     if smoke:QTimer.singleShot(1200,app.quit)
     return app.exec()
