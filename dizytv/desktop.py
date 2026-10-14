@@ -7,8 +7,8 @@ import time
 from pathlib import Path
 from zoneinfo import available_timezones
 
-from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices, QShortcut, QKeySequence
+from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent, QPoint
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices, QShortcut, QKeySequence, QCursor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -286,6 +286,10 @@ class MainWindow(QMainWindow):
         self.detached_controls=None;self.detached_hide_timer=QTimer(self)
         self.detached_hide_timer.setSingleShot(True)
         self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
+        self.detached_mouse_position=None
+        self.detached_mouse_timer=QTimer(self)
+        self.detached_mouse_timer.setInterval(250)
+        self.detached_mouse_timer.timeout.connect(self.poll_detached_mouse)
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
@@ -1008,9 +1012,11 @@ class MainWindow(QMainWindow):
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
             return True
-        if self.screen_dialog is not None and obj in (self.video,self.screen_dialog):
+        if self.screen_dialog is not None and obj in (self.video,self.screen_dialog,self.detached_controls):
             if event.type() in (QEvent.MouseMove,QEvent.Enter):
                 self.show_detached_controls()
+            if obj is self.screen_dialog and event.type() in (QEvent.Resize,QEvent.Move,QEvent.Show):
+                self.position_detached_overlay()
         return super().eventFilter(obj,event)
 
     def set_tv_volume(self,volume):
@@ -1129,7 +1135,8 @@ class MainWindow(QMainWindow):
         screen.setModal(False)
         screen.setMinimumSize(360,240)
         screen.resize(800,520)
-        screen.setStyleSheet('background:#111a15; color:#eef7ec')
+        screen.setObjectName('tvWindow')
+        screen.setStyleSheet('QDialog#tvWindow { background:#101713; }')
         screen.setMouseTracking(True)
         screen.installEventFilter(self)
         vbox=QVBoxLayout(screen)
@@ -1139,8 +1146,18 @@ class MainWindow(QMainWindow):
         vbox.addWidget(self.video,1)
 
         # The same libVLC player remains attached; do not start a second feed.
-        panel=QFrame(screen)
+        # Separate owned translucent tool window overlays native VLC video HWND.
+        panel=QFrame(screen,Qt.Tool|Qt.FramelessWindowHint)
         panel.setObjectName('playerControls')
+        panel.setAttribute(Qt.WA_TranslucentBackground,True)
+        panel.setAttribute(Qt.WA_ShowWithoutActivating,True)
+        panel.installEventFilter(self)
+        ratio=self.state['settings'].get('ui_scale',100)/100
+        padding=round((3 if self.state['settings'].get('button_size')=='Compact' else 6)*ratio)
+        panel.setStyleSheet('QFrame#playerControls {background:rgba(5,17,11,180);border-radius:11px;}'
+          'QPushButton {background:rgba(28,66,43,190);border:1px solid rgba(111,174,125,180);'
+          'border-radius:6px;padding:'+str(padding)+'px '+str(padding+2)+'px;font-size:'+str(round(12*ratio))+'px;}'
+          'QLabel,QSlider {background:transparent;}')
         panel.setMouseTracking(True)
         panel_layout=QVBoxLayout(panel)
         bar=QHBoxLayout()
@@ -1171,7 +1188,6 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(volume.setValue)
         volume_line.addWidget(volume,1)
         panel_layout.addLayout(volume_line)
-        vbox.addWidget(panel)
         self.detached_controls=panel
         self.screen_dialog=screen
         screen.finished.connect(self.exit_screen_fullscreen)
@@ -1181,16 +1197,35 @@ class MainWindow(QMainWindow):
         else:screen.show()
         self.video.show()
         self._rebind_video()
+        self.detached_mouse_position=QCursor.pos()
+        self.detached_mouse_timer.start()
         self.show_detached_controls()
+
+    def position_detached_overlay(self):
+        if self.screen_dialog is None or self.detached_controls is None:return
+        panel=self.detached_controls;screen=self.screen_dialog
+        panel.resize(max(300,screen.width()-16),panel.sizeHint().height())
+        panel.move(screen.mapToGlobal(QPoint(8,max(8,screen.height()-panel.height()-12))))
+
+    def poll_detached_mouse(self):
+        if self.screen_dialog is None:return
+        point=QCursor.pos()
+        if point==self.detached_mouse_position:return
+        self.detached_mouse_position=point
+        if (self.screen_dialog.frameGeometry().contains(point) or
+            self.detached_controls and self.detached_controls.frameGeometry().contains(point)):
+            self.show_detached_controls()
 
     def show_detached_controls(self):
         if self.screen_dialog is None or self.detached_controls is None:return
+        self.position_detached_overlay()
         self.detached_controls.show()
+        self.detached_controls.raise_()
         self.detached_hide_timer.start(3500)
 
     def hide_detached_controls(self):
         if self.detached_controls is None or self.screen_dialog is None:return
-        if (self.detached_controls.underMouse() or
+        if (self.detached_controls.frameGeometry().contains(QCursor.pos()) or
                 (self.screen_seek_slider is not None and self.screen_seek_slider.isSliderDown())):
             self.detached_hide_timer.start(1600)
             return
@@ -1208,9 +1243,12 @@ class MainWindow(QMainWindow):
         screen=self.screen_dialog
         if screen is None:return
         self.detached_hide_timer.stop()
+        self.detached_mouse_timer.stop()
+        overlay=self.detached_controls
         self.screen_dialog=None
         self.screen_seek_slider=None
         self.detached_controls=None
+        if overlay:overlay.close();overlay.deleteLater()
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
