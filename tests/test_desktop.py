@@ -154,6 +154,13 @@ class DesktopTests(unittest.TestCase):
             w.player.get_state.return_value='State.Playing'
             w.last_good_video=time.monotonic()
             self.assertEqual('live',w.playback_light_state())
+            # Direct streams must not turn amber after 18 seconds solely
+            # because there is no local timeshift capture to refresh stats.
+            w.last_good_video=time.monotonic()-30
+            self.assertEqual('live',w.playback_light_state())
+            w.timeshift=Mock()
+            self.assertEqual('buffering',w.playback_light_state())
+            w.timeshift=None
             w.pulse_live_light()
             self.assertIn('3cdb80',w.live_button.styleSheet())
             w.timeshift_lag=30
@@ -306,6 +313,27 @@ class DesktopTests(unittest.TestCase):
             w.close()
 
     @unittest.skipIf(sys.platform=='darwin', 'Qt offscreen native-window reparenting not validated on macOS')
+    @unittest.skipIf(sys.platform=='darwin', 'Qt offscreen native-window reparenting not validated on macOS')
+    def test_popout_cursor_uses_global_to_panel_coordinates(self):
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.show()
+            w.open_popout()
+            self.app.processEvents()
+            panel=w.detached_controls
+            w.screen_dialog.move(480,260)
+            w.position_detached_overlay()
+            self.app.processEvents()
+            point=panel.mapToGlobal(panel.rect().center())
+            self.assertTrue(w.cursor_over_detached_controls(point))
+            # The inactivity timeout must never hide controls while the
+            # cursor is inside them, even when the TV is off the origin.
+            with patch('dizytv.desktop.QCursor.pos',return_value=point):
+                w.hide_detached_controls()
+                self.assertTrue(panel.isVisible())
+            w.exit_screen_fullscreen()
+            w.close()
+
     def test_resizable_popout_keeps_player_and_guide_available(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
