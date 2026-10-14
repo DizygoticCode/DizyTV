@@ -841,7 +841,8 @@ class MainWindow(QMainWindow):
             if self.engine_task is not None:
                 self.status.setText('Ace Stream engine startup is already in progress…'); return
             self.status.setText('Checking/starting your installed Ace Stream engine…')
-            task=Task(lambda:ensure_ready(self.state['settings']['engine_url']))
+            task=Task(lambda:ensure_ready(self.state['settings']['engine_url'],
+                                          executable_path=self.state['settings'].get('engine_executable','')))
             self.engine_task=task
             def ready(_):
                 self.engine_task=None
@@ -850,6 +851,8 @@ class MainWindow(QMainWindow):
             def failed(message):
                 self.engine_task=None
                 self.status.setText('Ace Stream unavailable: '+message)
+                self.error('Could not start Ace Stream. '+message+
+                           '\n\nYou can choose the installed engine EXE in Settings.')
             task.signals.success.connect(ready); task.signals.failure.connect(failed)
             self.pool.start(task)
         else:

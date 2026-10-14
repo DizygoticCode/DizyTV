@@ -29,45 +29,64 @@ def running(address, timeout=0.5):
         return False
 
 
-def windows_engine_path():
+def windows_engine_path(explicit=''):
+    """Locate the official installed engine; never download or bundle it."""
     if sys.platform!='win32':
         return None
+    if explicit:
+        chosen=Path(explicit)
+        if chosen.is_file() and chosen.name.lower() in ('ace_console.exe','ace_engine.exe'):
+            return chosen
+        raise RuntimeError('Selected Ace engine executable was not found. Choose ace_console.exe or ace_engine.exe in Settings.')
     roots=[]
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,r'Software\ACEStream') as key:
-            root,_=winreg.QueryValueEx(key,'InstallDir')
-            roots.append(Path(root))
-    except (OSError,ValueError):
+        access=[winreg.KEY_READ]
+        for variant in ('KEY_WOW64_64KEY','KEY_WOW64_32KEY'):
+            flag=getattr(winreg,variant,0)
+            if flag:access.append(winreg.KEY_READ|flag)
+        for keypath in (r'Software\ACEStream',r'Software\Wow6432Node\ACEStream'):
+            for flag in access:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keypath,0,flag) as key:
+                        folder,_=winreg.QueryValueEx(key,'InstallDir')
+                        if folder:roots.append(Path(folder))
+                except (OSError,ValueError):
+                    continue
+    except ImportError:
         pass
-    roots.append(Path(os.environ.get('APPDATA',str(Path.home()/'AppData'/'Roaming')))/'ACEStream'/'engine')
+    for env, suffix in (('APPDATA','ACEStream'),('LOCALAPPDATA','ACEStream'),
+                        ('PROGRAMFILES','ACEStream'),('PROGRAMFILES(X86)','ACEStream')):
+        root=os.environ.get(env)
+        if root:roots.append(Path(root)/suffix)
     for root in roots:
-        for name in ('ace_console.exe','ace_engine.exe'):
-            found=root/name
-            if found.is_file():
-                return found
+        for location in (root,root/'engine'):
+            for name in ('ace_console.exe','ace_engine.exe'):
+                found=location/name
+                if found.is_file():
+                    return found
     return None
 
 
-def ensure_ready(address, startup_seconds=10):
+def ensure_ready(address, startup_seconds=25, executable_path=''):
     """Called off the UI thread. Never launch for a remote/custom engine URL."""
     if running(address):
         return 'connected'
     host,port=engine_endpoint(address)
     if host not in ('127.0.0.1','localhost','::1') or port!=6878 or sys.platform!='win32':
         raise RuntimeError('Ace Stream engine is unreachable at the configured address. Check Settings.')
-    executable=windows_engine_path()
+    executable=windows_engine_path(executable_path)
     if executable is None:
-        raise RuntimeError('Ace Stream engine is not installed. Install it from the official provider once; DizyTV will launch it automatically afterwards.')
+        raise RuntimeError('Ace Stream engine not detected. In Settings, choose your installed ace_console.exe or ace_engine.exe (usually %APPDATA%\\ACEStream\\engine), or use Set up Ace Stream engine.')
     flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
     args=[str(executable)]
     if executable.name.lower()=='ace_console.exe':
         args.append('--client-console')
     subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL,close_fds=True,creationflags=flags)
+                     stderr=subprocess.DEVNULL,close_fds=True,creationflags=flags,cwd=str(executable.parent))
     deadline=time.monotonic()+startup_seconds
     while time.monotonic()<deadline:
         if running(address):
             return 'started'
         time.sleep(0.35)
-    raise RuntimeError('Installed Ace Stream engine was launched but its HTTP API did not start. Check the engine installation.')
+    raise RuntimeError('Ace engine launched but localhost port 6878 is still unavailable. Check Windows firewall/engine settings and the configured engine URL.')
