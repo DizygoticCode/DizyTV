@@ -51,7 +51,7 @@ class FreeSourceTests(unittest.TestCase):
         self.assertEqual('Canada',channels[0]['country'])
         self.assertEqual('Series',channels[1]['genre'])
         def metadata(_):
-            return '#EXTM3U\\n#EXTINF:-1 tvg-genre="Sport" tvg-country="AU",Sports Channel\\nhttps://example.com/sport.m3u8\\n'
+            return '#EXTM3U\n#EXTINF:-1 tvg-genre="Sport" tvg-country="AU",Sports Channel\nhttps://example.com/sport.m3u8\n'
         rows,_,_=refresh_catalogue({'playlist_url':series,'playlist_urls':[series]},[],metadata)
         self.assertEqual('Sport',rows[0]['genre'])
         self.assertEqual('Australia',rows[0]['country'])
