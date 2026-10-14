@@ -114,6 +114,7 @@ class GuideGrid(QWidget):
     def __init__(self):
         super().__init__(); self.rows=[]; self.programmes=[]; self.hitboxes=[]; self.zone='auto'; self.start=0
         self.guide_scale=100
+        self._programmes_by_channel={}
     def geometry_units(self):
         ratio=max(55,min(130,self.guide_scale))/100.0
         return (max(25,int(58*ratio)),max(125,int(210*ratio)),
@@ -126,27 +127,43 @@ class GuideGrid(QWidget):
         self.setMinimumSize(left+6*hour+30,max(230,48+len(self.rows)*row+12))
         self.update()
     def set_data(self,channels,programmes,mappings,zone,start):
-        self.rows = channels[:250]; self.programmes = programmes; self.mappings=mappings
+        # NO channel cap. The full filtered catalogue stays scrollable; only
+        # the rows inside the viewport are painted at any given moment.
+        self.rows=list(channels)
+        self.programmes=programmes
+        self.mappings=mappings
         self.zone=zone; self.start=start
+        by_channel={}
+        for item in programmes:
+            by_channel.setdefault(item['channel'],[]).append(item)
+        self._programmes_by_channel=by_channel
         self.update_dimensions()
+    def visible_row_range(self,rect):
+        height,_,_,_=self.geometry_units()
+        first=max(0,(rect.top()-48)//height)
+        last=min(len(self.rows),(rect.bottom()-48)//height+2)
+        return first,max(first,last)
     def paintEvent(self,event):
-        p=QPainter(self); p.fillRect(self.rect(),QColor('#15221a')); self.hitboxes=[]
+        p=QPainter(self)
+        visible=event.rect()
+        p.setClipRect(visible)
+        p.fillRect(visible,QColor('#15221a'))
+        self.hitboxes=[]
         rowheight,left,hour,font=self.geometry_units()
         p.setFont(QFont('Sans Serif',font)); scale=hour/3600
         for i in range(7):
             x=left+i*hour
-            p.setPen(QColor('#47654b')); p.drawLine(x,0,x,self.height())
-            p.setPen(QColor('#f3ead5')); p.drawText(x+5,30,format_time(self.start+i*3600,self.zone,False,detected_zone()))
-        by_channel={}
-        for item in self.programmes:
-            if item['start']<self.start+6*3600 and item['end']>self.start:
-                by_channel.setdefault(item['channel'],[]).append(item)
-        for row,ch in enumerate(self.rows):
+            p.setPen(QColor('#47654b')); p.drawLine(x,visible.top(),x,visible.bottom())
+            if visible.top()<=48:
+                p.setPen(QColor('#f3ead5')); p.drawText(x+5,30,format_time(self.start+i*3600,self.zone,False,detected_zone()))
+        first,last=self.visible_row_range(visible)
+        for row in range(first,last):
+            ch=self.rows[row]
             y=48+row*rowheight
             p.fillRect(0,y,left,rowheight-3,QColor('#253b2b'))
             p.setPen(QColor('#f3ead5')); p.drawText(QRectF(12,y+4,left-20,rowheight-8),Qt.AlignVCenter|Qt.TextWordWrap,display_channel_name(ch['name']))
             key=self.mappings.get(ch['id'],ch['tvg_id'])
-            entries=by_channel.get(key,[])
+            entries=self._programmes_by_channel.get(key,[])
             if not entries:
                 p.setPen(QColor('#95a695')); p.drawText(left+15,y+33,'No guide match — choose Map EPG for this channel')
             for item in entries:
@@ -655,9 +672,9 @@ class MainWindow(QMainWindow):
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(display_channel_name(self.selected['name'])+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else display_channel_name(self.selected['name'])+' — no guide match')
     def render_guide(self):
-        # The grid only paints 250 visible channels within a six-hour window;
-        # never pass the complete XMLTV cache to its paintEvent.
-        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(min(self.channels.count(),250))]
+        # Pass ALL channels matching the catalogue's active filters. GuideGrid
+        # paints only its visible rows; channels without EPG are retained.
+        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(self.channels.count())]
         genre=self.genre_filter.currentData()
         by_channel,_=self.guide_index()
         resolved={}
@@ -674,7 +691,9 @@ class MainWindow(QMainWindow):
                 programmes.append(p)
         self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
-        self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
+        self.guide_date.setText(
+            format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone())+
+            f'  •  {len(channels):,} selected channels')
     def move_guide(self,delta):
         self.guide_start=self.guide_start+delta if delta else int(time.time()/3600)*3600; self.render_guide()
     def apply_interface_scale(self):

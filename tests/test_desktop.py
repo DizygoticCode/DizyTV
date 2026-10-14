@@ -14,6 +14,46 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_guide_keeps_all_ace_and_category_filtered_channels(self):
+        # Regression: two independent 250-row caps used to truncate 2k+ feeds.
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            channels=[
+                dict(id=f'ace-{i}',name=f'Ace Stream {i:04d}',stream=f'acestream://{i:040x}',
+                     group='Sport',genre='Sport',country='United Kingdom',
+                     transport='Ace Stream',source='https://search-ace.stream/playlist',
+                     tvg_id=f'ace-{i}',kind='TV')
+                for i in range(2300)
+            ]
+            channels += [
+                dict(id=f'news-{i}',name=f'News {i:04d}',stream=f'https://example.com/{i}.m3u8',
+                     group='News',genre='News',country='United Kingdom',
+                     transport='HTTP',source='https://iptv-org.github.io/iptv/countries/uk.m3u',
+                     tvg_id=f'news-{i}',kind='TV')
+                for i in range(65)
+            ]
+            store.update(lambda state:state.update(channels=channels))
+            w=MainWindow(store,start_worker=False)
+            w.source_filter.setCurrentIndex(w.source_filter.findData('<ace>'))
+            w.render_channels()
+            self.assertEqual(2300,w.channels.count())
+            self.assertEqual(2300,len(w.grid.rows))
+            self.assertEqual('ace-2299',w.grid.rows[-1]['id'])
+            h,_,_,_=w.grid.geometry_units()
+            self.assertGreater(w.grid.minimumHeight(),2300*h)
+            begin,end=w.grid.visible_row_range(__import__('PySide6.QtCore',fromlist=['QRect']).QRect(0,48+2200*h,900,600))
+            self.assertGreater(begin,2100)
+            self.assertLess(end-begin,20)
+            w.section_filter.setCurrentIndex(w.section_filter.findData('Sport'))
+            w.render_channels()
+            self.assertEqual(2300,len(w.grid.rows))
+            w.source_filter.setCurrentIndex(w.source_filter.findData('<http>'))
+            w.section_filter.setCurrentIndex(w.section_filter.findData('News'))
+            w.render_channels()
+            self.assertEqual(65,len(w.grid.rows))
+            w.close()
+
     def test_guide_scale_reduces_geometry(self):
         grid=GuideGrid()
         grid.set_data([{'id':'a','name':'BBC One','tvg_id':'bbc'}],[],{},'auto',0)
