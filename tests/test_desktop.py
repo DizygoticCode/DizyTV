@@ -80,6 +80,32 @@ class DesktopTests(unittest.TestCase):
             window.player=None
             window.close()
 
+    def test_resizable_popout_keeps_player_and_guide_available(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.show()
+            self.app.processEvents()
+            window.player=Mock()
+            window.open_popout()
+            self.assertIsNotNone(window.screen_dialog)
+            self.assertFalse(window.screen_dialog.isFullScreen())
+            self.assertGreaterEqual(window.screen_dialog.minimumWidth(),360)
+            self.assertIs(window.video.parentWidget(),window.screen_dialog)
+            self.assertTrue(window.tabs.isVisible())
+            window.hide_detached_controls()
+            window.show_detached_controls()
+            self.assertTrue(window.detached_controls.isVisible())
+            window.toggle_screen_fullscreen()
+            self.assertTrue(window.screen_dialog.isFullScreen())
+            window.open_popout()
+            self.assertFalse(window.screen_dialog.isFullScreen())
+            window.exit_screen_fullscreen()
+            self.assertIsNone(window.screen_dialog)
+            self.assertIs(window.video.parentWidget(),window.tabs.widget(0))
+            window.player=None
+            window.close()
+
     def test_fullscreen_restores_embedded_video_without_discarding_player(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:

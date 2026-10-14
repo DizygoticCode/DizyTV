@@ -8,7 +8,7 @@ from pathlib import Path
 from zoneinfo import available_timezones
 
 from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -264,6 +264,9 @@ class MainWindow(QMainWindow):
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
+        self.detached_controls=None;self.detached_hide_timer=QTimer(self)
+        self.detached_hide_timer.setSingleShot(True)
+        self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
@@ -318,7 +321,7 @@ class MainWindow(QMainWindow):
         self.channel_banner.setWordWrap(True)
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
-        self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
+        self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
         controls_widget=QWidget()
         controls=QHBoxLayout(controls_widget)
         controls.setContentsMargins(4,2,4,2)
@@ -346,6 +349,10 @@ class MainWindow(QMainWindow):
         self.screen_button=QPushButton('⛶ Screen')
         self.screen_button.clicked.connect(self.toggle_screen_fullscreen)
         controls.addWidget(self.screen_button)
+        self.popout_button=QPushButton('▣ Pop out')
+        self.popout_button.setToolTip('Open a separate resizable TV window while the guide stays available')
+        self.popout_button.clicked.connect(self.open_popout)
+        controls.addWidget(self.popout_button)
         setup_engine=QPushButton('Set up Ace Stream engine')
         setup_engine.setToolTip('Visit the official provider to install the optional P2P engine. Never needed for HTTP/HLS channels.')
         setup_engine.clicked.connect(self.open_ace_stream_setup)
@@ -361,6 +368,12 @@ class MainWindow(QMainWindow):
         self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+20)
         live_layout.addWidget(self.controls_scroll)
         self.tv_controls=controls
+        for item in range(controls.count()):
+            widget=controls.itemAt(item).widget()
+            if isinstance(widget,QPushButton):
+                if widget in (self.live_button,):widget.setObjectName('tvLive')
+                elif widget in (self.pause_button,self.popout_button):widget.setObjectName('tvPrimary')
+                elif widget.text().startswith(('■','● Record')):widget.setObjectName('tvDanger')
         self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
@@ -937,6 +950,9 @@ class MainWindow(QMainWindow):
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
             return True
+        if self.screen_dialog is not None and obj in (self.video,self.screen_dialog):
+            if event.type() in (QEvent.MouseMove,QEvent.Enter):
+                self.show_detached_controls()
         return super().eventFilter(obj,event)
 
     def set_tv_volume(self,volume):
@@ -1026,49 +1042,117 @@ class MainWindow(QMainWindow):
         self.cinema_button.setText('↩ Normal' if self.cinema_mode else '▣ Cinema')
         self.status.setText('Cinema view — use Normal to restore browsing' if self.cinema_mode else 'Normal windowed view')
 
+    def open_popout(self):
+        """Keep TV video visible in a resizable modeless window beside the EPG."""
+        if self.screen_dialog is not None:
+            self.screen_dialog.showNormal()
+            self.screen_dialog.resize(800,520)
+            self.screen_dialog.raise_()
+            self.show_detached_controls()
+            return
+        self.open_video_window(fullscreen=False)
+
     def toggle_screen_fullscreen(self):
         if self.screen_dialog is not None:
-            self.exit_screen_fullscreen()
+            if self.screen_dialog.isFullScreen():
+                self.screen_dialog.showNormal()
+                self.screen_dialog.resize(800,520)
+            else:
+                self.screen_dialog.showFullScreen()
+            self.show_detached_controls()
             return
+        self.open_video_window(fullscreen=True)
+
+    def open_video_window(self,fullscreen=False):
+        if self.screen_dialog is not None:return
         screen=QDialog(self)
-        screen.setWindowTitle('DizyTV — Fullscreen TV')
+        screen.setWindowTitle('DizyTV — TV player')
         screen.setWindowFlag(Qt.Window,True)
-        screen.setStyleSheet('background:#070907; color:white')
+        screen.setModal(False)
+        screen.setMinimumSize(360,240)
+        screen.resize(800,520)
+        screen.setStyleSheet('background:#111a15; color:#eef7ec')
+        screen.setMouseTracking(True)
+        screen.installEventFilter(self)
         vbox=QVBoxLayout(screen)
+        vbox.setContentsMargins(6,6,6,6)
+        vbox.setSpacing(4)
         self.video.setParent(screen)
         vbox.addWidget(self.video,1)
+
+        # The same libVLC player remains attached; do not start a second feed.
+        panel=QFrame(screen)
+        panel.setObjectName('playerControls')
+        panel.setMouseTracking(True)
+        panel_layout=QVBoxLayout(panel)
         bar=QHBoxLayout()
-        for title,callback in (('⏯ Play/Pause',self.toggle_pause),('↶ 30s',lambda:self.seek_relative(-30000)),
-                               ('● LIVE',self.jump_to_live),('☷ Guide',self.show_tv_guide),
-                               ('Info',self.show_tv_info),('⛶ Exit Fullscreen',self.exit_screen_fullscreen)):
-            b=QPushButton(title,screen);b.clicked.connect(callback);bar.addWidget(b)
-        vbox.addLayout(bar)
-        screen_seek=QSlider(Qt.Horizontal,screen)
-        screen_seek.setRange(0,1000)
-        screen_seek.sliderReleased.connect(lambda:self.seek_screen_slider())
-        self.screen_seek_slider=screen_seek
-        vbox.addWidget(screen_seek)
-        volume=QSlider(Qt.Horizontal,screen)
+        for title,callback in (('⏯ Pause / Play',self.toggle_pause),
+                               ('↶ 30s',lambda:self.seek_relative(-30000)),
+                               ('● LIVE',self.jump_to_live),
+                               ('☷ Guide',self.show_tv_guide),
+                               ('Info',self.show_tv_info),
+                               ('⛶ Full screen',self.toggle_screen_fullscreen),
+                               ('↩ Back to app',self.exit_screen_fullscreen)):
+            button=QPushButton(title,panel)
+            button.clicked.connect(callback)
+            if title=='● LIVE':button.setObjectName('tvLive')
+            bar.addWidget(button)
+        panel_layout.addLayout(bar)
+        self.screen_seek_slider=QSlider(Qt.Horizontal,panel)
+        self.screen_seek_slider.setObjectName('seekBar')
+        self.screen_seek_slider.setRange(0,1000)
+        self.screen_seek_slider.sliderReleased.connect(self.seek_screen_slider)
+        panel_layout.addWidget(self.screen_seek_slider)
+        volume_line=QHBoxLayout()
+        volume_line.addWidget(QLabel('Volume',panel))
+        volume=QSlider(Qt.Horizontal,panel)
+        volume.setObjectName('volumeBar')
         volume.setRange(0,100)
         volume.setValue(self.volume_slider.value())
         volume.valueChanged.connect(self.volume_slider.setValue)
         self.volume_slider.valueChanged.connect(volume.setValue)
-        vbox.addWidget(volume)
+        volume_line.addWidget(volume,1)
+        panel_layout.addLayout(volume_line)
+        vbox.addWidget(panel)
+        self.detached_controls=panel
         self.screen_dialog=screen
         screen.finished.connect(self.exit_screen_fullscreen)
-        screen.showFullScreen()
+        escape=QShortcut(QKeySequence('Escape'),screen)
+        escape.activated.connect(self.exit_screen_fullscreen)
+        if fullscreen:screen.showFullScreen()
+        else:screen.show()
         self.video.show()
         self._rebind_video()
+        self.show_detached_controls()
+
+    def show_detached_controls(self):
+        if self.screen_dialog is None or self.detached_controls is None:return
+        self.detached_controls.show()
+        self.detached_hide_timer.start(3500)
+
+    def hide_detached_controls(self):
+        if self.detached_controls is None or self.screen_dialog is None:return
+        if (self.detached_controls.underMouse() or
+                (self.screen_seek_slider is not None and self.screen_seek_slider.isSliderDown())):
+            self.detached_hide_timer.start(1600)
+            return
+        self.detached_controls.hide()
 
     def seek_screen_slider(self):
-        if self.screen_seek_slider and self.player and self.player.is_seekable() and self.player.get_length()>0:
+        if self.screen_seek_slider is None:return
+        if self.timeshift is not None:
+            self.seek_slider.setValue(self.screen_seek_slider.value())
+            self.seek_from_slider()
+        elif self.player and self.player.is_seekable() and self.player.get_length()>0:
             self.player.set_time(self.player.get_length()*self.screen_seek_slider.value()//1000)
 
     def exit_screen_fullscreen(self):
         screen=self.screen_dialog
         if screen is None:return
+        self.detached_hide_timer.stop()
         self.screen_dialog=None
         self.screen_seek_slider=None
+        self.detached_controls=None
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
