@@ -1478,9 +1478,13 @@ class MainWindow(QMainWindow):
         signals.caption.connect(self.receive_auto_caption)
         signals.finished.connect(self.auto_caption_finished)
         self._auto_caption_signals=signals
-        worker=LocalCaptionWorker(ffmpeg,self._playback_url,model,
-                                  lambda text:signals.caption.emit(serial,text),
-                                  lambda reason:signals.finished.emit(serial,reason))
+        def safe_caption(text):
+            try:signals.caption.emit(serial,text)
+            except RuntimeError:pass  # Window was closed while worker was stopping.
+        def safe_finished(reason):
+            try:signals.finished.emit(serial,reason)
+            except RuntimeError:pass
+        worker=LocalCaptionWorker(ffmpeg,self._playback_url,model,safe_caption,safe_finished)
         self._auto_caption_worker=worker
         self.status.setText('Starting optional offline captions; recognising live audio locally. '
                             'A second connection to this stream is used; no microphone or cloud STT.')
@@ -2134,6 +2138,10 @@ class MainWindow(QMainWindow):
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
         self._rebind_video()
+        if self._auto_caption_overlay is not None:
+            self.destroy_auto_caption_overlay()
+        if self._auto_caption_worker is not None and self._auto_caption_text:
+            self.receive_auto_caption(self._auto_caption_seq,self._auto_caption_text)
         screen.close()
         screen.deleteLater()
 
