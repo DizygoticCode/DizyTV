@@ -98,12 +98,12 @@ def start_playback_session(stream, address, timeout=20):
     Ace Engine's documented format=json middleware reports a playback_url or
     a content/peer error. We never pass an unverified outside URL to VLC.
     """
-    from .core import ace_request_params, http_url
+    from .core import ace_request_params, http_url, stream_url
     params=ace_request_params(stream)
     if params is None:
         raise ValueError('Selected channel has no supported Ace Stream content ID')
-    engine=http_url(address).rstrip('/')
-    split=urlsplit(engine+'/ace/getstream')
+    http_url(address)
+    split=urlsplit(stream_url(stream,address))
     query=urlencode({**params,'format':'json'})
     request=urlunsplit((split.scheme,split.netloc,split.path,query,''))
     try:
