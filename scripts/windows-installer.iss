@@ -11,6 +11,7 @@ PrivilegesRequired=lowest
 OutputDir=..\dist
 OutputBaseFilename=DizyTV-Setup-0.1.11-alpha-windows-x64
 SetupIconFile=..\assets\branding\dizytv.ico
+InfoBeforeFile=..\docs\WINDOWS-INCLUDED-COMPONENTS.txt
 UninstallDisplayIcon={app}\DizyTV.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
