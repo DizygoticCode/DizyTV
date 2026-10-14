@@ -595,6 +595,26 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual('https://example.com/one.m3u8',window.selected['stream'])
             window.close()
 
+    def test_same_channel_remains_available_from_multiple_playlist_filters(self):
+        from dizytv.core import parse_playlist
+        from dizytv.sources import FREE_PLAYLISTS
+        presets={label:url for label,url,_ in FREE_PLAYLISTS}
+        canada=presets['IPTV-org Canada']
+        series=presets['Free television series channels']
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory)
+            ch=parse_playlist('#EXTM3U\n#EXTINF:-1,24-7 Comedy\nhttps://example.com/show.m3u8')[0]
+            ch.update(source=canada,sources=[canada,series],country='Canada',genre='Series')
+            store.update(lambda s:s.update(channels=[ch]))
+            w=MainWindow(store,start_worker=False)
+            for source in (canada,series):
+                idx=w.source_filter.findData(source)
+                self.assertGreaterEqual(idx,0)
+                w.source_filter.setCurrentIndex(idx)
+                self.assertEqual(1,w.channels.count())
+                self.assertEqual(ch['id'],w.grid.rows[0]['id'])
+            w.close()
+
     def test_source_filter_separates_free_http_from_ace_and_preserves_all(self):
         from dizytv.core import parse_playlist
         from dizytv.sources import DEFAULT_PLAYLIST_URLS
