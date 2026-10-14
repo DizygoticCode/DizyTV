@@ -247,6 +247,47 @@ class DesktopTests(unittest.TestCase):
             self.assertLessEqual(w.minimumWidth(),480)
             w.close()
 
+    def test_media_rails_paint_no_system_grey_plate_and_seek_at_clicked_position(self):
+        from PySide6.QtGui import QColor, QImage
+        from dizytv.desktop import MediaRailSlider, TimeSeekSlider
+        for theme in ('Green','Dark','Light'):
+            for rail_type in ('seekBar','volumeBar'):
+                rail=TimeSeekSlider() if rail_type=='seekBar' else MediaRailSlider()
+                rail.setObjectName(rail_type)
+                rail.resize(360,25)
+                rail.setRange(0,100)
+                rail.setValue(70)
+                rail.set_rail_theme(theme)
+                image=QImage(360,25,QImage.Format_ARGB32)
+                image.fill(Qt.transparent)
+                rail.render(image)
+                background=QColor(MediaRailSlider.BACKGROUNDS[theme])
+                # The old QSlider drew a full-height light grey rectangle:
+                # test actual render output, not an unused style string.
+                self.assertEqual(background,image.pixelColor(180,2))
+                self.assertNotEqual(background,image.pixelColor(180,12))
+                rail.show()
+                QTest.mouseClick(rail,Qt.LeftButton,pos=QPoint(180,12))
+                self.assertTrue(48<=rail.value()<=52)
+                rail.close()
+
+    def test_narrow_player_uses_chevrons_without_visible_horizontal_scrollbar(self):
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.resize(640,480)
+            w.show()
+            self.app.processEvents()
+            bar=w.controls_scroll.horizontalScrollBar()
+            self.assertEqual(Qt.ScrollBarAlwaysOff,w.controls_scroll.horizontalScrollBarPolicy())
+            self.assertGreater(bar.maximum(),0)
+            self.assertTrue(w.controls_next.isVisible())
+            start=bar.value()
+            QTest.mouseClick(w.controls_next,Qt.LeftButton)
+            self.assertGreater(bar.value(),start)
+            QTest.mouseClick(w.controls_prev,Qt.LeftButton)
+            self.assertEqual(bar.value(),start)
+            w.close()
+
     def test_audio_with_black_video_distinguishes_decoder_and_vlc_video_output(self):
         from dizytv.desktop import diagnose_video_output
         self.assertIsNone(diagnose_video_output(0,0,0,0))
