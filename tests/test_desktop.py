@@ -110,6 +110,30 @@ class DesktopTests(unittest.TestCase):
             window.player=None
             window.close()
 
+    def test_transparent_popout_controls_overlay_video_without_resizing_window(self):
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.show()
+            self.app.processEvents()
+            w.open_popout()
+            self.app.processEvents()
+            dialog=w.screen_dialog
+            before_window=dialog.size()
+            before_video=w.video.size()
+            self.assertNotIn(w.detached_controls,[dialog.layout().itemAt(i).widget() for i in range(dialog.layout().count())])
+            self.assertTrue(w.detached_controls.testAttribute(Qt.WA_TranslucentBackground))
+            self.assertIn('QFrame#playerControls {background:transparent;',w.detached_controls.styleSheet())
+            w.hide_detached_controls()
+            self.app.processEvents()
+            self.assertEqual(before_window,dialog.size())
+            self.assertEqual(before_video,w.video.size())
+            w.show_detached_controls()
+            self.app.processEvents()
+            self.assertEqual(before_window,dialog.size())
+            self.assertEqual(before_video,w.video.size())
+            w.exit_screen_fullscreen()
+            w.close()
+
     def test_resizable_popout_keeps_player_and_guide_available(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:

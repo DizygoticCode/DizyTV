@@ -1159,27 +1159,61 @@ class MainWindow(QMainWindow):
         panel.setAttribute(Qt.WA_TranslucentBackground,True)
         panel.setAttribute(Qt.WA_ShowWithoutActivating,True)
         panel.installEventFilter(self)
-        ratio=self.state['settings'].get('ui_scale',100)/100
-        padding=round((3 if self.state['settings'].get('button_size')=='Compact' else 6)*ratio)
-        panel.setStyleSheet('QFrame#playerControls {background:rgba(5,17,11,180);border-radius:11px;}'
-          'QPushButton {background:rgba(28,66,43,190);border:1px solid rgba(111,174,125,180);'
-          'border-radius:6px;padding:'+str(padding)+'px '+str(padding+2)+'px;font-size:'+str(round(12*ratio))+'px;}'
-          'QLabel,QSlider {background:transparent;}')
+        ratio=max(.75,min(1.5,self.state['settings'].get('ui_scale',100)/100))
+        compact=self.state['settings'].get('button_size','Normal')=='Compact'
+        padding=max(2,round((3 if compact else 5)*ratio))
+        # The floating overlay is FULLY TRANSPARENT between the controls.
+        # Only its small pill buttons and slider tracks have translucent fills.
+        # This panel is NOT in the video layout: no window or video resizing.
+        panel.setStyleSheet(
+          'QFrame#playerControls {background:transparent;border:0;}'
+          'QFrame#playerControls QPushButton {'
+          'background:rgba(10,35,23,135);color:#edfff0;'
+          'border:1px solid rgba(161,213,173,150);'
+          'border-radius:7px;padding:'+str(padding)+'px '+str(padding+3)+'px;'
+          'font-size:'+str(max(9,round(11*ratio)))+'px;}'
+          'QFrame#playerControls QPushButton:hover {background:rgba(17,70,43,180);}'
+          'QFrame#playerControls QLabel {background:transparent;color:#effff0;}'
+          'QFrame#playerControls QSlider {background:transparent;}'
+          'QFrame#playerControls QSlider::groove:horizontal {'
+          'height:5px;background:rgba(14,40,29,120);border:0;border-radius:2px;}'
+          'QFrame#playerControls QSlider::sub-page:horizontal {'
+          'background:rgba(86,205,128,190);border-radius:2px;}'
+          'QFrame#playerControls QSlider::handle:horizontal {'
+          'width:13px;margin:-5px 0;border:1px solid rgba(210,255,227,200);'
+          'background:rgba(106,227,147,215);border-radius:7px;}')
         panel.setMouseTracking(True)
         panel_layout=QVBoxLayout(panel)
-        bar=QHBoxLayout()
-        for title,callback in (('⏯ Pause / Play',self.toggle_pause),
+        panel_layout.setContentsMargins(2,1,2,1)
+        panel_layout.setSpacing(2)
+        # Scrollable single-line controls, even in a narrow 360px pop-out.
+        button_row=QWidget(panel)
+        button_row.setStyleSheet('background:transparent;border:0;')
+        bar=QHBoxLayout(button_row)
+        bar.setContentsMargins(0,0,0,0)
+        bar.setSpacing(max(2,round(4*ratio)))
+        for title,callback in (('⏯ Play/Pause',self.toggle_pause),
                                ('↶ 30s',lambda:self.seek_relative(-30000)),
                                ('● LIVE',self.jump_to_live),
                                ('☷ Guide',self.show_tv_guide),
                                ('Info',self.show_tv_info),
-                               ('⛶ Full screen',self.toggle_screen_fullscreen),
-                               ('↩ Back to app',self.exit_screen_fullscreen)):
+                               ('⛶ Full',self.toggle_screen_fullscreen),
+                               ('↩ Dock',self.exit_screen_fullscreen)):
             button=QPushButton(title,panel)
             button.clicked.connect(callback)
             if title=='● LIVE':button.setObjectName('tvLive')
             bar.addWidget(button)
-        panel_layout.addLayout(bar)
+        button_scroll=QScrollArea(panel)
+        button_scroll.setFrameShape(QFrame.NoFrame)
+        button_scroll.setWidgetResizable(False)
+        button_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        button_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        button_scroll.setStyleSheet('QScrollArea {background:transparent;border:0;}'
+                                    'QWidget {background:transparent;}')
+        button_row.adjustSize()
+        button_scroll.setWidget(button_row)
+        button_scroll.setFixedHeight(button_row.sizeHint().height()+14)
+        panel_layout.addWidget(button_scroll)
         self.screen_seek_slider=QSlider(Qt.Horizontal,panel)
         self.screen_seek_slider.setObjectName('seekBar')
         self.screen_seek_slider.setRange(0,1000)
