@@ -128,6 +128,15 @@ jobs:
             $old.Refresh()
             if (-not $old.HasExited) { throw 'Old worker still running after upgrade' }
             if (-not (Test-Path -LiteralPath (Join-Path $target '_internal/libcrypto-3.dll'))) { throw 'DLL not installed' }
+            # Prove the *compiled Inno installer* copied the speech components,
+            # rather than only testing PyInstaller's uninstalled dist directory.
+            $installedSpeech = Join-Path $target '_internal/speech'
+            $installedFFmpeg = Join-Path $installedSpeech 'ffmpeg.exe'
+            if (-not (Test-Path -LiteralPath $installedFFmpeg)) { throw 'Installer omitted bundled FFmpeg' }
+            if (-not (Test-Path -LiteralPath (Join-Path $installedSpeech 'vosk-model-small-en-us-0.15/am'))) { throw 'Installer omitted bundled Vosk acoustic model' }
+            if (-not (Test-Path -LiteralPath (Join-Path $installedSpeech 'vosk-model-small-en-us-0.15/conf'))) { throw 'Installer omitted bundled Vosk model config' }
+            & $installedFFmpeg -version | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Installed FFmpeg failed execution' }
             if ((Get-Content -LiteralPath $note -Raw) -match 'STALE-INSTALLED-FILE') { throw 'Old file was not replaced' }
             $run = Start-Process -FilePath $app -ArgumentList @('--smoke-test','--data-dir',('"' + $data + '"')) -PassThru -Wait
             if ($run.ExitCode -ne 0) { throw 'Upgraded binary failed startup' }
