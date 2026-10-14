@@ -83,6 +83,30 @@ class Task(QRunnable):
             self.signals.failure.emit(str(exc))
 
 
+class TimeSeekSlider(QSlider):
+    """Mouse wheel seeks only when directly over the video timeline."""
+    seek_requested=Signal(int)
+    def __init__(self,orientation=Qt.Horizontal,parent=None):
+        super().__init__(orientation,parent)
+        self._wheel_degrees=0
+        self.setToolTip('Drag to seek or scroll over the timeline: 30 seconds per wheel notch')
+
+    def seek_wheel_delta(self,delta):
+        self._wheel_degrees+=delta
+        ticks=int(self._wheel_degrees/120)
+        if ticks:
+            ticks=max(-4,min(4,ticks))
+            self._wheel_degrees-=ticks*120
+            self.seek_requested.emit(ticks*30000)
+
+    def wheelEvent(self,event):
+        if not self.isEnabled():
+            event.ignore()
+            return
+        self.seek_wheel_delta(event.angleDelta().y() or event.angleDelta().x())
+        event.accept()
+
+
 class GuideGrid(QWidget):
     channel_clicked = Signal(object)
     programme_record_requested = Signal(object,object)
@@ -376,6 +400,10 @@ class MainWindow(QMainWindow):
         self.rewind_button=QPushButton('↶ 30s')
         self.rewind_button.clicked.connect(lambda:self.seek_relative(-30000))
         controls.addWidget(self.rewind_button)
+        self.forward_button=QPushButton('↷ 30s')
+        self.forward_button.setToolTip('Skip forward 30 seconds in buffered TV, up to LIVE')
+        self.forward_button.clicked.connect(lambda:self.seek_relative(30000))
+        controls.addWidget(self.forward_button)
         self.live_button=QPushButton('LIVE')
         self.live_button.clicked.connect(self.jump_to_live)
         controls.addWidget(self.live_button)
@@ -422,8 +450,9 @@ class MainWindow(QMainWindow):
         self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
-        self.seek_slider=QSlider(Qt.Horizontal)
+        self.seek_slider=TimeSeekSlider(Qt.Horizontal)
         self.seek_slider.setObjectName('seekBar')
+        self.seek_slider.seek_requested.connect(self.seek_relative)
         self.seek_slider.setRange(0,1000)
         self.seek_slider.setEnabled(False)
         self.seek_slider.sliderReleased.connect(self.seek_from_slider)
@@ -772,10 +801,11 @@ class MainWindow(QMainWindow):
             if seekable and length>0 and position>=0 and not self.seek_slider.isSliderDown():
                 self.seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
             if self.screen_seek_slider is not None:
-                self.screen_seek_slider.setEnabled(seekable and length>0)
+                self.screen_seek_slider.setEnabled(local_active or (seekable and length>0))
                 if seekable and length>0 and position>=0 and not self.screen_seek_slider.isSliderDown():
                     self.screen_seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
             self.rewind_button.setEnabled(seekable)
+            self.forward_button.setEnabled(seekable)
             self.pause_button.setEnabled(seekable)
             if local_active:
                 available=self.timeshift.window.latest_seconds()
@@ -1111,16 +1141,24 @@ class MainWindow(QMainWindow):
     def seek_relative(self,delta_ms):
         if not self.player or not self.playback_started:return
         if self.timeshift is not None:
-            seconds_back=max(0,self.timeshift_lag)+abs(delta_ms)/1000
+            available=self.timeshift.window.latest_seconds()
+            if available<=0:
+                self.seek_notice.setText('Local timeshift buffer is still filling.')
+                return
+            # A positive delta skips toward LIVE; a negative delta rewinds.
+            seconds_back=max(0.0,min(available,float(self.timeshift_lag)-delta_ms/1000.0))
+            if seconds_back<1.0:
+                self.jump_to_live()
+                return
             try:
                 self.play_url(self.timeshift.replay_url(seconds_back))
                 self.timeshift_lag=seconds_back
-                self.seek_notice.setText('Playing from device cache, about '+str(int(seconds_back))+' seconds behind LIVE')
+                self.seek_notice.setText('Device buffer: ~'+str(int(seconds_back))+' seconds behind LIVE')
             except (ValueError,RuntimeError) as exc:
-                self.seek_notice.setText('Rewind not ready: '+str(exc))
+                self.seek_notice.setText('Timeshift seek unavailable: '+str(exc))
             return
         if not self.player.is_seekable():
-            self.seek_notice.setText('Rewind is unavailable: this stream has no seekable DVR window.')
+            self.seek_notice.setText('This live stream has no seekable DVR window.')
             return
         current=self.player.get_time()
         length=self.player.get_length()
@@ -1203,15 +1241,18 @@ class MainWindow(QMainWindow):
         # Windows libVLC uses a native HWND: an owned translucent *window*
         # is required to cover it. On macOS/Linux use a normal child overlay:
         # native Qt.Tool children produce QWidgetWindow shutdown crashes there.
-        native_overlay=(os.name=='nt')
+        native_overlay=(os.name=='nt' and os.environ.get('QT_QPA_PLATFORM')!='offscreen')
         if native_overlay:
             panel=QDialog(screen,Qt.Tool|Qt.FramelessWindowHint)
             panel.setModal(False)
         else:
             panel=QFrame(screen)
         panel.setObjectName('playerControls')
-        panel.setAttribute(Qt.WA_TranslucentBackground,True)
-        panel.setAttribute(Qt.WA_ShowWithoutActivating,True)
+        # WA_TranslucentBackground is only safe on a real native tool
+        # window. For Qt offscreen tests and other platforms use a
+        # stylesheet-transparent normal child without native promotion.
+        panel.setAttribute(Qt.WA_TranslucentBackground,native_overlay)
+        if native_overlay:panel.setAttribute(Qt.WA_ShowWithoutActivating,True)
         panel.installEventFilter(self)
         ratio=max(.75,min(1.5,self.state['settings'].get('ui_scale',100)/100))
         compact=self.state['settings'].get('button_size','Normal')=='Compact'
@@ -1249,6 +1290,7 @@ class MainWindow(QMainWindow):
         bar.setSpacing(max(2,round(4*ratio)))
         for title,callback in (('⏯ Play/Pause',self.toggle_pause),
                                ('↶ 30s',lambda:self.seek_relative(-30000)),
+                               ('↷ 30s',lambda:self.seek_relative(30000)),
                                ('● LIVE',self.jump_to_live),
                                ('☷ Guide',self.show_tv_guide),
                                ('Info',self.show_tv_info),
@@ -1274,8 +1316,9 @@ class MainWindow(QMainWindow):
         button_scroll.setWidget(button_row)
         button_scroll.setFixedHeight(button_row.sizeHint().height()+14)
         panel_layout.addWidget(button_scroll)
-        self.screen_seek_slider=QSlider(Qt.Horizontal,panel)
+        self.screen_seek_slider=TimeSeekSlider(Qt.Horizontal,panel)
         self.screen_seek_slider.setObjectName('seekBar')
+        self.screen_seek_slider.seek_requested.connect(self.seek_relative)
         self.screen_seek_slider.setRange(0,1000)
         self.screen_seek_slider.sliderReleased.connect(self.seek_screen_slider)
         panel_layout.addWidget(self.screen_seek_slider)
@@ -1417,6 +1460,7 @@ class MainWindow(QMainWindow):
         self.playback_started=0
         self.seek_slider.setEnabled(False)
         self.rewind_button.setEnabled(False)
+        self.forward_button.setEnabled(False)
         self.pause_button.setEnabled(False)
     def add_job(self,job):
         def change(s):

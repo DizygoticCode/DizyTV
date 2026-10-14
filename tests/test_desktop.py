@@ -9,7 +9,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimeZone
 
-from dizytv.desktop import MainWindow, GuideGrid, Settings
+from dizytv.desktop import MainWindow, GuideGrid, Settings, TimeSeekSlider
 from dizytv.storage import Store
 
 
@@ -103,6 +103,53 @@ class DesktopTests(unittest.TestCase):
                 play.assert_not_called()
             w.timeshift=None;w.player=None;w.close()
 
+    def test_wheel_seek_notches_and_forward_rewind_with_seekable_stream(self):
+        from unittest.mock import Mock
+        slider=TimeSeekSlider(Qt.Horizontal)
+        slider.setEnabled(True)
+        events=[]
+        slider.seek_requested.connect(events.append)
+        slider.seek_wheel_delta(120)
+        slider.seek_wheel_delta(-240)
+        self.assertEqual([30000,-60000],events)
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.player.is_seekable.return_value=True
+            w.player.get_time.return_value=120000
+            w.player.get_length.return_value=300000
+            w.playback_started=1
+            w.seek_relative(30000)
+            w.player.set_time.assert_called_with(150000)
+            w.seek_relative(-30000)
+            w.player.set_time.assert_called_with(90000)
+            w.player=None
+            w.close()
+
+    def test_cached_forward_button_uses_relative_lag_and_returns_to_live(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.playback_started=1
+            w.timeshift=Mock()
+            w.timeshift.window.latest_seconds.return_value=180
+            w.timeshift.replay_url.return_value='http://127.0.0.1:6789/test/replay.m3u8'
+            w.timeshift.live_url.return_value='http://127.0.0.1:6789/test/live.m3u8'
+            w.timeshift_lag=90
+            with patch.object(w,'play_url') as player:
+                w.seek_relative(30000)
+                self.assertEqual(60,w.timeshift_lag)
+                w.timeshift.replay_url.assert_called_with(60)
+                player.assert_called_with('http://127.0.0.1:6789/test/replay.m3u8')
+                w.seek_relative(-30000)
+                self.assertEqual(90,w.timeshift_lag)
+                w.seek_relative(120000)
+                self.assertEqual(0,w.timeshift_lag)
+                player.assert_called_with('http://127.0.0.1:6789/test/live.m3u8')
+            w.timeshift=None;w.player=None
+            w.close()
+
     def test_tv_player_modes_and_seekable_dvr_controls(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
@@ -141,7 +188,8 @@ class DesktopTests(unittest.TestCase):
             before_window=dialog.size()
             before_video=w.video.size()
             self.assertNotIn(w.detached_controls,[dialog.layout().itemAt(i).widget() for i in range(dialog.layout().count())])
-            self.assertTrue(w.detached_controls.testAttribute(Qt.WA_TranslucentBackground))
+            self.assertEqual(w.detached_controls.testAttribute(Qt.WA_TranslucentBackground),
+                             os.name=='nt' and os.environ.get('QT_QPA_PLATFORM')!='offscreen')
             self.assertIn('#playerControls {background:transparent;',w.detached_controls.styleSheet())
             w.hide_detached_controls()
             self.app.processEvents()
