@@ -1282,12 +1282,24 @@ class MainWindow(QMainWindow):
                 self.status.setText('Now playing inside DizyTV')
             elif state.endswith('.Error') or state.endswith('.Ended'):
                 self.playback_reported=True
-                self.status.setText('VLC could not play this source. Checking the provider response…')
-                if self.timeshift is None:self.diagnose_stream()
+                from .core import ace_id
+                if self.selected and ace_id(self.selected['stream']):
+                    # Do not replace a genuine VLC failure with a misleading
+                    # green "Ace Engine port 6878 is open" diagnostic.
+                    self.status.setText('Ace Engine provided a stream, but VLC could not decode/play it. '
+                                        'Check channel peers, engine playback and VLC 3 x64.')
+                else:
+                    self.status.setText('VLC could not play this source. Checking the provider response…')
+                    if self.timeshift is None:self.diagnose_stream()
             elif time.monotonic()-self.playback_started>25:
                 self.playback_reported=True
-                self.status.setText('Stream did not begin within 25 seconds; checking host response…')
-                if self.timeshift is None:self.diagnose_stream()
+                from .core import ace_id
+                if self.selected and ace_id(self.selected['stream']):
+                    self.status.setText('Ace stream has not produced playable video after 25 seconds. '
+                                        'The engine port alone does not prove the channel has peers or decodable media.')
+                else:
+                    self.status.setText('Stream did not begin within 25 seconds; checking host response…')
+                    if self.timeshift is None:self.diagnose_stream()
     def async_task(self,function,success):
         if self.task:self.status.setText('A refresh is already running'); return
         self.task=Task(function)
