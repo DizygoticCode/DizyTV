@@ -12,11 +12,37 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import subprocess
 import threading
 
 
+def installed_caption_models():
+    """Installed models live in user AppData, not the DizyTV programme folder."""
+    home=Path(os.environ.get('LOCALAPPDATA',Path.home()/'AppData'/'Local'))
+    root=home/'DizyTV'/'models'
+    if not root.is_dir():return []
+    return [(path.name,str(path)) for path in sorted(root.glob('vosk-model-small-*'))
+            if (path/'am').is_dir() and (path/'conf').is_dir()]
+
+
+def preferred_caption_model():
+    models=installed_caption_models()
+    english=next((path for name,path in models if name=='vosk-model-small-en-us-0.15'),None)
+    return english or (models[0][1] if models else '')
+
+
+def bundled_ffmpeg():
+    """Portable optional FFmpeg beside the installed DizyTV.exe."""
+    if getattr(sys,'frozen',False):
+        exe=Path(sys.executable).resolve()
+        path=exe.parent/'tools'/'ffmpeg.exe'
+        if path.is_file():return str(path)
+    return shutil.which('ffmpeg') or ''
+
+
 def verify_caption_engine(model_dir,ffmpeg_path=''):
+    model_dir=model_dir or preferred_caption_model()
     if not model_dir:
         raise ValueError('Choose an extracted offline Vosk speech model in Settings')
     model=Path(model_dir)
@@ -28,7 +54,7 @@ def verify_caption_engine(model_dir,ffmpeg_path=''):
             raise ValueError('Select the installed FFmpeg executable')
         binary=str(ffmpeg.resolve())
     else:
-        binary=shutil.which('ffmpeg')
+        binary=bundled_ffmpeg()
         if not binary:
             raise ValueError('FFmpeg is not installed or on PATH; choose its executable in Settings')
     try:
