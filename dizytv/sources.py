@@ -6,6 +6,7 @@ Use only streams the viewer is authorised to access; geoblocking and DRM are not
 from __future__ import annotations
 
 from .core import http_url, parse_playlist
+from .iptv_directory_data import DIRECTORY_ROWS
 from urllib.parse import urlparse
 
 LEGACY_URL = "https://search-ace.stream/playlist"
@@ -14,6 +15,17 @@ FREE_PLAYLISTS = (
     ("UK free television", "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_uk.m3u8", "United Kingdom"),
     ("IPTV-org United Kingdom", "https://iptv-org.github.io/iptv/countries/uk.m3u", "United Kingdom"),
     ("IPTV-org United States", "https://iptv-org.github.io/iptv/countries/us.m3u", "United States"),
+    ("IPTV-org Canada", "https://iptv-org.github.io/iptv/countries/ca.m3u", "Canada"),
+    ("IPTV-org Australia", "https://iptv-org.github.io/iptv/countries/au.m3u", "Australia"),
+    ("IPTV-org New Zealand", "https://iptv-org.github.io/iptv/countries/nz.m3u", "New Zealand"),
+    ("IPTV-org South Africa", "https://iptv-org.github.io/iptv/countries/za.m3u", "South Africa"),
+    ("IPTV-org Singapore", "https://iptv-org.github.io/iptv/countries/sg.m3u", "Singapore"),
+    ("IPTV-org Hong Kong", "https://iptv-org.github.io/iptv/countries/hk.m3u", "Hong Kong"),
+    ("Free classic TV and movies", "https://iptv-org.github.io/iptv/categories/classic.m3u", ""),
+    ("Free television series channels", "https://iptv-org.github.io/iptv/categories/series.m3u", ""),
+    ("Free movie channels", "https://iptv-org.github.io/iptv/categories/movies.m3u", ""),
+    ("Free comedy / sitcom channels", "https://iptv-org.github.io/iptv/categories/comedy.m3u", ""),
+    ("Free public sports channels", "https://iptv-org.github.io/iptv/categories/sports.m3u", ""),
     ("Free-TV curated international", "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8", ""),
     ("IPTV-org worldwide", "https://iptv-org.github.io/iptv/index.m3u", ""),
 )
@@ -22,16 +34,39 @@ FREE_GUIDES = (
     ("UK Freeview (seven days)", "https://raw.githubusercontent.com/dp247/Freeview-EPG/master/epg.xml"),
     ("US lightweight XMLTV", "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_lite.xml.gz"),
 )
-DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]  # Worldwide mega-index optional on low-memory phones
+# Sixteen bounded free HTTP/Ace/category sources; the worldwide mega-index stays opt-in.
+DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
+# Directory entries carry a country hint for country/subdivision/city feeds.
+# No country is guessed for region, language or grouped worldwide indexes.
+DIRECTORY_META = {url:(kind,name,parent) for kind,name,url,parent in DIRECTORY_ROWS}
+DIRECTORY_COUNTRIES = {url:(name if kind=='Countries' else parent)
+                       for kind,name,url,parent in DIRECTORY_ROWS
+                       if kind in ('Countries','States & provinces','Cities')}
+DIRECTORY_CATEGORIES = {url:name for kind,name,url,parent in DIRECTORY_ROWS
+                        if kind=='Categories' and name not in ('Undefined','XXX')}
+CATEGORY_HINTS = {
+    'https://iptv-org.github.io/iptv/categories/classic.m3u': 'Classic',
+    'https://iptv-org.github.io/iptv/categories/series.m3u': 'Series',
+    'https://iptv-org.github.io/iptv/categories/movies.m3u': 'Movies',
+    'https://iptv-org.github.io/iptv/categories/comedy.m3u': 'Comedy',
+    'https://iptv-org.github.io/iptv/categories/sports.m3u': 'Sport',
+}
 
 def source_label(url):
     """Human-readable source name without exposing playlist credentials or query tokens."""
     for label, preset, _ in FREE_PLAYLISTS:
         if preset == url:
             return label
-    return urlparse(url).hostname or "Custom playlist"
+    if url in DIRECTORY_META:
+        kind,name,parent=DIRECTORY_META[url]
+        location=(name+', '+parent) if parent else name
+        return 'IPTV-org '+kind+' · '+location
+    parsed=urlparse(url)
+    if parsed.hostname=='iptv-org.github.io' and parsed.path.startswith('/iptv/'):
+        return 'IPTV-org · '+parsed.path.removeprefix('/iptv/')
+    return parsed.hostname or "Custom playlist"
 
 
 def configured_playlists(settings):
@@ -51,19 +86,29 @@ def refresh_catalogue(settings, old_channels, fetch):
     urls = configured_playlists(settings)
     if not urls:
         raise ValueError("Add at least one channel playlist in Settings")
-    if len(urls) > 16:
-        raise ValueError("Use at most 16 channel playlists")
+    if len(urls) > 24:
+        raise ValueError("Use at most 24 channel playlists")
     existing = {}
     for ch in old_channels:
-        source = ch.get("source", LEGACY_URL)
-        existing.setdefault(source, []).append(ch)
-    seen = set()
+        # A stream found in two directories must remain cached independently
+        # if either feed later fails.
+        for source in ch.get("sources") or [ch.get("source", LEGACY_URL)]:
+            existing.setdefault(source, []).append(ch)
+    seen = {}
     combined, errors, success = [], [], 0
 
-    def append(items):
-        for ch in items:
-            if ch["id"] not in seen:
-                seen.add(ch["id"])
+    def append(items,origin):
+        for channel in items:
+            ch={**channel,'source':origin,'sources':[origin]}
+            if ch["id"] in seen:
+                saved=combined[seen[ch["id"]]]
+                sources=saved.setdefault('sources',[saved.get('source',LEGACY_URL)])
+                if origin not in sources:sources.append(origin)
+                for key in ('country','genre'):
+                    if saved.get(key,'Unspecified')=='Unspecified' and ch.get(key)!='Unspecified':
+                        saved[key]=ch[key]
+            else:
+                seen[ch["id"]]=len(combined)
                 combined.append(ch)
 
     for url in urls:
@@ -71,13 +116,17 @@ def refresh_catalogue(settings, old_channels, fetch):
             channels = parse_playlist(fetch(url))
             for ch in channels:
                 ch["source"] = url
-                if ch.get("country") == "Unspecified" and COUNTRY_HINTS.get(url):
-                    ch["country"] = COUNTRY_HINTS[url]
+                if ch.get("country") == "Unspecified":
+                    hint=COUNTRY_HINTS.get(url) or DIRECTORY_COUNTRIES.get(url)
+                    if hint:ch["country"]=hint
+                if ch.get("genre") == "Unspecified":
+                    hint=CATEGORY_HINTS.get(url) or DIRECTORY_CATEGORIES.get(url)
+                    if hint:ch["genre"]=hint
             success += 1
-            append(channels)
+            append(channels,url)
         except Exception as exc:
             errors.append(source_label(url) + ": " + type(exc).__name__)
-            append(existing.get(url, []))
+            append(existing.get(url, []),url)
     if not success:
         if old_channels:
             return old_channels, 0, errors
