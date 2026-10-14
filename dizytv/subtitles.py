@@ -25,14 +25,17 @@ def validate_caption_settings(settings):
     size=settings.get('subtitle_size',28)
     if type(size) is not int or not 12<=size<=64:
         raise ValueError('Invalid subtitle text size')
-    if settings.get('subtitle_colour','White') not in COLOURS:
-        raise ValueError('Invalid subtitle colour')
-    if settings.get('subtitle_position','Bottom') not in POSITIONS:
-        raise ValueError('Invalid subtitle position')
-    if settings.get('subtitle_font','Sans') not in FONTS:
-        raise ValueError('Invalid subtitle font')
-    if settings.get('subtitle_language','Auto') not in ('Auto','English'):
-        raise ValueError('Invalid subtitle language preference')
+    for key,valid,label in (
+            ('subtitle_colour',COLOURS,'colour'),
+            ('subtitle_position',POSITIONS,'position'),
+            ('subtitle_font',FONTS,'font'),
+            ('subtitle_language',('Auto','English'),'language preference')):
+        value=settings.get(key,{'subtitle_colour':'White',
+                                 'subtitle_position':'Bottom',
+                                 'subtitle_font':'Sans',
+                                 'subtitle_language':'Auto'}[key])
+        if not isinstance(value,str) or value not in valid:
+            raise ValueError('Invalid subtitle '+label)
     return settings
 
 
