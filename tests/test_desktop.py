@@ -363,6 +363,20 @@ class DesktopTests(unittest.TestCase):
                 w.toggle_auto_captions()
                 fake.stop.assert_called_once()
                 self.assertIsNone(w._auto_caption_overlay)
+                self.assertIs(w._auto_caption_worker,fake)
+                self.assertTrue(w._auto_caption_stopping)
+                # The slow previous model must fully exit before another can
+                # begin loading (or video memory usage can double).
+                w.toggle_auto_captions()
+                fake.start.assert_called_once()
+                w.auto_caption_finished(serial,'')
+                self.assertIsNone(w._auto_caption_worker)
+                self.assertFalse(w._auto_caption_stopping)
+                w.toggle_auto_captions()
+                self.assertEqual(2,fake.start.call_count)
+                serial2=w._auto_caption_seq
+                w.stop_auto_captions()
+                w.auto_caption_finished(serial2,'')
                 self.assertIsNone(w._auto_caption_worker)
             # Late transcription messages cannot resurrect an overlay.
             w.receive_auto_caption(serial,'stale result')
