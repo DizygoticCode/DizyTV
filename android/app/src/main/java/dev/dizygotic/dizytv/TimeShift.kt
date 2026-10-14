@@ -48,8 +48,13 @@ internal class TimeshiftRing(
         val id=nextSeq++
         val temp=File(directory,id.toString()+".part")
         val file=File(directory,id.toString()+".ts")
-        temp.writeBytes(data)
-        require(temp.renameTo(file)) { "Unable to save timeshift segment" }
+        try {
+            temp.writeBytes(data)
+            require(temp.renameTo(file)) { "Unable to save timeshift segment" }
+        } finally {
+            // A failed write must never leave a partial video segment behind.
+            temp.delete()
+        }
         val segment=Part(id,clock(),duration,data.size.toLong(),file)
         parts.addLast(segment)
         bytes+=segment.size
@@ -78,7 +83,9 @@ internal class TimeshiftRing(
         return parts.firstOrNull()?.seq
     }
     @Synchronized fun manifest(start:Long?=null):String {
-        val selected=if(start==null) parts.takeLast(3) else parts.filter { it.seq>=start }
+        // Keep a broader live HLS window so VLC has time to fetch fragments
+        // while network and decoder threads compete for CPU on older phones.
+        val selected=if(start==null) parts.takeLast(12) else parts.filter { it.seq>=start }
         if(selected.isEmpty()) return ""
         val result=StringBuilder("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:")
         result.append(ceil(selected.maxOf { it.duration }).toInt().coerceAtLeast(1))
@@ -173,6 +180,13 @@ internal class DeviceTimeshift(
                 require(lines.none { it.startsWith("#EXT-X-MAP:") }) {
                     "Fragmented-MP4 HLS isn't supported by local timeshift"
                 }
+                require(lines.none {
+                    it.startsWith("#EXT-X-BYTERANGE:") ||
+                        it.startsWith("#EXT-X-DISCONTINUITY") ||
+                        it.startsWith("#EXT-X-I-FRAMES-ONLY")
+                }) {
+                    "This HLS discontinuity/byte-range format is not supported by local timeshift"
+                }
                 val variant=lines.indexOfFirst { it.startsWith("#EXT-X-STREAM-INF:") }
                 if(variant>=0) {
                     val target=lines.getOrNull(variant+1)?:throw IllegalArgumentException("HLS variant missing")
@@ -250,6 +264,9 @@ internal class DeviceTimeshift(
                         }
                     }
                 }
+                // An origin may end a finite HTTP TS response. Avoid
+                // hammering that endpoint in a reconnect-tight loop.
+                if(!stopped.get())Thread.sleep(800)
             } catch(e:Exception) {
                 error=e.message
                 if(ring.snapshot().isEmpty()){ready.countDown();return}

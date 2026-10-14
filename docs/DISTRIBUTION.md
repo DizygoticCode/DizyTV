@@ -1,21 +1,21 @@
 # DizyTV installers and distribution
 
-**0.1.9-alpha native test packages are built and published as individual GitHub Release files.** Downloads do not require extracting a GitHub Actions ZIP or signing into GitHub. These are development packages: native-host package/startup checks and Android compilation/lint/signature checks have passed, but physical-device tests are pending. See [verification](BUILD-VERIFICATION.md) and the [README download buttons](../README.md#downloads).
+**0.1.10-alpha native test packages are built and published as individual GitHub Release files.** Downloads do not require extracting a GitHub Actions ZIP or signing into GitHub. These are development packages: native-host package/startup checks and Android compilation/lint/signature checks have passed, but physical-device tests are pending. See [verification](BUILD-VERIFICATION.md) and the [README download buttons](../README.md#downloads).
 
 ## Outputs
 
 | Platform | Artifact contents | Signing status |
 | --- | --- | --- |
-| Windows x64 | `DizyTV-Setup-0.1.9-alpha-windows-x64.exe` and checksum | Unsigned development installer |
-| Android 8.0+ / API 26 | `DizyTV-0.1.9-alpha-android-universal-debug.apk` and checksum | Verified CI debug signature; no retained release key |
-| Apple Silicon Mac | `DizyTV-0.1.9-alpha-macos-arm64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
-| Intel Mac | `DizyTV-0.1.9-alpha-macos-x86_64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
+| Windows x64 | `DizyTV-Setup-0.1.10-alpha-windows-x64.exe` and checksum | Unsigned development installer |
+| Android 8.0+ / API 26 | `DizyTV-0.1.10-alpha-android-universal-debug.apk` and checksum | Verified CI debug signature; no retained release key |
+| Apple Silicon Mac | `DizyTV-0.1.10-alpha-macos-arm64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
+| Intel Mac | `DizyTV-0.1.10-alpha-macos-x86_64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
 
 Mac packages target macOS 13+. Windows builds target x64. Build settings and CI runner results establish package targets; fresh installation and compatibility on user devices are still to be tested.
 
 ## Install and configure
 
-Download the native .exe, .apk or .pkg directly from the [0.1.9-alpha pre-release](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.9-alpha) and verify against its [SHA256SUMS.txt](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/SHA256SUMS.txt). Run the Windows EXE, install the APK through Android's permitted sideload flow, or open the matching Mac PKG to install `DizyTV.app` in Applications. Unsigned/development builds may trigger browser or operating-system trust warnings. Do not disable protective software to proceed.
+Download the native .exe, .apk or .pkg directly from the [0.1.10-alpha pre-release](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.10-alpha) and verify against its [SHA256SUMS.txt](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/SHA256SUMS.txt). Run the Windows EXE, install the APK through Android's permitted sideload flow, or open the matching Mac PKG to install `DizyTV.app` in Applications. Unsigned/development builds may trigger browser or operating-system trust warnings. Do not disable protective software to proceed.
 
 - **Windows:** install VLC 3 x64 and a separately installed Ace Stream engine. Start the engine before playback/recording. The app installs per user, without requiring an administrator by default.
 - **Android:** libVLC is embedded; install/open Ace Stream separately. Select a folder through Settings and retain its read/write grant. Allow recording notifications and grant exact-alarm access when scheduling.
@@ -37,12 +37,12 @@ Android CI debug keys are generated on build hosts and do not provide a guarante
 
 ## Distribution status
 
-The public repository now uses a gated release job: after all four native builds pass on a push to `main`, GitHub Actions creates a **pre-release tagged `v0.1.9-alpha`** and uploads all four files plus a consolidated SHA-256 manifest. If that version already exists, it is not silently overwritten. The release assets are direct downloads without the 30-day GitHub Actions artifact expiry or login requirement.
+The public repository now uses a gated release job: after all four native builds pass on a push to `main`, GitHub Actions creates a **pre-release tagged `v0.1.10-alpha`** and uploads all four files plus a consolidated SHA-256 manifest. If that version already exists, it is not silently overwritten. The release assets are direct downloads without the 30-day GitHub Actions artifact expiry or login requirement.
 
-- [Windows .exe](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-Setup-0.1.9-alpha-windows-x64.exe)
-- [Android .apk](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-android-universal-debug.apk)
-- [Mac arm64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-macos-arm64.pkg)
-- [Mac x86_64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-macos-x86_64.pkg)
+- [Windows .exe](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-Setup-0.1.10-alpha-windows-x64.exe)
+- [Android .apk](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-android-universal-debug.apk)
+- [Mac arm64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-macos-arm64.pkg)
+- [Mac x86_64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-macos-x86_64.pkg)
 
 Direct links do **not** establish a file's reputation with Chrome, Microsoft Defender SmartScreen, Play Protect or Gatekeeper. These are explicitly **untrusted/development** packages: Windows is unsigned; Android is signed with a CI debug key that is not retained between runs; Mac PKGs are unsigned and unnotarized. Never instruct testers to turn off browser or operating-system malware protections. If Chrome reports that a file is harmful or malware, do not override the warning: investigate the exact warning and check the binaries and supply chain first. Routine publisher-identity warnings likewise mean these builds are not yet suitable for broadly trusted public distribution.
 
@@ -66,22 +66,22 @@ The workflow uses Windows 2022 x64, macOS 15 Apple Silicon, macOS 15 Intel and U
 
 DizyTV Setup offers an **unchecked** task, "Open the official Ace Stream download page after installing DizyTV." If selected, it opens https://docs.acestream.net/products/ in the default browser; **no Ace executable is embedded, downloaded or silently executed** by DizyTV. Users may obtain the unchanged installer from the publisher and accept its own terms, which include P2P networking and advertising. The Live TV tab also includes a setup link for people who skipped the installer option. DizyTV auto-starts an existing engine on Windows, but no known redistribution/integration permission is implied by these changes. Once installed, regular HTTP/HLS playback remains entirely independent of Ace Stream. Desktop libVLC/VLC 3 requirements are separate.
 
-## 0.1.9-alpha playback note
+## 0.1.10-alpha playback note
 
 This release adds fullscreen TV viewing controls, a quick EPG popup and platform-native volume/seek UI. DVR pause and rewind are **conditional on source seekability**. The package does not include a universal ring buffer for live channels; unseekable streams correctly report that timeshifting is unavailable. No FFmpeg, external IPTV credentials, or Ace Stream binary is silently installed.
 
-## 0.1.9-alpha experimental rolling timeshift
+## 0.1.10-alpha experimental rolling timeshift
 
 Windows/macOS and Android can opt into a **locally buffered** viewing mode for direct HTTP MPEG-TS or clear HLS playlists with MPEG-TS segments. Configurable duration 1–240 minutes, independent disk quota from 256 MiB–32 GiB, minimum 1 GiB free-space reserve, cleanup on stop and old crash cache cleanup. The Android cache is inside the app's private device storage; desktop can use a user-chosen local folder. No DVR data leaves the user's device.
 
 **Limitations:** experimental playback; provider streams are not guaranteed seekable by libVLC, although the buffer's own archive is seekable via a new replay manifest. HLS AES encryption, fMP4, DASH and DRM are excluded. For unsupported feeds, original live playback continues. Alpha users should check storage after a short test and report device/channel behavior. All cached fragments are transient and should not be treated as recordings.
 
-## Windows usability and diagnostics (0.1.9-alpha)
+## Windows usability and diagnostics (0.1.10-alpha)
 
 This version's functional changes target the Windows Qt player: compact window layout, per-user font/button size preferences, styled native controls, modeless resizable TV pop-out, more reliable *existing* Ace Stream engine detection/startup, HTTP response diagnostics, and local HLS timeshift stall handling. Radio classification is shared core metadata logic; no Android screen work was done. Source status messages distinguish HTTP errors but cannot establish geo-blocking with certainty. All streams require the viewer's own legitimate access.
 
 The Windows installer remains in-place upgrade safe for an **idle** detached recorder; finish any active recordings and close the UI before upgrading. Preserve existing state.json, recordings and favourites. The official Ace Stream engine is not redistributed.
 
-## 0.1.9-alpha Windows release notes
+## 0.1.10-alpha Windows release notes
 
 Ctrl+K global search (all sources and programme titles); full filtered guide with no 250-channel cap and viewport-only rendering; separately scalable EPG; transparent auto-hiding overlay controls without video/window layout reflow; +30-second seek and mouse-wheel seek; diagnostic Ace engine status and animated live indicator. These changes target the desktop Qt player. Android packaging receives aligned build metadata only. Windows installer still respects active recording safety and preserves state. Native CI and real-device playback validation remain distinct.
