@@ -150,6 +150,35 @@ def theme_color(color, theme='Green'):
     return THEME_COLORS.get(theme, {}).get(color, color)
 
 
+def overlay_theme_style(style, theme='Green'):
+    """Preserve translucent overlay geometry while changing only its colours."""
+    variants={
+        'Dark': {
+            'rgba(10,35,23,135)':'rgba(21,33,53,165)',
+            'rgba(161,213,173,150)':'rgba(148,177,225,160)',
+            'rgba(17,70,43,180)':'rgba(40,64,101,205)',
+            'rgba(14,40,29,120)':'rgba(21,32,53,165)',
+            'rgba(86,205,128,190)':'rgba(109,155,224,200)',
+            'rgba(210,255,227,200)':'rgba(212,227,255,210)',
+            'rgba(106,227,147,215)':'rgba(132,182,246,220)',
+            '#edfff0':'#f2f5ff','#effff0':'#f2f5ff',
+        },
+        'Light': {
+            'rgba(10,35,23,135)':'rgba(232,240,253,213)',
+            'rgba(161,213,173,150)':'rgba(58,111,181,180)',
+            'rgba(17,70,43,180)':'rgba(202,221,249,230)',
+            'rgba(14,40,29,120)':'rgba(206,219,237,200)',
+            'rgba(86,205,128,190)':'rgba(57,119,206,220)',
+            'rgba(210,255,227,200)':'rgba(34,97,177,220)',
+            'rgba(106,227,147,215)':'rgba(85,151,229,230)',
+            '#edfff0':'#17263b','#effff0':'#17263b',
+        },
+    }
+    for before,after in variants.get(theme,{}).items():
+        style=style.replace(before,after)
+    return style
+
+
 def desktop_style(scale=100, button_size='Normal', theme='Green'):
     """Respect TV DPI while allowing smaller independent UI/controls."""
     scale=max(75,min(150,int(scale)))/100
@@ -850,6 +879,12 @@ class MainWindow(QMainWindow):
         self.theme_picker.setCurrentText(theme)
         self.theme_picker.blockSignals(False)
         self.grid.set_theme(theme)
+        if self.detached_controls is not None:
+            self.detached_controls.setStyleSheet(
+                overlay_theme_style(self._detached_base_style,theme))
+        if self.screen_dialog is not None:
+            self.screen_dialog.setStyleSheet(
+                'QDialog#tvWindow { background:'+theme_color('#101713',theme)+'; }')
         self.channel_banner.setStyleSheet(
             'background:'+theme_color('#304d36',theme)+';color:'+
             ('#1e293b' if theme=='Light' else '#ffffff')+';padding:8px;')
@@ -1488,7 +1523,7 @@ class MainWindow(QMainWindow):
         # Only its small pill buttons and slider tracks have translucent fills.
         # This panel is NOT in the video layout: no window or video resizing.
         prefix=('QDialog' if native_overlay else 'QFrame')+'#playerControls '
-        panel.setStyleSheet(''.join((
+        self._detached_base_style=''.join((
             prefix+'{background:transparent;border:0;}',
             prefix+'QPushButton {background:rgba(10,35,23,135);color:#edfff0;'
                 'border:1px solid rgba(161,213,173,150);border-radius:7px;'
@@ -1504,7 +1539,9 @@ class MainWindow(QMainWindow):
             prefix+'QSlider::handle:horizontal {width:13px;margin:-5px 0;'
                 'border:1px solid rgba(210,255,227,200);'
                 'background:rgba(106,227,147,215);border-radius:7px;}',
-        )))
+        ))
+        panel.setStyleSheet(overlay_theme_style(self._detached_base_style,
+                                               self.state['settings'].get('theme','Green')))
         panel.setMouseTracking(True)
         panel_layout=QVBoxLayout(panel)
         panel_layout.setContentsMargins(2,1,2,1)
