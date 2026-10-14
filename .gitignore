@@ -53,3 +53,6 @@ smoke-data/
 smoke-packaged/
 assets/licenses/NOTICES.md
 assets/licenses/components/
+
+# Locally staged verified third-party installers and language archives
+scripts/vendor/windows/
