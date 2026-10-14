@@ -142,7 +142,7 @@ class DesktopTests(unittest.TestCase):
             before_video=w.video.size()
             self.assertNotIn(w.detached_controls,[dialog.layout().itemAt(i).widget() for i in range(dialog.layout().count())])
             self.assertTrue(w.detached_controls.testAttribute(Qt.WA_TranslucentBackground))
-            self.assertIn('QDialog#playerControls {background:transparent;',w.detached_controls.styleSheet())
+            self.assertIn('#playerControls {background:transparent;',w.detached_controls.styleSheet())
             w.hide_detached_controls()
             self.app.processEvents()
             self.assertEqual(before_window,dialog.size())

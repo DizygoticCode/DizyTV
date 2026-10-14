@@ -1200,11 +1200,15 @@ class MainWindow(QMainWindow):
 
         # The same libVLC player remains attached; do not start a second feed.
         # Separate owned translucent tool window overlays native VLC video HWND.
-        # QDialog is a proper native tool-window owner on Win/macOS.
-        # A QFrame carrying Qt.Tool creates a QWidgetWindow with invalid
-        # ownership on macOS and can crash interpreter shutdown.
-        panel=QDialog(screen,Qt.Tool|Qt.FramelessWindowHint)
-        panel.setModal(False)
+        # Windows libVLC uses a native HWND: an owned translucent *window*
+        # is required to cover it. On macOS/Linux use a normal child overlay:
+        # native Qt.Tool children produce QWidgetWindow shutdown crashes there.
+        native_overlay=(os.name=='nt')
+        if native_overlay:
+            panel=QDialog(screen,Qt.Tool|Qt.FramelessWindowHint)
+            panel.setModal(False)
+        else:
+            panel=QFrame(screen)
         panel.setObjectName('playerControls')
         panel.setAttribute(Qt.WA_TranslucentBackground,True)
         panel.setAttribute(Qt.WA_ShowWithoutActivating,True)
@@ -1215,21 +1219,22 @@ class MainWindow(QMainWindow):
         # The floating overlay is FULLY TRANSPARENT between the controls.
         # Only its small pill buttons and slider tracks have translucent fills.
         # This panel is NOT in the video layout: no window or video resizing.
+        selector='QDialog' if native_overlay else 'QFrame'
         panel.setStyleSheet(
-          'QDialog#playerControls {background:transparent;border:0;}'
-          'QDialog#playerControls QPushButton {'
+          selector+'#playerControls {background:transparent;border:0;}'
+          selector+'#playerControls QPushButton {'
           'background:rgba(10,35,23,135);color:#edfff0;'
           'border:1px solid rgba(161,213,173,150);'
           'border-radius:7px;padding:'+str(padding)+'px '+str(padding+3)+'px;'
           'font-size:'+str(max(9,round(11*ratio)))+'px;}'
-          'QDialog#playerControls QPushButton:hover {background:rgba(17,70,43,180);}'
-          'QDialog#playerControls QLabel {background:transparent;color:#effff0;}'
-          'QDialog#playerControls QSlider {background:transparent;}'
-          'QDialog#playerControls QSlider::groove:horizontal {'
+          selector+'#playerControls QPushButton:hover {background:rgba(17,70,43,180);}'
+          selector+'#playerControls QLabel {background:transparent;color:#effff0;}'
+          selector+'#playerControls QSlider {background:transparent;}'
+          selector+'#playerControls QSlider::groove:horizontal {'
           'height:5px;background:rgba(14,40,29,120);border:0;border-radius:2px;}'
-          'QDialog#playerControls QSlider::sub-page:horizontal {'
+          selector+'#playerControls QSlider::sub-page:horizontal {'
           'background:rgba(86,205,128,190);border-radius:2px;}'
-          'QDialog#playerControls QSlider::handle:horizontal {'
+          selector+'#playerControls QSlider::handle:horizontal {'
           'width:13px;margin:-5px 0;border:1px solid rgba(210,255,227,200);'
           'background:rgba(106,227,147,215);border-radius:7px;}')
         panel.setMouseTracking(True)
@@ -1301,7 +1306,8 @@ class MainWindow(QMainWindow):
         if self.screen_dialog is None or self.detached_controls is None:return
         panel=self.detached_controls;screen=self.screen_dialog
         panel.resize(max(300,screen.width()-16),panel.sizeHint().height())
-        panel.move(screen.mapToGlobal(QPoint(8,max(8,screen.height()-panel.height()-12))))
+        point=QPoint(8,max(8,screen.height()-panel.height()-12))
+        panel.move(screen.mapToGlobal(point) if os.name=='nt' else point)
 
     def poll_detached_mouse(self):
         if self.screen_dialog is None:return
@@ -1492,6 +1498,10 @@ class MainWindow(QMainWindow):
             self.store.update(change); self.selected=None; self.guide={'names':{},'programmes':[]}; atomic_json(self.store.directory/'guide.json',self.guide); self.render_channels(); self.tick(); self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
+        for timer in (self.light_timer,self.detached_hide_timer,
+                      self.detached_mouse_timer,self.clock,
+                      self.refresh_clock,self.guide_clock):
+            timer.stop()
         self.exit_screen_fullscreen()
         self.stop_playback()
         if self.player:self.player.release(); self.player=None
