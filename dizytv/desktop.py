@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QDialog)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, COUNTRIES, GENRES)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
 from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
@@ -443,7 +443,7 @@ class MainWindow(QMainWindow):
         self.source_filter.blockSignals(False)
         _,genre_by_id=self.guide_index()
         for widget,key,label in ((self.country_filter,'country','All countries'),(self.genre_filter,'genre','All genres'),(self.kind_filter,'kind','All stream types')):
-            chosen=widget.currentData(); values={c.get(key,'TV' if key=='kind' else 'Unspecified') for c in source}
+            chosen=widget.currentData(); values={(channel_kind(c) if key=='kind' else c.get(key,'Unspecified')) for c in source}
             if key=='genre':values.update(g for genres in genre_by_id.values() for g in genres)
             if key=='kind':values.update(c.get('transport','Ace Stream' if c['stream'].startswith('acestream:') else 'HTTP') for c in source)
             widget.blockSignals(True); widget.clear(); widget.addItem(label,'')
@@ -470,7 +470,7 @@ class MainWindow(QMainWindow):
             if self.section_filter.currentData() and channel_section(ch)!=self.section_filter.currentData():continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
             if country and ch.get('country','Unspecified')!=country:continue
-            if kind and kind not in (ch.get('kind','TV'),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
+            if kind and kind not in (channel_kind(ch),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
             key=self.matched_guide(ch)
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
             item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+display_channel_name(ch['name'])); item.setData(Qt.UserRole,ch); self.channels.addItem(item)

@@ -37,6 +37,24 @@ def normalise_genre(value):
     return value.strip()[:512] or 'Unspecified'
 
 
+def channel_kind(channel):
+    """Recognize unmistakable audio stations without rewriting saved identities."""
+    if channel.get('kind') == 'Radio':
+        return 'Radio'
+    name = str(channel.get('name',''))
+    tvg = str(channel.get('tvg_id',''))
+    group = str(channel.get('group',''))
+    if re.search(r'(?i)(?:^|[._-])radio\w*',tvg):
+        return 'Radio'
+    if re.search(r'(?i)\b(?:radio|fm station)\b',group):
+        return 'Radio'
+    if re.search(r'(?i)\b(?:radio|fm radio)\b',name):
+        return 'Radio'
+    if re.match(r'(?i)^BBC (?:Asian Network|World Service)\b',name) and tvg.lower().startswith('bbcradio'):
+        return 'Radio'
+    return 'TV'
+
+
 def channel_categories(attrs, stream, name=''):
     group = attrs.get('group-title','')
     explicit = attrs.get('tvg-country',attrs.get('country','')).strip()
@@ -55,7 +73,10 @@ def channel_categories(attrs, stream, name=''):
         genre = candidate if candidate in {g for g,_ in GENRES} else 'Unspecified'
     else:
         genre = normalise_genre(genre)
-    return {'country':country,'genre':genre,'kind':'Radio' if attrs.get('radio','').lower() in ('true','1','yes') else 'TV',
+    kind = 'Radio' if attrs.get('radio','').lower() in ('true','1','yes') else 'TV'
+    kind = channel_kind({'kind':kind,'name':name or attrs.get('tvg-name',''),
+                         'tvg_id':attrs.get('tvg-id',''),'group':group})
+    return {'country':country,'genre':genre,'kind':kind,
             'transport':'Ace Stream' if ace_id(stream) else 'HTTP'}
 
 
@@ -80,7 +101,7 @@ def display_channel_name(name):
 
 def channel_section(channel):
     """Country/category navigator: keep original group-title and IDs intact."""
-    if channel.get('kind')=='Radio':
+    if channel_kind(channel)=='Radio':
         return 'Radio'
     genre=normalise_genre(str(channel.get('genre') or ''))
     sections={'Sport','News','Movies','Kids','Music','Documentary','Entertainment','Education'}

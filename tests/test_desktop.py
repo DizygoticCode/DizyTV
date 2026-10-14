@@ -198,6 +198,21 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual('Sport',window.grid.rows[0]['name'])
             window.close()
 
+    def test_cached_radio_under_separate_uk_radio_section(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            src=('#EXTM3U\n#EXTINF:-1 tvg-id="BBCRadio2.uk" tvg-country="GB" group-title="UK",BBC Radio 2\nhttps://example.com/r.m3u8\n'
+                 '#EXTINF:-1 tvg-country="GB" group-title="UK",BBC One\nhttps://example.com/tv.m3u8')
+            channels=parse_playlist(src)
+            channels[0]['kind']='TV'  # pre-fix cached data
+            store.update(lambda s:s.update(channels=channels))
+            w=MainWindow(store,start_worker=False)
+            uk=next(w.country_tree.topLevelItem(i) for i in range(w.country_tree.topLevelItemCount()) if 'United Kingdom' in w.country_tree.topLevelItem(i).text(0))
+            names=[uk.child(i).text(0) for i in range(uk.childCount())]
+            self.assertTrue(any('Radio' in name for name in names),names)
+            w.close()
+
     def test_country_tree_and_category_navigation_keeps_source_values(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:
