@@ -139,7 +139,7 @@ def default_state():
                          'reserve_bytes': 1073741824, 'recording_dir': '',
                          'timeshift_enabled': False, 'timeshift_minutes': 30,
                          'timeshift_max_bytes': 4*1024**3, 'timeshift_dir': '',
-                         'ui_scale': 100, 'button_size': 'Normal', 'engine_executable': '', 'guide_scale': 100},
+                         'ui_scale': 100, 'button_size': 'Normal', 'engine_executable': '', 'guide_scale': 100, 'theme': 'Green'},
             'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
 
 
@@ -343,7 +343,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -369,6 +369,8 @@ def validate_state(state):
         _integer(settings['ui_scale'],75,150,'interface scale')
     if 'guide_scale' in settings:
         _integer(settings['guide_scale'],55,130,'guide scale')
+    if 'theme' in settings and settings['theme'] not in ('Green','Dark','Light'):
+        raise ValueError('Invalid appearance theme')
     if 'button_size' in settings and settings['button_size'] not in ('Compact','Normal','Large'):
         raise ValueError('Invalid button size')
     if 'engine_executable' in settings and (not isinstance(settings['engine_executable'],str) or len(settings['engine_executable'])>4096):
