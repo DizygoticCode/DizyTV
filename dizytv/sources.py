@@ -14,6 +14,16 @@ FREE_PLAYLISTS = (
     ("UK free television", "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_uk.m3u8", "United Kingdom"),
     ("IPTV-org United Kingdom", "https://iptv-org.github.io/iptv/countries/uk.m3u", "United Kingdom"),
     ("IPTV-org United States", "https://iptv-org.github.io/iptv/countries/us.m3u", "United States"),
+    ("IPTV-org Canada", "https://iptv-org.github.io/iptv/countries/ca.m3u", "Canada"),
+    ("IPTV-org Australia", "https://iptv-org.github.io/iptv/countries/au.m3u", "Australia"),
+    ("IPTV-org New Zealand", "https://iptv-org.github.io/iptv/countries/nz.m3u", "New Zealand"),
+    ("IPTV-org South Africa", "https://iptv-org.github.io/iptv/countries/za.m3u", "South Africa"),
+    ("IPTV-org Singapore", "https://iptv-org.github.io/iptv/countries/sg.m3u", "Singapore"),
+    ("IPTV-org Hong Kong", "https://iptv-org.github.io/iptv/countries/hk.m3u", "Hong Kong"),
+    ("Free classic TV and movies", "https://iptv-org.github.io/iptv/categories/classic.m3u", ""),
+    ("Free television series channels", "https://iptv-org.github.io/iptv/categories/series.m3u", ""),
+    ("Free movie channels", "https://iptv-org.github.io/iptv/categories/movies.m3u", ""),
+    ("Free comedy / sitcom channels", "https://iptv-org.github.io/iptv/categories/comedy.m3u", ""),
     ("Free-TV curated international", "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8", ""),
     ("IPTV-org worldwide", "https://iptv-org.github.io/iptv/index.m3u", ""),
 )
@@ -22,9 +32,16 @@ FREE_GUIDES = (
     ("UK Freeview (seven days)", "https://raw.githubusercontent.com/dp247/Freeview-EPG/master/epg.xml"),
     ("US lightweight XMLTV", "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_lite.xml.gz"),
 )
-DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]  # Worldwide mega-index optional on low-memory phones
+# Fifteen bounded free HTTP/Ace/category sources; the worldwide mega-index stays opt-in.
+DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
+CATEGORY_HINTS = {
+    'https://iptv-org.github.io/iptv/categories/classic.m3u': 'Classic',
+    'https://iptv-org.github.io/iptv/categories/series.m3u': 'Series',
+    'https://iptv-org.github.io/iptv/categories/movies.m3u': 'Movies',
+    'https://iptv-org.github.io/iptv/categories/comedy.m3u': 'Comedy',
+}
 
 def source_label(url):
     """Human-readable source name without exposing playlist credentials or query tokens."""
@@ -73,6 +90,8 @@ def refresh_catalogue(settings, old_channels, fetch):
                 ch["source"] = url
                 if ch.get("country") == "Unspecified" and COUNTRY_HINTS.get(url):
                     ch["country"] = COUNTRY_HINTS[url]
+                if ch.get("genre") == "Unspecified" and CATEGORY_HINTS.get(url):
+                    ch["genre"] = CATEGORY_HINTS[url]
             success += 1
             append(channels)
         except Exception as exc:
