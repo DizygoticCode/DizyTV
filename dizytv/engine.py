@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
+from urllib.parse import urlparse, urlsplit, urlunsplit, urlencode
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 
@@ -127,7 +127,7 @@ def start_playback_session(stream, address, timeout=20):
     error=payload.get('error')
     if error:
         # Never expose a raw URL/token from an engine-generated error.
-        detail=re.sub(r'https?://\\S+','[stream URL]',str(error))[:180]
+        detail=re.sub(r'https?://\S+','[stream URL]',str(error))[:180]
         raise RuntimeError('Ace Stream could not start the channel: '+detail)
     result=payload.get('response')
     playback=result.get('playback_url') if isinstance(result,dict) else None
