@@ -360,6 +360,20 @@ class DesktopTests(unittest.TestCase):
                 self.assertEqual('Some example spoken words',w._auto_caption_label.text())
                 self.assertEqual(Qt.PlainText,w._auto_caption_label.textFormat())
                 self.assertEqual('autoCaptionOverlay',w._auto_caption_overlay.objectName())
+                # Regression: partial speech updates must not conceal the
+                # visible toolbar in the native Windows pop-out.
+                controls=Mock()
+                controls.isVisible.return_value=True
+                w.screen_dialog=Mock()
+                w.detached_controls=controls
+                w.receive_auto_caption(serial,'Updated recognised words')
+                controls.raise_.assert_called_once()
+                controls.reset_mock()
+                controls.isVisible.return_value=False
+                w.receive_auto_caption(serial,'Another recognised phrase')
+                controls.raise_.assert_not_called()
+                w.screen_dialog=None
+                w.detached_controls=None
                 w.toggle_auto_captions()
                 fake.stop.assert_called_once()
                 self.assertIsNone(w._auto_caption_overlay)
