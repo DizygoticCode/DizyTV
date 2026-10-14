@@ -199,7 +199,8 @@ def ace_id(stream):
 def stream_url(stream, engine):
     params = ace_request_params(stream)
     if params is not None:
-        return http_url(engine).rstrip('/') + '/ace/getstream?' + urlencode(params)
+        endpoint='/ace/manifest.m3u8' if urlparse(stream).path=='/ace/manifest.m3u8' else '/ace/getstream'
+        return http_url(engine).rstrip('/') + endpoint + '?' + urlencode(params)
     return http_url(stream)
 
 
