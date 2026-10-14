@@ -25,7 +25,7 @@
 | Feature | Included in the native alpha |
 | --- | --- |
 | 📺 **Live TV** | Embedded libVLC player, channel search and now/next information |
-| 🔎 **Imported channels** | Five built-in free M3U sources: Ace directory, two UK playlists, USA playlist, and curated worldwide channels; individually configurable with per-source last-good fallback |
+| 🔎 **Imported channels** | Fifteen built-in playlists on fresh installs: existing UK/US/Ace sources, Canada/Australia/NZ/South Africa/Singapore/Hong Kong HTTP feeds, plus classic TV, series, movie and comedy categories; offline failures preserve last-good data |
 | 🗓️ **XMLTV guide** | UK Freeview and US-lite XMLTV presets, automatic ID/unique-name mapping, manual overrides and periodic refresh |
 | 🗂️ **Country, genre & type** | Filter channels and EPG by country, genre, TV/radio and Ace Stream/HTTP; save category edits |
 | ⭐ **Favourites** | Persistent favourites and a favourites-only channel browser and guide |
@@ -74,7 +74,7 @@ One recording runs at a time per device. The recorder saves the available live M
 
 ## Channels and the guide
 
-DizyTV imports several public playlists directly on the device: [search-ace.stream](https://search-ace.stream/doc), [Free-TV UK / worldwide](https://github.com/Free-TV/IPTV), and [IPTV-org UK / US](https://github.com/iptv-org/iptv). An optional, much larger IPTV-org worldwide index can be added to Settings. Each source refreshes independently; a failed source retains its cached entries. Identical stream identifiers/URLs are deduplicated, and stable IDs preserve favourites, mappings and category edits across refreshes. No channel dataset is bundled. Public links can be broken, geo-restricted, or subject to broadcaster access requirements.
+DizyTV imports publicly listed playlists directly on the device: [search-ace.stream](https://search-ace.stream/doc), [Free-TV UK / worldwide](https://github.com/Free-TV/IPTV), and [IPTV-org](https://github.com/iptv-org/iptv) country/category feeds. New defaults include public HTTP/HLS lists for Canada, Australia, New Zealand, South Africa, Singapore and Hong Kong, plus separate **Classic**, **Series**, **Movies** and **Comedy** playlists to help discover 24/7-style programme and film channels. These are catalogues of available streams, not guaranteed English-only, always-on, officially licensed, or currently playable content; regional availability and provider rights still apply. Existing installations keep their configured sources; choose **Settings → Add built-in free playlists** to add the new presets without replacing personal URLs. An optional, much larger IPTV-org worldwide index can still be added in Settings. Each source refreshes independently; a failed source retains its cached entries. Identical stream identifiers/URLs are deduplicated, and stable IDs preserve favourites, mappings and category edits across refreshes. No channel dataset is bundled. Public links can be broken, geo-restricted, or subject to broadcaster access requirements.
 
 Country filters use explicit M3U metadata, recognised country groups and bracketed country tags such as `[RU]` and `[UK]`. Genres use source metadata and mapped XMLTV programme categories. TV/radio follows source metadata or saved edits; transport follows the stream. Missing metadata appears as **Unspecified**. Quality tags such as `[HD]` are not countries.
 
@@ -89,7 +89,7 @@ Built-in guide URLs point to [Freeview-EPG](https://github.com/dp247/Freeview-EP
 
 The recorder checks write access and free space where the provider reports it, rejects overlapping timers and preserves partial output. Older recordings are not automatically deleted.
 
-**Backup** saves your setup to a local JSON file. **Restore** previews replacement, resets storage permissions and pauses future timers. Video files and EPG cache are excluded. Choose storage and rearm timers after restoring. Backups can move preferences between platforms; see [backup format](docs/BACKUP-FORMAT.md).
+On desktop, use **Tools → Save local backup** or **Tools → Restore local backup** from the top toolbar (no separate Backup tab). **Backup** saves your setup to a local JSON file. **Restore** previews replacement, resets storage permissions and pauses future timers. Video files and EPG cache are excluded. Choose storage and rearm timers after restoring. Backups can move preferences between platforms; see [backup format](docs/BACKUP-FORMAT.md).
 
 ## Development
 
@@ -151,7 +151,7 @@ The previous 0.1.6 release remains available. See [the timeshift development iss
 
 ## DizyTV 0.1.9-alpha — Windows TV player and readability pass
 
-Windows users can resize the app down to a small window (minimum 480 × 360 logical pixels) while the horizontal control and header toolbars scroll instead of forcing an oversized minimum width. **Settings → Interface scale** supports 75–150%; **Button size** offers Compact, Normal and Large independently. The main player uses redesigned playback buttons, seek and volume sliders.
+Windows users can resize the app down to a small window (minimum 480 × 360 logical pixels) while the horizontal control and header toolbars scroll instead of forcing an oversized minimum width. **Settings → Interface scale** supports 75–150%; **Button size** offers Compact, Normal and Large independently. Select **Green** (original default), **Dark**, or **Light** beside the DizyTV name or under Settings → Appearance theme. The choice persists with your local settings and backups and also recolours the TV Guide and detached controls. Live TV, TV Guide and Recordings use compact rounded tabs with overflow scrolling; Backup/Restore moved to **Tools**. The main player uses redesigned playback buttons, seek and volume sliders.
 
 **Pop out** moves the existing libVLC video surface into a separate modeless resizable window while the DizyTV main catalogue/EPG remains usable. The separate player has Play/Pause, 30-second rewind, LIVE, guide and info, fullscreen toggle, volume and progress controls that disappear after inactivity and return on mouse movement. Escape or **Back to app** restores the embedded player without opening a second stream.
 
@@ -169,6 +169,6 @@ Local timeshift retains a wider live playlist for VLC, and cautiously reconnects
 
 The TV Guide now contains **all channels matching the current filters**, not the former first 250. Only the viewport's visible rows are painted for responsive scrolling through thousands of stations; guide density can be set separately in Settings (55–130%). Programme matches navigate to their channel and time, temporarily clearing hiding filters. User's original category overrides, EPG IDs, favourites and source URLs are not rewritten.
 
-The native TV pop-out uses a **transparent floating background** behind compact, slightly translucent controls. Its video/window dimensions do **not** change when controls appear or auto-hide. Both built-in player and pop-out have ±30-second seek buttons; mouse-wheel seek works only when hovering over the timeline (one notch = 30 seconds) if the stream or local buffer is seekable. Live/buffering/stopped lights pulse green/amber/red. Ace Engine checks distinguish engine API availability from absent stream peers; no proprietary binaries are bundled.
+The native TV pop-out uses a **transparent floating background** behind compact, slightly translucent controls. Its video/window dimensions do **not** change when controls appear or auto-hide. Both built-in player and pop-out have ±30-second seek buttons; mouse-wheel seek works only when hovering over the timeline (one notch = 30 seconds) if the stream or local buffer is seekable. Live/buffering/stopped lights pulse green/amber/red (direct streams correctly stay green while VLC is playing); the pop-out's hide timer respects the cursor on any desktop position. Ace Engine checks distinguish engine API availability from absent stream peers; no proprietary binaries are bundled.
 
 **Early-test caveat:** A listed channel does not guarantee an available playable stream. Live timeshift, engine playback and overlay behaviour still require actual Windows device testing; package CI is necessary but not sufficient.
