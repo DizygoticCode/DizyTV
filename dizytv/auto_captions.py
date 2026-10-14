@@ -85,6 +85,7 @@ class LocalCaptionWorker:
             from vosk import Model, KaldiRecognizer, SetLogLevel
             SetLogLevel(-1)
             recognizer=KaldiRecognizer(Model(self.model_path),16000)
+            if self._stop.is_set():return
             flags=getattr(subprocess,'CREATE_NO_WINDOW',0) if os.name=='nt' else 0
             process=subprocess.Popen(ffmpeg_capture_args(self.binary,self.url),
                                      stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
@@ -104,7 +105,7 @@ class LocalCaptionWorker:
                     last=result
             if not self._stop.is_set():
                 reason='Local transcription ended; stream may not provide readable audio.'
-        except (Exception,) as exc:
+        except Exception as exc:
             if not self._stop.is_set():
                 reason='Offline caption engine stopped: '+type(exc).__name__
         finally:
