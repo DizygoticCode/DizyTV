@@ -49,6 +49,13 @@ class AcePlaybackTests(unittest.TestCase):
         self.assertIn("format=json", requested)
         self.assertIn("id=" + HASH, requested)
 
+    def test_remote_engine_localhost_url_is_rewritten_to_configured_host(self):
+        remote = "http://192.168.1.20:6878"
+        loopback_url = ENGINE + "/ace/m/" + HASH + "/abc.m3u8"
+        with patch.object(engine, "urlopen", return_value=self.session_response(loopback_url)):
+            resolved = engine.start_playback_session("acestream://" + HASH, remote)
+        self.assertEqual(resolved, remote + "/ace/m/" + HASH + "/abc.m3u8")
+
     def test_session_request_keeps_infohash_and_safe_options(self):
         original = ENGINE + "/ace/getstream?infohash=" + HASH + "&hlc=1"
         with patch.object(engine, "urlopen", return_value=self.session_response(ENGINE + "/ace/m/live.m3u8")) as get:
