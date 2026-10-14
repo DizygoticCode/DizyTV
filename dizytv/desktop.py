@@ -29,7 +29,7 @@ from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
-from .auto_captions import verify_caption_engine, LocalCaptionWorker, caption_text
+from .auto_captions import verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -1521,8 +1521,11 @@ class MainWindow(QMainWindow):
         if self._subtitle_auto_applied and signature==self._subtitle_track_signature:return
         target=suggested_subtitle(tracks,self.state['settings'].get('subtitle_language','Auto'))
         try:
-            if target is not None and self.player.video_get_spu()!=target:
-                self.player.video_set_spu(target)
+            if target is None:return
+            if self.player.video_get_spu()!=target and self.player.video_set_spu(target)!=0:
+                # HLS caption tracks can be listed before VLC is ready to
+                # activate them. Try again on the next timer tick.
+                return
             self._subtitle_auto_applied=True
             self._subtitle_track_signature=signature
         except (AttributeError,OSError,RuntimeError):pass
@@ -1619,7 +1622,7 @@ class MainWindow(QMainWindow):
             # Some free HLS origins reject libVLC's default User-Agent.
             # This is format compatibility, not bypassing geo/DRM restrictions.
             if url.startswith('http'):
-                media.add_option(':http-user-agent=Mozilla/5.0 (compatible; DizyTV/0.1)')
+                media.add_option(':http-user-agent='+PLAYBACK_USER_AGENT)
             self.player.set_media(media); media.release()
             self._subtitle_auto_applied=False
             self._subtitle_manual_track=None
@@ -1821,6 +1824,19 @@ class MainWindow(QMainWindow):
         else:
             # Ordinary HTTP/HLS streams play without the Ace Stream engine.
             self.play_stream(url)
+    def moveEvent(self,event):
+        super().moveEvent(event)
+        # Windows' native transparent caption window is in global screen
+        # coordinates. Moving the main window does not move the video widget
+        # relative to its parent, so its own move event is not sufficient.
+        if self._auto_caption_overlay is not None:
+            self.position_auto_caption_overlay()
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if self._auto_caption_overlay is not None:
+            self.position_auto_caption_overlay()
+
     def eventFilter(self,obj,event):
         if obj is self.video and event.type() in (QEvent.Resize,QEvent.Move):
             self.position_auto_caption_overlay()
