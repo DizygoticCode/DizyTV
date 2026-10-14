@@ -136,13 +136,20 @@ def start_playback_session(stream, address, timeout=20):
                            'The content ID may be stale or have no active peers.')
     parsed=urlparse(playback)
     host,port=engine_endpoint(address)
+    local=('localhost','127.0.0.1','::1')
+    # A remote Windows/Linux engine may advertise its own 127.0.0.1.
+    # Route that URL through the user-selected endpoint instead so Mac
+    # clients do not attempt to connect to their own loopback interface.
+    if host not in local and parsed.hostname in local:
+        target=urlparse(address)
+        playback=urlunsplit((target.scheme,target.netloc,parsed.path,parsed.query,parsed.fragment))
+        parsed=urlparse(playback)
     try:
         returned_port=parsed.port or (443 if parsed.scheme=='https' else 80)
     except ValueError:
         raise RuntimeError('Engine returned an invalid playback port') from None
     same_host=parsed.hostname==host or (
-        host in ('localhost','127.0.0.1','::1')
-        and parsed.hostname in ('localhost','127.0.0.1','::1'))
+        host in local and parsed.hostname in local)
     if parsed.scheme not in ('http','https') or not same_host or returned_port!=port:
         raise RuntimeError('Engine returned a playback URL outside its configured endpoint')
     return http_url(playback)
