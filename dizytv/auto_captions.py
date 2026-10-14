@@ -15,6 +15,9 @@ import shutil
 import subprocess
 import threading
 
+# Keep the caption audio client identical to VLC's working HTTP identity.
+PLAYBACK_USER_AGENT = 'Mozilla/5.0 (compatible; DizyTV/0.1)'
+
 
 def verify_caption_engine(model_dir,ffmpeg_path=''):
     if not model_dir:
@@ -46,9 +49,13 @@ def ffmpeg_capture_args(binary,url):
         http_url(url)
     elif not Path(url).is_file():
         raise ValueError('Only an authorised active HTTP stream or local video file can be transcribed')
-    return [binary,'-hide_banner','-loglevel','error','-nostdin','-re',
-            '-i',url,'-map','0:a:0','-vn','-ac','1','-ar','16000',
-            '-f','s16le','pipe:1']
+    args=[binary,'-hide_banner','-loglevel','error','-nostdin','-re']
+    if url.startswith(('http://','https://')):
+        # FFmpeg's default Lavf user agent may be rejected by otherwise
+        # playable HLS origins; use the same identity as the video player.
+        args.extend(['-user_agent',PLAYBACK_USER_AGENT])
+    return args+['-i',url,'-map','0:a:0','-vn','-ac','1','-ar','16000',
+                 '-f','s16le','pipe:1']
 
 
 def caption_text(value):
