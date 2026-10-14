@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy, QAbstractItemView)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
-                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
+                   check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
 from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
@@ -1269,11 +1269,57 @@ class MainWindow(QMainWindow):
             except ValueError as exc:self.error(str(exc))
     def map_channel(self):
         if not self.selected:return
-        options=['No mapping']+[key+' — '+name for key,name in sorted(self.guide['names'].items())]
-        value,ok=QInputDialog.getItem(self,'Guide channel mapping','Choose the correct XMLTV channel',options,0,False)
-        if ok:
-            cid=self.selected['id']; target='' if value=='No mapping' else value.split(' — ')[0]
-            self.store.update(lambda s:s['mappings'].update({cid:target})); self.state=self.store.read(); self.render_guide(); self.render_now()
+        dialog=QDialog(self)
+        dialog.setWindowTitle('Map EPG — '+display_channel_name(self.selected['name']))
+        dialog.resize(680,520)
+        layout=QVBoxLayout(dialog)
+        label=QLabel('Choose the correct XMLTV station. Similar names are suggestions only; '
+                     'regional schedules must be selected explicitly.',dialog)
+        label.setWordWrap(True);layout.addWidget(label)
+        query=QLineEdit(dialog)
+        query.setObjectName('epgMappingSearch')
+        query.setPlaceholderText('Search XMLTV channel names or IDs…')
+        layout.addWidget(query)
+        results=QListWidget(dialog)
+        results.setObjectName('epgMappingOptions')
+        layout.addWidget(results,1)
+        suggestions=guide_suggestions(self.selected,self.guide['names'])
+        suggested_keys={key for key,_ in suggestions}
+        choices=[('', 'No mapping (leave guide blank)', False)]
+        choices.extend((key,name,True) for key,name in suggestions)
+        choices.extend((key,name,False) for key,name in
+                       sorted(self.guide['names'].items(),key=lambda x:(x[1].casefold(),x[0].casefold()))
+                       if key not in suggested_keys)
+        for key,name,suggested in choices:
+            text=('★ Suggested: ' if suggested else '')+name+('  ·  '+key if key else '')
+            item=QListWidgetItem(text)
+            item.setData(Qt.UserRole,key)
+            results.addItem(item)
+        def filter_options(text):
+            needle=text.strip().casefold()
+            first=None
+            for index in range(results.count()):
+                item=results.item(index)
+                visible=needle in item.text().casefold()
+                item.setHidden(not visible)
+                if visible and first is None:first=item
+            if first is not None:results.setCurrentItem(first)
+            else:results.clearSelection()
+        query.textChanged.connect(filter_options)
+        existing=self.state['mappings'].get(self.selected['id'])
+        start=next((index for index,option in enumerate(choices) if option[0]==existing),0)
+        results.setCurrentRow(start)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel,dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec()==QDialog.Accepted:
+            selected=results.currentItem()
+            if selected is None or selected.isHidden():return
+            cid=self.selected['id'];target=selected.data(Qt.UserRole)
+            self.store.update(lambda s:s['mappings'].update({cid:target}))
+            self.state=self.store.read()
+            self.render_guide();self.render_now()
     def init_player(self):
         if self.player:return
         if os.name=='nt':
