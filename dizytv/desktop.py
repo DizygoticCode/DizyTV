@@ -1394,12 +1394,13 @@ class MainWindow(QMainWindow):
         settings=self.state['settings']
         rgb=COLOURS.get(settings.get('subtitle_colour','White'),'0xFFFFFF')
         colour='#'+rgb[2:]
+        backdrop='rgba(255,255,255,222)' if colour=='#000000' else 'rgba(0,0,0,190)'
         font={'Sans':'Arial','Serif':'Georgia','Monospace':'Consolas'}.get(
             settings.get('subtitle_font','Sans'),'Arial')
         size=settings.get('subtitle_size',28)
         label.setStyleSheet(
             'QLabel#autoCaptionText {font-family:"'+font+'";font-size:'+str(size)+'px;'
-            'font-weight:700;color:'+colour+';background:rgba(0,0,0,190);'
+            'font-weight:700;color:'+colour+';background:'+backdrop+';'
             'border-radius:10px;padding:10px 18px;}')
         self.position_auto_caption_overlay()
 
