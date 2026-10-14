@@ -172,3 +172,12 @@ The TV Guide now contains **all channels matching the current filters**, not the
 The native TV pop-out uses a **transparent floating background** behind compact, slightly translucent controls. Its video/window dimensions do **not** change when controls appear or auto-hide. Both built-in player and pop-out have ±30-second seek buttons; mouse-wheel seek works only when hovering over the timeline (one notch = 30 seconds) if the stream or local buffer is seekable. Live/buffering/stopped lights pulse green/amber/red (direct streams correctly stay green while VLC is playing); the pop-out's hide timer respects the cursor on any desktop position. Ace Engine checks distinguish engine API availability from absent stream peers; no proprietary binaries are bundled.
 
 **Early-test caveat:** A listed channel does not guarantee an available playable stream. Live timeshift, engine playback and overlay behaviour still require actual Windows device testing; package CI is necessary but not sufficient.
+
+## Subtitles and closed captions (desktop)
+
+**CC Subtitles** is available on the embedded TV player and floating player. Select the subtitle or closed-caption track the channel actually carries, switch it off, or attach your own SRT, ASS, SSA, VTT or SUB file. Live channels and third-party playlists may supply no caption tracks; the UI reports that rather than inventing programme text.
+
+Settings → **Subtitles / closed captions** controls the default on/off state and preferred English track. **Text size (12–64 px), font (Sans/Serif/Monospace), text colour (White/Yellow/Cyan/Green/Black) and screen position (Bottom/Raised/High)** are saved with settings and portable backups. Renderer changes take effect when DizyTV is restarted, without interrupting active streams or scheduled recordings. Embedded text subtitles are painted by VLC onto the same video surface, including when the video pops out; picture-based DVB subtitles may ignore text appearance settings.
+
+**Speech-generated live captions** are a separate planned opt-in recognition feature, *not* included in this native-caption implementation yet. Chrome Live Caption uses speech recognition, whereas the native desktop app would need a local model, sound extraction and latency/resource safeguards. The plan is private on-device processing, off by default, without hidden audio uploads. The CC button alone does not imply automatic speech recognition is available.
+
