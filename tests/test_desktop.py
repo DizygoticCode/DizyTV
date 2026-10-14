@@ -380,6 +380,9 @@ class DesktopTests(unittest.TestCase):
             store.update(lambda s:s['settings'].update(subtitles_enabled=False))
             w=MainWindow(store,start_worker=False)
             w.player=Mock()
+            w.player.get_length.return_value=0
+            w.player.get_time.return_value=0
+            w.player.is_seekable.return_value=False
             w.playback_started=1
             w.player.video_set_subtitle_file.return_value=True
             w.player.video_get_spu_description.return_value=[(1,'English'),(2,'French')]
@@ -408,6 +411,9 @@ class DesktopTests(unittest.TestCase):
             store.update(lambda s:s['settings'].update(subtitles_enabled=False))
             w=MainWindow(store,start_worker=False)
             w.player=Mock()
+            w.player.get_length.return_value=0
+            w.player.get_time.return_value=0
+            w.player.is_seekable.return_value=False
             w.playback_started=1
             w.player.video_get_spu_description.return_value=[(3,'English')]
             w.player.video_get_spu.return_value=-1
@@ -421,6 +427,39 @@ class DesktopTests(unittest.TestCase):
             self.assertIsNone(w._subtitle_manual_track)
             w.player.video_set_spu.assert_called_with(3)
             w.player=None;w.close()
+
+    def test_automatic_subtitles_retry_track_until_vlc_accepts_selection(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.playback_started=1
+            w.player.video_get_spu_description.return_value=[(3,'English')]
+            w.player.video_get_spu.return_value=-1
+            w.player.video_set_spu.side_effect=[-1,0]
+            w.sync_subtitles()
+            self.assertFalse(w._subtitle_auto_applied)
+            self.assertEqual((),w._subtitle_track_signature)
+            w.sync_subtitles()
+            self.assertTrue(w._subtitle_auto_applied)
+            self.assertEqual(2,w.player.video_set_spu.call_count)
+            w.sync_subtitles()
+            self.assertEqual(2,w.player.video_set_spu.call_count)
+            w.player=None;w.close()
+
+    def test_caption_overlay_repositions_when_main_window_moves(self):
+        from PySide6.QtWidgets import QFrame
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.show()
+            QApplication.processEvents()
+            w._auto_caption_overlay=QFrame(w.video)
+            with patch.object(w,'position_auto_caption_overlay') as reposition:
+                w.move(w.x()+40,w.y()+32)
+                QApplication.processEvents()
+                self.assertGreater(reposition.call_count,0)
+            w.destroy_auto_caption_overlay()
+            w.close()
 
     def test_vlc_closed_captions_track_lifecycle_and_preferences(self):
         from unittest.mock import Mock
