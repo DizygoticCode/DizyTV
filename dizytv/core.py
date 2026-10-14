@@ -24,8 +24,9 @@ COUNTRIES = {'GB':'United Kingdom','UK':'United Kingdom','US':'United States','U
              'SE':'Sweden','NO':'Norway','DK':'Denmark','FI':'Finland','GR':'Greece',
              'TR':'Turkey','UA':'Ukraine','RU':'Russia','IN':'India','PK':'Pakistan',
              'BR':'Brazil','MX':'Mexico','AR':'Argentina','JP':'Japan','CN':'China',
-             'KR':'South Korea','ZA':'South Africa','IL':'Israel','AE':'United Arab Emirates'}
+             'KR':'South Korea','ZA':'South Africa','SG':'Singapore','HK':'Hong Kong','IL':'Israel','AE':'United Arab Emirates'}
 GENRES = [('Sport',r'sports?'),('News',r'news|current affairs'),('Movies',r'movies?|films?|cinema'),
+          ('Classic',r'classics?'),('Series',r'series|tv shows?'),('Comedy',r'comedy|sitcoms?'),
           ('Kids',r'kids|children|cartoons?'),('Music',r'music'),('Documentary',r'documentar(?:y|ies)|factual'),
           ('Entertainment',r'entertainment'),('Education',r'education'),('General',r'general')]
 
@@ -104,7 +105,7 @@ def channel_section(channel):
     if channel_kind(channel)=='Radio':
         return 'Radio'
     genre=normalise_genre(str(channel.get('genre') or ''))
-    sections={'Sport','News','Movies','Kids','Music','Documentary','Entertainment','Education'}
+    sections={'Sport','News','Movies','Classic','Series','Comedy','Kids','Music','Documentary','Entertainment','Education'}
     if genre in sections:
         return genre
     label=' '.join((display_channel_name(channel.get('name','')),str(channel.get('group') or '')))
@@ -112,6 +113,9 @@ def channel_section(channel):
         ('News',r'\b(?:news|headlines?|weather)\b'),
         ('Sport',r'\b(?:sports?|football|cricket|racing|nba|nfl|golf)\b'),
         ('Movies',r'\b(?:movies?|cinema|films?)\b'),
+        ('Classic',r'\bclassic(?:s)?\b'),
+        ('Series',r'\b(?:series|tv shows?)\b'),
+        ('Comedy',r'\b(?:comedy|sitcoms?)\b'),
         ('Kids',r'\b(?:kids|children|cartoons?|junior)\b'),
         ('Music',r'\b(?:music|concert)\b'),
         ('Documentary',r'\b(?:documentar(?:y|ies)|factual|history|nature)\b'),
