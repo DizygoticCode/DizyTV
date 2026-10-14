@@ -428,6 +428,38 @@ class DesktopTests(unittest.TestCase):
             w.player.video_set_spu.assert_called_with(3)
             w.player=None;w.close()
 
+    def test_backup_restore_applies_subtitles_off_to_active_player(self):
+        from unittest.mock import Mock, patch
+        from pathlib import Path
+        from PySide6.QtWidgets import QMessageBox
+        from dizytv.core import export_backup
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            state=store.read()
+            state['settings']['subtitles_enabled']=False
+            backup=Path(folder)/'subtitle-backup.json'
+            backup.write_text(export_backup(state),encoding='utf-8')
+            w=MainWindow(store,start_worker=False)
+            w.player=Mock()
+            w.player.get_length.return_value=0
+            w.player.get_time.return_value=0
+            w.player.is_seekable.return_value=False
+            w.player.video_set_spu.return_value=0
+            w.player.video_get_spu_description.return_value=[(3,'English')]
+            w.playback_started=1
+            w._subtitle_auto_applied=True
+            w._subtitle_manual_track=3
+            with patch('dizytv.desktop.QFileDialog.getOpenFileName',
+                       return_value=(str(backup),'')), \
+                 patch('dizytv.desktop.QMessageBox.question',
+                       return_value=QMessageBox.Yes):
+                w.restore()
+            self.assertFalse(store.read()['settings']['subtitles_enabled'])
+            self.assertIsNone(w._subtitle_manual_track)
+            w.player.video_set_spu.assert_called_with(-1)
+            self.assertTrue(w._subtitle_auto_applied)
+            w.player=None;w.close()
+
     def test_disable_subtitles_retries_after_vlc_initially_rejects_off(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
