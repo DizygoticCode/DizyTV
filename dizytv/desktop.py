@@ -21,7 +21,7 @@ from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
-from .engine import ensure_ready
+from .engine import ensure_ready, engine_diagnostics
 from .timeshift import RollingTimeshift
 from .stream_diagnostics import probe_stream
 
@@ -909,9 +909,16 @@ class MainWindow(QMainWindow):
         from .core import ace_id
         is_ace=ace_id(self.selected['stream']) is not None
         if is_ace:
-            # Engine streams have peer/engine-specific failures, not a
-            # public channel endpoint that can safely be probed as a HLS URL.
-            self.status.setText('Ace Stream playback failed: check engine status, peers and content ID. Open Settings to locate your installed engine.')
+            self.source_check_serial+=1
+            serial=self.source_check_serial
+            channel=self.selected['id']
+            diagnostic=Task(lambda:engine_diagnostics(self.state['settings']['engine_url']))
+            self.source_check=diagnostic
+            def ready(message):
+                if serial==self.source_check_serial and self.selected and self.selected['id']==channel:
+                    self.status.setText(message+' If Ace was started in console mode, no tray icon is expected.')
+            diagnostic.signals.success.connect(ready)
+            self.pool.start(diagnostic)
             return
         self.source_check_serial+=1
         serial=self.source_check_serial
