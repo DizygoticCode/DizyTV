@@ -336,6 +336,60 @@ class DesktopTests(unittest.TestCase):
             w.timeshift=None;w.player=None
             w.close()
 
+    def test_vlc_closed_captions_track_lifecycle_and_preferences(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            self.assertEqual('CC Subtitles',w.subtitle_button.text())
+            settings=Settings(store.read(),w)
+            self.assertTrue(settings.cc_enabled.isChecked())
+            settings.cc_font.setCurrentText('Monospace')
+            settings.cc_position.setCurrentText('Raised')
+            settings.cc_colour.setCurrentText('Cyan')
+            settings.cc_size.setValue(38)
+            self.assertEqual('Cyan',settings.values()['subtitle_colour'])
+            self.assertEqual(38,settings.values()['subtitle_size'])
+            w.player=Mock()
+            w.player.get_state.return_value='State.Playing'
+            w.player.video_get_spu_description.return_value=[(-1,'Disable'),(1,'French'),(3,'English')]
+            w.player.video_get_spu.return_value=-1
+            w.player.video_set_spu.return_value=0
+            w.playback_started=1
+            w.state['settings']['subtitle_language']='English'
+            w.sync_subtitles()
+            w.player.video_set_spu.assert_called_with(3)
+            self.assertTrue(w._subtitle_auto_applied)
+            w.choose_subtitle_track(1)
+            w.player.video_set_spu.assert_called_with(1)
+            self.assertEqual(1,w._subtitle_manual_track)
+            w.state['settings']['subtitles_enabled']=False
+            w._subtitle_auto_applied=False
+            w.sync_subtitles()
+            w.player.video_set_spu.assert_called_with(-1)
+            w.player=None
+            settings.close();w.close()
+
+    def test_subtitle_style_saved_without_restart_or_active_recording_changes(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            initial=store.read()['settings']
+            modified=dict(initial,subtitle_colour='Yellow',subtitle_position='High',
+                          subtitle_size=50,subtitle_font='Serif')
+            w.store.update(lambda s:s.update(settings=modified))
+            w.state=w.store.read()
+            w.apply_interface_scale()
+            self.assertEqual('Yellow',w.state['settings']['subtitle_colour'])
+            from dizytv.subtitles import vlc_subtitle_options
+            opts=vlc_subtitle_options(w.state['settings'])
+            self.assertIn('--sub-margin=135',opts)
+            self.assertIn('--freetype-fontsize=50',opts)
+            self.assertIsNone(w.player)
+            self.assertEqual([],store.read()['jobs'])
+            w.close()
+
     def test_tv_player_modes_and_seekable_dvr_controls(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
