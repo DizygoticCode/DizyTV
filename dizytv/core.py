@@ -163,20 +163,44 @@ def http_url(value):
     return value
 
 
-def ace_id(stream):
+def ace_request_params(stream):
+    """Preserve Ace infohash versus content_id when converting playlist URLs.
+
+    Never use the playlist-supplied host for playback; use the configured
+    engine address in Settings instead.
+    """
     p = urlparse(stream)
     if p.scheme == 'acestream':
-        candidate = p.netloc or p.path.lstrip('/')
-    else:
-        q = parse_qs(p.query)
-        candidate = next((q[k][0] for k in ('id', 'content_id', 'infohash') if k in q), '')
-    return candidate.lower() if re.fullmatch('[a-fA-F0-9]{40}', candidate) else None
+        identifier = p.netloc or p.path.lstrip('/')
+        return {'id': identifier.lower()} if re.fullmatch('[a-fA-F0-9]{40}', identifier) else None
+    if p.scheme not in ('http', 'https') or p.path not in ('/ace/getstream', '/ace/manifest.m3u8'):
+        return None
+    pairs = parse_qs(p.query, keep_blank_values=False)
+    for key in ('content_id', 'id', 'infohash'):
+        values = pairs.get(key, [])
+        if len(values) == 1 and re.fullmatch('[a-fA-F0-9]{40}', values[0]):
+            params = {('id' if key == 'content_id' else key): values[0].lower()}
+            for option in ('hlc', 'transcode_audio', 'transcode_mp3',
+                           'transcode_ac3', 'preferred_audio_language'):
+                opt = pairs.get(option, [])
+                if len(opt) == 1 and re.fullmatch('[A-Za-z0-9_-]{1,16}', opt[0]):
+                    params[option] = opt[0]
+            return params
+    return None
+
+
+def ace_id(stream):
+    params = ace_request_params(stream)
+    if params is None:
+        return None
+    return next(params[key] for key in ('id', 'infohash') if key in params)
 
 
 def stream_url(stream, engine):
-    identifier = ace_id(stream)
-    if identifier:
-        return http_url(engine).rstrip('/') + '/ace/getstream?' + urlencode({'id': identifier})
+    params = ace_request_params(stream)
+    if params is not None:
+        endpoint='/ace/manifest.m3u8' if urlparse(stream).path=='/ace/manifest.m3u8' else '/ace/getstream'
+        return http_url(engine).rstrip('/') + endpoint + '?' + urlencode(params)
     return http_url(stream)
 
 
@@ -203,7 +227,7 @@ def parse_playlist(text):
                 channels.append({'id': cid, 'name': (name or attrs.get('tvg-name') or cid)[:512],
                                  'group': attrs.get('group-title', '')[:512],
                                  'tvg_id': attrs.get('tvg-id', '')[:512],
-                                 'stream': 'acestream://' + aid if aid else line,
+                                 'stream': ('acestream://' + aid if urlparse(line).scheme == 'acestream' else line),
                                  **channel_categories(attrs,line,name)})
             attrs, name = {}, ''
     if not channels:
