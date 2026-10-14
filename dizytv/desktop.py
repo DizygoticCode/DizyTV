@@ -29,7 +29,8 @@ from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
-from .auto_captions import verify_caption_engine, LocalCaptionWorker, caption_text
+from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text,
+                             installed_caption_models, preferred_caption_model, bundled_ffmpeg)
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -552,10 +553,23 @@ class Settings(QDialog):
         model_layout.addWidget(self.auto_model_path,1)
         model_layout.addWidget(model_btn)
         form.addRow('Offline auto-caption model',model_row)
+        self.installed_cc_languages=QComboBox()
+        self.installed_cc_languages.setObjectName('installedCaptionLanguages')
+        self.installed_cc_languages.addItem('Automatic (prefer installed English)', '')
+        for model_name,model_path in installed_caption_models():
+            self.installed_cc_languages.addItem(model_name.replace('vosk-model-small-',''),model_path)
+        chosen=self.original.get('auto_caption_model_dir','')
+        if chosen and self.installed_cc_languages.findData(chosen)<0:
+            self.installed_cc_languages.addItem('Custom selected model',chosen)
+        self.installed_cc_languages.setCurrentIndex(max(0,self.installed_cc_languages.findData(chosen)))
+        self.installed_cc_languages.currentIndexChanged.connect(
+            lambda _:self.auto_model_path.setText(self.installed_cc_languages.currentData() or ''))
+        form.addRow('Installed caption languages',self.installed_cc_languages)
         self.auto_ffmpeg_path=QLineEdit(self.original.get('auto_caption_ffmpeg_path',''))
         self.auto_ffmpeg_path.setObjectName('autoCaptionFFmpegPath')
         self.auto_ffmpeg_path.setReadOnly(True)
-        self.auto_ffmpeg_path.setPlaceholderText('FFmpeg on PATH (or choose installed executable)')
+        self.auto_ffmpeg_path.setPlaceholderText(
+            'Automatic: bundled FFmpeg or PATH' + (' (detected)' if bundled_ffmpeg() else ''))
         ffmpeg_btn=QPushButton('Browse…')
         ffmpeg_btn.clicked.connect(self.choose_auto_caption_ffmpeg)
         ffmpeg_row=QWidget();ffmpeg_layout=QHBoxLayout(ffmpeg_row)
@@ -606,7 +620,7 @@ class Settings(QDialog):
         warning=QLabel('Timeshift requires available disk space and clear MPEG-TS or TS/HLS video. This is NOT a saved recording. The oldest data is automatically discarded; the buffer is deleted when playback stops. Encrypted/fMP4 streams fall back to live playback.')
         warning.setWordWrap(True)
         form.addRow(warning)
-        note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
+        note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine are separate from DizyTV even when their original installers are included.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
@@ -622,7 +636,12 @@ class Settings(QDialog):
     def choose_auto_caption_model(self):
         folder=QFileDialog.getExistingDirectory(
             self,'Select extracted offline Vosk speech model',self.auto_model_path.text())
-        if folder:self.auto_model_path.setText(folder)
+        if folder:
+            self.auto_model_path.setText(folder)
+            if self.installed_cc_languages.findData(folder)<0:
+                self.installed_cc_languages.addItem('Custom selected model',folder)
+            self.installed_cc_languages.setCurrentIndex(
+                self.installed_cc_languages.findData(folder))
 
     def choose_auto_caption_ffmpeg(self):
         executable,_=QFileDialog.getOpenFileName(
