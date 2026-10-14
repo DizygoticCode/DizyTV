@@ -52,6 +52,9 @@ class OfflineCaptionTests(unittest.TestCase):
         self.assertEqual('-vn',a[a.index('-vn')])
         self.assertEqual(PLAYBACK_USER_AGENT,a[a.index('-user_agent')+1])
         self.assertLess(a.index('-user_agent'),a.index('-i'))
+        uppercase=ffmpeg_capture_args('ffmpeg','HTTPS://example.com/live.m3u8')
+        self.assertEqual(PLAYBACK_USER_AGENT,uppercase[uppercase.index('-user_agent')+1])
+        self.assertEqual('HTTPS://example.com/live.m3u8',uppercase[uppercase.index('-i')+1])
         with tempfile.TemporaryDirectory() as directory:
             local=Path(directory)/'saved.ts'
             local.write_bytes(b'local')
