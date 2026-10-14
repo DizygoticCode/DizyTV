@@ -68,20 +68,34 @@ def refresh_catalogue(settings, old_channels, fetch):
     urls = configured_playlists(settings)
     if not urls:
         raise ValueError("Add at least one channel playlist in Settings")
-    if len(urls) > 16:
-        raise ValueError("Use at most 16 channel playlists")
+    if len(urls) > 24:
+        raise ValueError("Use at most 24 channel playlists")
     existing = {}
     for ch in old_channels:
         source = ch.get("source", LEGACY_URL)
         existing.setdefault(source, []).append(ch)
-    seen = set()
+    seen = {}
     combined, errors, success = [], [], 0
 
     def append(items):
         for ch in items:
-            if ch["id"] not in seen:
-                seen.add(ch["id"])
-                combined.append(ch)
+            # One stable identity, but retain every category/region playlist
+            # in which it appears. Source filtering must not hide duplicates.
+            origins=list(dict.fromkeys(ch.get('sources',[]) or
+                                       [ch.get('source',LEGACY_URL)]))
+            if ch["id"] in seen:
+                saved=combined[seen[ch["id"]]]
+                sources=saved.setdefault('sources',[saved.get('source',LEGACY_URL)])
+                for origin in origins:
+                    if origin not in sources:sources.append(origin)
+                # Enrich missing metadata; never overwrite a known category.
+                for key in ('country','genre'):
+                    if saved.get(key,'Unspecified')=='Unspecified' and ch.get(key)!='Unspecified':
+                        saved[key]=ch[key]
+            else:
+                entry={**ch,'sources':origins}
+                seen[ch["id"]]=len(combined)
+                combined.append(entry)
 
     for url in urls:
         try:
