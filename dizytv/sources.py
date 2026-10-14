@@ -6,6 +6,7 @@ Use only streams the viewer is authorised to access; geoblocking and DRM are not
 from __future__ import annotations
 
 from .core import http_url, parse_playlist
+from .iptv_directory_data import DIRECTORY_ROWS
 from urllib.parse import urlparse
 
 LEGACY_URL = "https://search-ace.stream/playlist"
@@ -37,6 +38,14 @@ FREE_GUIDES = (
 DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
+# Directory entries carry a country hint for country/subdivision/city feeds.
+# No country is guessed for region, language or grouped worldwide indexes.
+DIRECTORY_META = {url:(kind,name,parent) for kind,name,url,parent in DIRECTORY_ROWS}
+DIRECTORY_COUNTRIES = {url:(name if kind=='Countries' else parent)
+                       for kind,name,url,parent in DIRECTORY_ROWS
+                       if kind in ('Countries','States & provinces','Cities')}
+DIRECTORY_CATEGORIES = {url:name for kind,name,url,parent in DIRECTORY_ROWS
+                        if kind=='Categories' and name not in ('Undefined','XXX')}
 CATEGORY_HINTS = {
     'https://iptv-org.github.io/iptv/categories/classic.m3u': 'Classic',
     'https://iptv-org.github.io/iptv/categories/series.m3u': 'Series',
@@ -50,7 +59,14 @@ def source_label(url):
     for label, preset, _ in FREE_PLAYLISTS:
         if preset == url:
             return label
-    return urlparse(url).hostname or "Custom playlist"
+    if url in DIRECTORY_META:
+        kind,name,parent=DIRECTORY_META[url]
+        location=(name+', '+parent) if parent else name
+        return 'IPTV-org '+kind+' · '+location
+    parsed=urlparse(url)
+    if parsed.hostname=='iptv-org.github.io' and parsed.path.startswith('/iptv/'):
+        return 'IPTV-org · '+parsed.path.removeprefix('/iptv/')
+    return parsed.hostname or "Custom playlist"
 
 
 def configured_playlists(settings):
@@ -74,45 +90,43 @@ def refresh_catalogue(settings, old_channels, fetch):
         raise ValueError("Use at most 24 channel playlists")
     existing = {}
     for ch in old_channels:
-        source = ch.get("source", LEGACY_URL)
-        existing.setdefault(source, []).append(ch)
+        # A stream found in two directories must remain cached independently
+        # if either feed later fails.
+        for source in ch.get("sources") or [ch.get("source", LEGACY_URL)]:
+            existing.setdefault(source, []).append(ch)
     seen = {}
     combined, errors, success = [], [], 0
 
-    def append(items):
-        for ch in items:
-            # One stable identity, but retain every category/region playlist
-            # in which it appears. Source filtering must not hide duplicates.
-            origins=list(dict.fromkeys(ch.get('sources',[]) or
-                                       [ch.get('source',LEGACY_URL)]))
+    def append(items,origin):
+        for channel in items:
+            ch={**channel,'source':origin,'sources':[origin]}
             if ch["id"] in seen:
                 saved=combined[seen[ch["id"]]]
                 sources=saved.setdefault('sources',[saved.get('source',LEGACY_URL)])
-                for origin in origins:
-                    if origin not in sources:sources.append(origin)
-                # Enrich missing metadata; never overwrite a known category.
+                if origin not in sources:sources.append(origin)
                 for key in ('country','genre'):
                     if saved.get(key,'Unspecified')=='Unspecified' and ch.get(key)!='Unspecified':
                         saved[key]=ch[key]
             else:
-                entry={**ch,'sources':origins}
                 seen[ch["id"]]=len(combined)
-                combined.append(entry)
+                combined.append(ch)
 
     for url in urls:
         try:
             channels = parse_playlist(fetch(url))
             for ch in channels:
                 ch["source"] = url
-                if ch.get("country") == "Unspecified" and COUNTRY_HINTS.get(url):
-                    ch["country"] = COUNTRY_HINTS[url]
-                if ch.get("genre") == "Unspecified" and CATEGORY_HINTS.get(url):
-                    ch["genre"] = CATEGORY_HINTS[url]
+                if ch.get("country") == "Unspecified":
+                    hint=COUNTRY_HINTS.get(url) or DIRECTORY_COUNTRIES.get(url)
+                    if hint:ch["country"]=hint
+                if ch.get("genre") == "Unspecified":
+                    hint=CATEGORY_HINTS.get(url) or DIRECTORY_CATEGORIES.get(url)
+                    if hint:ch["genre"]=hint
             success += 1
-            append(channels)
+            append(channels,url)
         except Exception as exc:
             errors.append(source_label(url) + ": " + type(exc).__name__)
-            append(existing.get(url, []))
+            append(existing.get(url, []),url)
     if not success:
         if old_channels:
             return old_channels, 0, errors
