@@ -35,6 +35,29 @@ class FreeSourceTests(unittest.TestCase):
         self.assertEqual(DEFAULT_PLAYLIST_URLS,state['settings']['playlist_urls'])
         self.assertEqual(15,len(configured_playlists(state['settings'])))
 
+    def test_same_stream_is_searchable_under_region_and_series_feeds(self):
+        from dizytv.sources import FREE_PLAYLISTS
+        presets={label:url for label,url,_ in FREE_PLAYLISTS}
+        region=presets['IPTV-org Canada']
+        series=presets['Free television series channels']
+        url='https://example.com/same-stream.m3u8'
+        settings={'playlist_url':region,'playlist_urls':[region,series]}
+        rows,success,errors=refresh_catalogue(settings,[],lambda _:feed(url,'Old Show 24/7'))
+        self.assertEqual((2,[]),(success,errors))
+        self.assertEqual(1,len(rows))
+        self.assertEqual([region,series],rows[0]['sources'])
+        self.assertEqual('Canada',rows[0]['country'])
+        self.assertEqual('Series',rows[0]['genre'])
+        state=default_state()
+        state['channels']=rows
+        validate_state(state)
+        self.assertEqual([region,series],
+                         restore_backup(export_backup(state))['channels'][0]['sources'])
+        broken=default_state()
+        broken['channels']=[{**rows[0],'sources':[region,'not-an-http-url']}]
+        with self.assertRaises(ValueError):
+            validate_state(broken)
+
     def test_region_and_24_7_source_hints_do_not_override_real_metadata(self):
         from dizytv.sources import FREE_PLAYLISTS
         urls={label:url for label,url,_ in FREE_PLAYLISTS}
