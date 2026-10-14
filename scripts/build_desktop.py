@@ -17,7 +17,7 @@ shutil.copyfile(ROOT/'THIRD-PARTY-NOTICES.md',licences/'NOTICES.md')
 # HTTP support distributions. colorama is Windows-only (tqdm dependency).
 licence_packages=('python-vlc','tzdata','pyinstaller','vosk',
                   'requests','srt','tqdm','charset-normalizer','idna',
-                  'urllib3','certifi','Pillow')
+                  'urllib3','certifi','Pillow','cffi','pycparser')
 for package in (*licence_packages,'colorama'):
     try:wheel=distribution(package)
     except PackageNotFoundError:
@@ -48,7 +48,7 @@ for package in (*licence_packages,'colorama'):
             target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(source,target)
             found=1
-    if package in ('vosk','requests','srt','tqdm') and not found:
+    if package in ('vosk','requests','srt','tqdm','cffi','pycparser') and not found:
         raise RuntimeError('Missing licence terms for bundled dependency '+package)
 image=Image.open('assets/branding/dizytv-logo.png')
 image.save('assets/branding/dizytv.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
