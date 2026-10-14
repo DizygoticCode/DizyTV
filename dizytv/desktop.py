@@ -1159,29 +1159,37 @@ class MainWindow(QMainWindow):
         return 'buffering'
 
     def pulse_live_light(self):
+        """Pulse ONLY the small green dot; keep the LIVE button steady.
+
+        Amber means buffering, paused, or behind LIVE; red means stopped or
+        error. Unlike the old implementation neither warning state flashes.
+        Avoid reapplying unchanged button styles on every timer tick, which
+        causes distracting button-wide repainting on Windows.
+        """
         state=self.playback_light_state()
         self.light_phase=not self.light_phase
-        variants={'live':('#3cdb80','#247744'),
-                  'buffering':('#f2b450','#a47524'),
-                  'stopped':('#f26a60','#873930')}
-        bright,dim=variants[state]
-        color=bright if self.light_phase else dim
+        colours={'live':'#3cdb80','buffering':'#f2b450','stopped':'#f26a60'}
+        bright=colours[state]
+        dot_colour=('#247744' if not self.light_phase else bright) if state=='live' else bright
+        hint={'live':'Playing at LIVE',
+              'buffering':'Buffering, paused or watching behind LIVE',
+              'stopped':'Stopped / stream error'}[state]
         for label in (self.live_light,self.popout_live_light):
             if label is not None:
                 label.setText('●')
-                label.setStyleSheet('QLabel {background:transparent;color:'+color+
-                                    ';font-size:16px;font-weight:bold;}')
-                label.setToolTip({'live':'Stream playing near LIVE',
-                                  'buffering':'Buffering, paused or watching behind LIVE',
-                                  'stopped':'Stopped / stream error'}[state])
-        self.live_button.setStyleSheet(
-            'QPushButton {border:1px solid '+color+';'
-            'background:rgba(16,43,27,175);font-weight:700;'
-            'color:'+color+';}')
-        if self.popout_live_button is not None:
-            self.popout_live_button.setStyleSheet(
-                'QPushButton {background:rgba(8,30,20,120);'
-                'color:'+color+';border:1px solid '+color+';}')
+                style='QLabel {background:transparent;color:'+dot_colour+';font-size:16px;font-weight:bold;}'
+                if label.styleSheet()!=style:label.setStyleSheet(style)
+                if label.toolTip()!=hint:label.setToolTip(hint)
+        background={'live':'rgba(16,55,33,200)',
+                    'buffering':'rgba(63,43,14,200)',
+                    'stopped':'rgba(67,25,27,200)'}[state]
+        steady_style=('QPushButton {border:1px solid '+bright+';'
+                      'background:'+background+';font-weight:700;'
+                      'color:'+bright+';}')
+        for button in (self.live_button,self.popout_live_button):
+            if button is not None:
+                if button.styleSheet()!=steady_style:button.setStyleSheet(steady_style)
+                if button.toolTip()!=hint:button.setToolTip(hint)
 
     def media_activity(self):
         """VLC's decoded picture/audio counters catch freezes with State.Playing.
@@ -2156,7 +2164,7 @@ class MainWindow(QMainWindow):
         for title,callback in (('⏯ Play/Pause',self.toggle_pause),
                                ('↶ 30s',lambda:self.seek_relative(-30000)),
                                ('↷ 30s',lambda:self.seek_relative(30000)),
-                               ('● LIVE',self.jump_to_live),
+                               ('LIVE',self.jump_to_live),
                                ('☷ Guide',self.show_tv_guide),
                                ('Info',self.show_tv_info),
                                ('CC Subtitles',self.show_subtitle_menu),
@@ -2164,11 +2172,11 @@ class MainWindow(QMainWindow):
                                ('↩ Dock',self.exit_screen_fullscreen)):
             button=QPushButton(title,panel)
             button.clicked.connect(callback)
-            if title=='● LIVE':
+            if title=='LIVE':
                 button.setObjectName('tvLive')
                 self.popout_live_button=button
             bar.addWidget(button)
-            if title=='● LIVE':
+            if title=='LIVE':
                 self.popout_live_light=QLabel('●',button_row)
                 bar.addWidget(self.popout_live_light)
         button_scroll=QScrollArea(panel)
