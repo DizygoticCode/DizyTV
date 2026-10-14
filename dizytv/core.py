@@ -24,8 +24,9 @@ COUNTRIES = {'GB':'United Kingdom','UK':'United Kingdom','US':'United States','U
              'SE':'Sweden','NO':'Norway','DK':'Denmark','FI':'Finland','GR':'Greece',
              'TR':'Turkey','UA':'Ukraine','RU':'Russia','IN':'India','PK':'Pakistan',
              'BR':'Brazil','MX':'Mexico','AR':'Argentina','JP':'Japan','CN':'China',
-             'KR':'South Korea','ZA':'South Africa','IL':'Israel','AE':'United Arab Emirates'}
+             'KR':'South Korea','ZA':'South Africa','SG':'Singapore','HK':'Hong Kong','IL':'Israel','AE':'United Arab Emirates'}
 GENRES = [('Sport',r'sports?'),('News',r'news|current affairs'),('Movies',r'movies?|films?|cinema'),
+          ('Classic',r'classics?'),('Series',r'series|tv shows?'),('Comedy',r'comedy|sitcoms?'),
           ('Kids',r'kids|children|cartoons?'),('Music',r'music'),('Documentary',r'documentar(?:y|ies)|factual'),
           ('Entertainment',r'entertainment'),('Education',r'education'),('General',r'general')]
 
@@ -104,7 +105,7 @@ def channel_section(channel):
     if channel_kind(channel)=='Radio':
         return 'Radio'
     genre=normalise_genre(str(channel.get('genre') or ''))
-    sections={'Sport','News','Movies','Kids','Music','Documentary','Entertainment','Education'}
+    sections={'Sport','News','Movies','Classic','Series','Comedy','Kids','Music','Documentary','Entertainment','Education'}
     if genre in sections:
         return genre
     label=' '.join((display_channel_name(channel.get('name','')),str(channel.get('group') or '')))
@@ -112,6 +113,9 @@ def channel_section(channel):
         ('News',r'\b(?:news|headlines?|weather)\b'),
         ('Sport',r'\b(?:sports?|football|cricket|racing|nba|nfl|golf)\b'),
         ('Movies',r'\b(?:movies?|cinema|films?)\b'),
+        ('Classic',r'\bclassic(?:s)?\b'),
+        ('Series',r'\b(?:series|tv shows?)\b'),
+        ('Comedy',r'\b(?:comedy|sitcoms?)\b'),
         ('Kids',r'\b(?:kids|children|cartoons?|junior)\b'),
         ('Music',r'\b(?:music|concert)\b'),
         ('Documentary',r'\b(?:documentar(?:y|ies)|factual|history|nature)\b'),
@@ -139,7 +143,7 @@ def default_state():
                          'reserve_bytes': 1073741824, 'recording_dir': '',
                          'timeshift_enabled': False, 'timeshift_minutes': 30,
                          'timeshift_max_bytes': 4*1024**3, 'timeshift_dir': '',
-                         'ui_scale': 100, 'button_size': 'Normal', 'engine_executable': ''},
+                         'ui_scale': 100, 'button_size': 'Normal', 'engine_executable': '', 'guide_scale': 100, 'theme': 'Green'},
             'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
 
 
@@ -343,7 +347,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -352,8 +356,8 @@ def validate_state(state):
     for url in settings['xmltv_urls']:
         http_url(url)
     if 'playlist_urls' in settings:
-        if not isinstance(settings['playlist_urls'], list) or not 1 <= len(settings['playlist_urls']) <= 16:
-            raise ValueError('Use 1 to 16 playlist URLs')
+        if not isinstance(settings['playlist_urls'], list) or not 1 <= len(settings['playlist_urls']) <= 24:
+            raise ValueError('Use 1 to 24 playlist URLs')
         for url in settings['playlist_urls']:
             http_url(url)
     try:
@@ -367,6 +371,10 @@ def validate_state(state):
     _integer(settings['reserve_bytes'], 0, 1024**5, 'storage reserve')
     if 'ui_scale' in settings:
         _integer(settings['ui_scale'],75,150,'interface scale')
+    if 'guide_scale' in settings:
+        _integer(settings['guide_scale'],55,130,'guide scale')
+    if 'theme' in settings and settings['theme'] not in ('Green','Dark','Light'):
+        raise ValueError('Invalid appearance theme')
     if 'button_size' in settings and settings['button_size'] not in ('Compact','Normal','Large'):
         raise ValueError('Invalid button size')
     if 'engine_executable' in settings and (not isinstance(settings['engine_executable'],str) or len(settings['engine_executable'])>4096):
@@ -395,6 +403,12 @@ def validate_state(state):
         ids.add(ch['id'])
         if 'source' in ch:
             http_url(ch['source'])
+        if 'sources' in ch:
+            if (not isinstance(ch['sources'],list) or len(ch['sources'])>24 or
+                    len(ch['sources'])!=len(set(str(s) for s in ch['sources']))):
+                raise ValueError('Invalid channel source membership')
+            for origin in ch['sources']:
+                http_url(origin)
         for key in ('country','genre','kind','transport'):
             if key in ch and (not isinstance(ch[key],str) or len(ch[key])>512):
                 raise ValueError('Invalid channel category')
@@ -442,6 +456,8 @@ def export_backup(state):
         ch['stream'] = _redact_url(ch['stream'])
         if 'source' in ch:
             ch['source'] = _redact_url(ch['source'])
+        if 'sources' in ch:
+            ch['sources'] = [_redact_url(url) for url in ch['sources']]
     payload = json.dumps({'app':'DizyTV', 'version':1, 'data':data}, ensure_ascii=False, indent=2)
     if len(payload.encode('utf-8')) > MAX_BACKUP:
         raise ValueError('Backup is too large')

@@ -150,6 +150,37 @@ class CoreTests(unittest.TestCase):
         # Old installations remain valid without new keys.
         validate_state(s)
 
+    def test_appearance_theme_defaults_are_optional_validated_and_backed_up(self):
+        from dizytv.core import default_state,validate_state
+        state=default_state()
+        self.assertEqual('Green',state['settings']['theme'])
+        for theme in ('Green','Dark','Light'):
+            state['settings']['theme']=theme
+            validate_state(state)
+            self.assertEqual(theme,restore_backup(export_backup(state))['settings']['theme'])
+        for value in ('Blue','Auto','green',None,5):
+            state['settings']['theme']=value
+            with self.assertRaises(ValueError):
+                validate_state(state)
+        state['settings'].pop('theme')
+        validate_state(state)  # Old 0.1.8 backups are still valid.
+
+    def test_backup_redacts_every_playlist_source_membership(self):
+        state=default_state()
+        channel=parse_playlist('#EXTM3U\n#EXTINF:-1,Test\nhttps://example.com/movie.m3u8')[0]
+        a='https://example.com/ca.m3u?access_token=SECRET_CA&public=1'
+        b='https://example.com/series.m3u?api_key=SECRET_SERIES&public=2'
+        channel.update(source=a,sources=[a,b])
+        state['channels']=[channel]
+        exported=export_backup(state)
+        self.assertNotIn('SECRET_CA',exported)
+        self.assertNotIn('SECRET_SERIES',exported)
+        restored=restore_backup(exported)
+        self.assertEqual(2,len(restored['channels'][0]['sources']))
+        for source in restored['channels'][0]['sources']:
+            self.assertNotIn('SECRET',source)
+            self.assertIn('public=',source)
+
     def test_windows_ui_settings_optional_for_old_backups(self):
         from dizytv.core import default_state,validate_state
         s=default_state()

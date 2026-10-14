@@ -1,19 +1,20 @@
 """Native Qt desktop client for Windows and macOS."""
 from __future__ import annotations
 import json
+import re
 import os
 import sys
 import time
 from pathlib import Path
 from zoneinfo import available_timezones
 
-from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices, QShortcut, QKeySequence
+from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent, QPoint
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices, QShortcut, QKeySequence, QCursor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy, QAbstractItemView)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
@@ -21,9 +22,11 @@ from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
-from .engine import ensure_ready
+from .engine import ensure_ready, engine_diagnostics
 from .timeshift import RollingTimeshift
 from .stream_diagnostics import probe_stream
+from .global_search import GlobalSearch
+from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -34,7 +37,11 @@ QPushButton:hover { background:#477552; } QPushButton:disabled { color:#8a938b; 
 QLineEdit,QPlainTextEdit,QComboBox,QSpinBox,QDoubleSpinBox { background:#202d24; padding:8px; border:1px solid #405246; border-radius:5px; }
 QListWidget { background:#1a261e; border:0; } QListWidget::item { padding:12px; border-bottom:1px solid #2f4033; }
 QListWidget::item:selected { background:#416248; }
-QTabBar::tab { padding:12px 22px; background:#25362b; } QTabBar::tab:selected { background:#416248; }
+QTabWidget::pane { border:1px solid #405246; border-radius:10px; top:0px; }
+QTabBar::tab { padding:9px 16px; margin:4px 4px 5px 0; background:#25362b; border:1px solid #405246; border-radius:9px; }
+QTabBar::tab:hover { background:#355b43; }
+QTabBar::tab:selected { background:#416248; border:1px solid #54785b; font-weight:700; }
+QLabel#filterTitle { color:#a8c5ad; }
 QTableWidget { gridline-color:#354638; background:#19251d; }
 QHeaderView::section { background:#2d4133; padding:8px; border:0; }
 QPushButton#tvPrimary { background:#397f51; border:1px solid #64b679; color:white; font-weight:700; }
@@ -52,15 +59,140 @@ QScrollArea#toolbarScroll, QScrollArea#playerControlScroll { border:0; backgroun
 '''
 
 
-def desktop_style(scale=100, button_size='Normal'):
+THEME_COLORS = {
+    'Dark': {
+        '#151e19':'#17191f',
+        '#f3ead5':'#f1f3f7',
+        '#355b43':'#323845',
+        '#54785b':'#59616f',
+        '#8a938b':'#8d96a4',
+        '#477552':'#424a5b',
+        '#202d24':'#242932',
+        '#405246':'#545d6d',
+        '#1a261e':'#1d222b',
+        '#2f4033':'#343c47',
+        '#416248':'#485d79',
+        '#25362b':'#292f3a',
+        '#19251d':'#20252e',
+        '#354638':'#454f5c',
+        '#2d4133':'#333b49',
+        '#397f51':'#385e91',
+        '#64b679':'#6ea0e1',
+        '#4b9963':'#497ab6',
+        '#69352f':'#693c45',
+        '#b26354':'#bf777e',
+        '#713b38':'#8b3e3f',
+        '#cc7771':'#f1a29b',
+        '#ffe2d4':'#ffe9dc',
+        '#355c48':'#66788e',
+        '#21392e':'#2d3542',
+        '#61bd7c':'#679bdc',
+        '#d9f6dd':'#e4edff',
+        '#72df99':'#8bb7f2',
+        '#6b746d':'#747983',
+        '#99a69d':'#a7afbc',
+        '#62adca':'#759dbf',
+        '#a8c5ad':'#c1cada',
+        '#15221a':'#151922',
+        '#253b2b':'#283448',
+        '#47654b':'#465267',
+        '#95a695':'#bbc1cd',
+        '#3c5c42':'#354966',
+        '#283e30':'#272f3e',
+        '#f4af71':'#f2b875',
+        '#304d36':'#303c52',
+        '#101713':'#101219',
+    },
+    'Light': {
+        '#151e19':'#f7f9fc',
+        '#f3ead5':'#1e293b',
+        '#355b43':'#e3e9f2',
+        '#54785b':'#a4b2c6',
+        '#8a938b':'#8490a2',
+        '#477552':'#d3deec',
+        '#202d24':'#ffffff',
+        '#405246':'#c2ccd9',
+        '#1a261e':'#ffffff',
+        '#2f4033':'#dee5ed',
+        '#416248':'#bfd4ee',
+        '#25362b':'#e9eef6',
+        '#19251d':'#ffffff',
+        '#354638':'#d1dbe7',
+        '#2d4133':'#eff3fa',
+        '#397f51':'#2d6cc0',
+        '#64b679':'#1a569e',
+        '#4b9963':'#3d7ed1',
+        '#69352f':'#f7dce0',
+        '#b26354':'#d67e8a',
+        '#713b38':'#fae7e4',
+        '#cc7771':'#d76767',
+        '#ffe2d4':'#842a27',
+        '#355c48':'#a5bfdc',
+        '#21392e':'#e8f0fb',
+        '#61bd7c':'#3b82d5',
+        '#d9f6dd':'#e8f4ff',
+        '#72df99':'#4c94e0',
+        '#6b746d':'#bcc4cf',
+        '#99a69d':'#919cae',
+        '#62adca':'#3480a3',
+        '#a8c5ad':'#51657e',
+        '#15221a':'#f1f5fb',
+        '#253b2b':'#dde7f4',
+        '#47654b':'#ccd7e5',
+        '#95a695':'#526078',
+        '#3c5c42':'#d7e7fb',
+        '#283e30':'#e5edf9',
+        '#f4af71':'#cf6f17',
+        '#304d36':'#dde9fa',
+        '#101713':'#e8eef6',
+    },
+}
+
+
+def theme_color(color, theme='Green'):
+    return THEME_COLORS.get(theme, {}).get(color, color)
+
+
+def overlay_theme_style(style, theme='Green'):
+    """Preserve translucent overlay geometry while changing only its colours."""
+    variants={
+        'Dark': {
+            'rgba(10,35,23,135)':'rgba(21,33,53,165)',
+            'rgba(161,213,173,150)':'rgba(148,177,225,160)',
+            'rgba(17,70,43,180)':'rgba(40,64,101,205)',
+            'rgba(14,40,29,120)':'rgba(21,32,53,165)',
+            'rgba(86,205,128,190)':'rgba(109,155,224,200)',
+            'rgba(210,255,227,200)':'rgba(212,227,255,210)',
+            'rgba(106,227,147,215)':'rgba(132,182,246,220)',
+            '#edfff0':'#f2f5ff','#effff0':'#f2f5ff',
+        },
+        'Light': {
+            'rgba(10,35,23,135)':'rgba(232,240,253,213)',
+            'rgba(161,213,173,150)':'rgba(58,111,181,180)',
+            'rgba(17,70,43,180)':'rgba(202,221,249,230)',
+            'rgba(14,40,29,120)':'rgba(206,219,237,200)',
+            'rgba(86,205,128,190)':'rgba(57,119,206,220)',
+            'rgba(210,255,227,200)':'rgba(34,97,177,220)',
+            'rgba(106,227,147,215)':'rgba(85,151,229,230)',
+            '#edfff0':'#17263b','#effff0':'#17263b',
+        },
+    }
+    for before,after in variants.get(theme,{}).items():
+        style=style.replace(before,after)
+    return style
+
+
+def desktop_style(scale=100, button_size='Normal', theme='Green'):
     """Respect TV DPI while allowing smaller independent UI/controls."""
     scale=max(75,min(150,int(scale)))/100
     pad={'Compact':(4,8),'Normal':(9,15),'Large':(13,20)}.get(button_size,(9,15))
-    return (STYLE.replace('font-size:14px;',f'font-size:{round(14*scale)}px;')
-                 .replace('font-size:27px;',f'font-size:{round(27*scale)}px;')
-                 .replace('padding:9px 15px;',f'padding:{round(pad[0]*scale)}px {round(pad[1]*scale)}px;')
-                 .replace('padding:12px 22px;',f'padding:{round(10*scale)}px {round(18*scale)}px;')
-                 .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
+    style=(STYLE.replace('font-size:14px;',f'font-size:{round(14*scale)}px;')
+               .replace('font-size:27px;',f'font-size:{round(27*scale)}px;')
+               .replace('padding:9px 15px;',f'padding:{round(pad[0]*scale)}px {round(pad[1]*scale)}px;')
+               .replace('padding:9px 16px;',f'padding:{round(8*scale)}px {round(14*scale)}px;')
+               .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
+    colors=THEME_COLORS.get(theme, {})
+    return re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
 
 
 def detected_zone():
@@ -83,48 +215,131 @@ class Task(QRunnable):
             self.signals.failure.emit(str(exc))
 
 
+class TimeSeekSlider(QSlider):
+    """Mouse wheel seeks only when directly over the video timeline."""
+    seek_requested=Signal(int)
+    def __init__(self,orientation=Qt.Horizontal,parent=None):
+        super().__init__(orientation,parent)
+        self._wheel_degrees=0
+        self.setToolTip('Drag to seek or scroll over the timeline: 30 seconds per wheel notch')
+
+    def seek_wheel_delta(self,delta):
+        self._wheel_degrees+=delta
+        ticks=int(self._wheel_degrees/120)
+        if ticks:
+            ticks=max(-4,min(4,ticks))
+            self._wheel_degrees-=ticks*120
+            self.seek_requested.emit(ticks*30000)
+
+    def wheelEvent(self,event):
+        if not self.isEnabled():
+            event.ignore()
+            return
+        self.seek_wheel_delta(event.angleDelta().y() or event.angleDelta().x())
+        event.accept()
+
+
 class GuideGrid(QWidget):
     channel_clicked = Signal(object)
     programme_record_requested = Signal(object,object)
     channel_record_requested = Signal(object)
     def __init__(self):
         super().__init__(); self.rows=[]; self.programmes=[]; self.hitboxes=[]; self.zone='auto'; self.start=0
+        self.guide_scale=100
+        self.theme='Green'
+        self._programmes_by_channel={}
+    def set_theme(self,theme):
+        if theme!=self.theme:
+            self.theme=theme
+            self.update()
+
+    def geometry_units(self):
+        ratio=max(55,min(130,self.guide_scale))/100.0
+        return (max(25,int(58*ratio)),max(125,int(210*ratio)),
+                max(86,int(180*ratio)),max(8,int(11*ratio)))
+    def set_guide_scale(self,value):
+        self.guide_scale=max(55,min(130,int(value)))
+        self.update_dimensions()
+    def update_dimensions(self):
+        row,left,hour,font=self.geometry_units()
+        self.setMinimumSize(left+6*hour+30,max(230,48+len(self.rows)*row+12))
+        self.update()
     def set_data(self,channels,programmes,mappings,zone,start):
-        self.rows = channels[:250]; self.programmes = programmes; self.mappings=mappings
+        # NO channel cap. The full filtered catalogue stays scrollable; only
+        # the rows inside the viewport are painted at any given moment.
+        self.rows=list(channels)
+        self.programmes=programmes
+        self.mappings=mappings
         self.zone=zone; self.start=start
-        self.setMinimumSize(1350,max(420,60+len(self.rows)*58)); self.update()
-    def paintEvent(self,event):
-        p=QPainter(self); p.fillRect(self.rect(),QColor('#15221a')); self.hitboxes=[]
-        p.setFont(QFont('Sans Serif',11)); rowheight=58; left=210; scale=180/3600
-        for i in range(7):
-            x=left+i*180
-            p.setPen(QColor('#47654b')); p.drawLine(x,0,x,self.height())
-            p.setPen(QColor('#f3ead5')); p.drawText(x+5,30,format_time(self.start+i*3600,self.zone,False,detected_zone()))
         by_channel={}
-        for item in self.programmes:
-            if item['start']<self.start+6*3600 and item['end']>self.start:
-                by_channel.setdefault(item['channel'],[]).append(item)
-        for row,ch in enumerate(self.rows):
+        for item in programmes:
+            by_channel.setdefault(item['channel'],[]).append(item)
+        self._programmes_by_channel=by_channel
+        self.update_dimensions()
+    def visible_row_range(self,rect):
+        height,_,_,_=self.geometry_units()
+        first=max(0,(rect.top()-48)//height)
+        last=min(len(self.rows),(rect.bottom()-48)//height+2)
+        return first,max(first,last)
+    def paintEvent(self,event):
+        p=QPainter(self)
+        visible=event.rect()
+        p.setClipRect(visible)
+        p.fillRect(visible,QColor(theme_color('#15221a',self.theme)))
+        rowheight,left,hour,font=self.geometry_units()
+        p.setFont(QFont('Sans Serif',font)); scale=hour/3600
+        for i in range(7):
+            x=left+i*hour
+            p.setPen(QColor(theme_color('#47654b',self.theme))); p.drawLine(x,visible.top(),x,visible.bottom())
+            if visible.top()<=48:
+                p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(x+5,30,format_time(self.start+i*3600,self.zone,False,detected_zone()))
+        first,last=self.visible_row_range(visible)
+        for row in range(first,last):
+            ch=self.rows[row]
             y=48+row*rowheight
-            p.fillRect(0,y,left,rowheight-3,QColor('#253b2b'))
-            p.setPen(QColor('#f3ead5')); p.drawText(QRectF(12,y+4,left-20,rowheight-8),Qt.AlignVCenter|Qt.TextWordWrap,display_channel_name(ch['name']))
+            p.fillRect(0,y,left,rowheight-3,QColor(theme_color('#253b2b',self.theme)))
+            p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(QRectF(12,y+4,left-20,rowheight-8),Qt.AlignVCenter|Qt.TextWordWrap,display_channel_name(ch['name']))
             key=self.mappings.get(ch['id'],ch['tvg_id'])
-            entries=by_channel.get(key,[])
+            entries=self._programmes_by_channel.get(key,[])
             if not entries:
-                p.setPen(QColor('#95a695')); p.drawText(left+15,y+33,'No guide match — choose Map EPG for this channel')
+                p.setPen(QColor(theme_color('#95a695',self.theme))); p.drawText(left+15,y+33,'No guide match — choose Map EPG for this channel')
             for item in entries:
                 x=left+max(0,item['start']-self.start)*scale
                 width=(min(item['end'],self.start+6*3600)-max(item['start'],self.start))*scale
                 rect=QRectF(x+2,y+2,max(0,width-4),rowheight-6)
-                p.fillRect(rect,QColor('#3c5c42' if item['start']<=time.time()<item['end'] else '#283e30'))
-                p.setPen(QColor('#f3ead5')); p.drawText(rect.adjusted(8,2,-8,-2),Qt.AlignVCenter|Qt.TextWordWrap,item['title'])
-                self.hitboxes.append((rect,ch,item))
+                fill='#3c5c42' if item['start']<=time.time()<item['end'] else '#283e30'
+                p.fillRect(rect,QColor(theme_color(fill,self.theme)))
+                p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(rect.adjusted(8,2,-8,-2),Qt.AlignVCenter|Qt.TextWordWrap,item['title'])
+
         x=left+(time.time()-self.start)*scale
-        if left<=x<=left+1080:
-            p.setPen(QColor('#f4af71')); p.drawLine(int(x),40,int(x),self.height())
+        if left<=x<=left+6*hour:
+            p.setPen(QColor(theme_color('#f4af71',self.theme))); p.drawLine(int(x),40,int(x),self.height())
+    def programme_at(self,point,row=None):
+        """Determine the programme from its data, not partial paint rectangles.
+
+        Qt repaints narrow dirty rectangles while scrolling; caching hitboxes
+        only from paintEvent causes invisible context-menu regressions.
+        """
+        rowheight,left,hour,_=self.geometry_units()
+        if row is None:row=int((point.y()-48)//rowheight)
+        if not 0<=row<len(self.rows) or point.x()<left:return None
+        channel=self.rows[row]
+        key=self.mappings.get(channel['id'],channel['tvg_id'])
+        scale=hour/3600
+        for item in self._programmes_by_channel.get(key,()):
+            span_start=max(item['start'],self.start)
+            span_end=min(item['end'],self.start+6*3600)
+            if span_end<=span_start:continue
+            x=left+(span_start-self.start)*scale
+            width=(span_end-span_start)*scale
+            rect=QRectF(x+2,48+row*rowheight+2,max(0,width-4),rowheight-6)
+            if rect.contains(point):return item
+        return None
+
     def mousePressEvent(self,event):
         # Row identity does not depend on whether this channel has XMLTV data.
-        row=int((event.position().y()-48)//58)
+        rowheight,_,_,_=self.geometry_units()
+        row=int((event.position().y()-48)//rowheight)
         if not (0<=row<len(self.rows)):
             return super().mousePressEvent(event)
         channel=self.rows[row]
@@ -134,8 +349,7 @@ class GuideGrid(QWidget):
             return
         if event.button()==Qt.RightButton:
             # Offer recording only through an explicit menu, never by default click.
-            programme=next((p for rect,ch,p in reversed(self.hitboxes)
-                            if ch['id']==channel['id'] and rect.contains(event.position())),None)
+            programme=self.programme_at(event.position(),row)
             menu=QMenu(self)
             watch=menu.addAction('▶ Watch channel')
             watch.triggered.connect(lambda checked=False,ch=channel:self.channel_clicked.emit(ch))
@@ -153,6 +367,116 @@ class GuideGrid(QWidget):
         return super().mousePressEvent(event)
 
 
+class IPTVDirectoryDialog(QDialog):
+    """Entire official IPTV-org playlist index, not 1,000 simultaneous downloads."""
+
+    def __init__(self,existing_urls,parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('IPTV-org public playlist directory')
+        self.resize(820,610)
+        self.rows=list(DIRECTORY_ROWS)
+        self.existing=set(existing_urls)
+        self.added_urls=[]
+        self.refresh_task=None
+        root=QVBoxLayout(self)
+        note=QLabel('Browse the complete IPTV-org directory: countries, cities, regions, '
+                    'languages and categories. Pick feeds to import; the worldwide index '
+                    'covers the complete channel collection with one playlist. '
+                    'No new streams are downloaded until you save Settings and refresh channels.',self)
+        note.setWordWrap(True);root.addWidget(note)
+        top=QHBoxLayout()
+        self.kind_filter=QComboBox(self)
+        self.kind_filter.setObjectName('iptvDirectoryType')
+        self.kind_filter.addItems(DIRECTORY_TYPES)
+        self.kind_filter.currentTextChanged.connect(self.populate)
+        top.addWidget(self.kind_filter)
+        self.query=QLineEdit(self)
+        self.query.setObjectName('iptvDirectorySearch')
+        self.query.setPlaceholderText('Search country, region, city, language, genre or URL…')
+        self.query.textChanged.connect(self.populate)
+        top.addWidget(self.query,1)
+        root.addLayout(top)
+        self.results=QListWidget(self)
+        self.results.setObjectName('iptvDirectoryResults')
+        self.results.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.results.itemDoubleClicked.connect(lambda _:self.add_selected())
+        root.addWidget(self.results,1)
+        self.status_label=QLabel('',self)
+        self.status_label.setObjectName('iptvDirectoryStatus')
+        self.status_label.setWordWrap(True)
+        root.addWidget(self.status_label)
+        buttons=QHBoxLayout()
+        add=QPushButton('Add selected playlists',self)
+        add.setObjectName('iptvDirectoryAdd')
+        add.clicked.connect(self.add_selected)
+        buttons.addWidget(add)
+        worldwide=QPushButton('Add worldwide index',self)
+        worldwide.setObjectName('iptvDirectoryWorldwide')
+        worldwide.setToolTip('One playlist containing all channels; no mass per-country downloads')
+        worldwide.clicked.connect(self.add_worldwide)
+        buttons.addWidget(worldwide)
+        refresh=QPushButton('Refresh source directory',self)
+        refresh.setObjectName('iptvDirectoryRefresh')
+        refresh.clicked.connect(self.refresh_online)
+        buttons.addWidget(refresh)
+        cancel=QPushButton('Cancel',self)
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
+        self.populate()
+
+    def populate(self,*_):
+        visible=directory_search(self.rows,self.kind_filter.currentText(),self.query.text())
+        self.results.clear()
+        for kind,name,url,country in visible:
+            label=name+((' · '+country) if country else '')+'  —  '+kind
+            if url in self.existing:label+='  (already added)'
+            item=QListWidgetItem(label)
+            item.setData(Qt.UserRole,url)
+            item.setToolTip(url)
+            self.results.addItem(item)
+        self.status_label.setText(f'{len(visible):,} matching sources of {len(self.rows):,} published playlists '
+                                  '· select one or several; up to 24 active playlists in Settings')
+
+    def add_selected(self):
+        urls=[item.data(Qt.UserRole) for item in self.results.selectedItems()]
+        if not urls:
+            self.status_label.setText('Select at least one playlist, or choose the worldwide index.')
+            return
+        combined=list(dict.fromkeys([*self.existing,*urls]))
+        if len(combined)>24:
+            self.status_label.setText(f'Cannot activate {len(combined)} feeds at once (24 maximum). '
+                                      'Select fewer, or use the single worldwide index.')
+            return
+        self.added_urls=[url for url in urls if url not in self.existing]
+        self.accept()
+
+    def add_worldwide(self):
+        if WORLDWIDE_URL not in self.existing and len(self.existing)>=24:
+            self.status_label.setText('Remove an active feed in Settings before adding the worldwide index.')
+            return
+        self.added_urls=[WORLDWIDE_URL] if WORLDWIDE_URL not in self.existing else []
+        self.accept()
+
+    def refresh_online(self):
+        if self.refresh_task is not None:return
+        self.status_label.setText('Refreshing directory from IPTV-org …')
+        task=Task(lambda:parse_directory(download(DIRECTORY_URL)))
+        self.refresh_task=task
+        def done(rows):
+            self.refresh_task=None
+            self.rows=rows
+            self.populate()
+            self.status_label.setText(f'{len(rows):,} published sources loaded directly from IPTV-org.')
+        def failed(error):
+            self.refresh_task=None
+            self.status_label.setText('Online refresh unavailable ('+error+
+                                      '). Bundled directory retained.')
+        task.signals.success.connect(done)
+        task.signals.failure.connect(failed)
+        QThreadPool.globalInstance().start(task)
+
+
 class Settings(QDialog):
     def __init__(self,state,parent):
         super().__init__(parent); self.setWindowTitle('DizyTV settings'); self.resize(690,640)
@@ -167,6 +491,10 @@ class Settings(QDialog):
         add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
+        discover=QPushButton('Browse every IPTV-org country, category and language…',self)
+        discover.setObjectName('browseIPTVDirectory')
+        discover.clicked.connect(self.browse_iptv_directory)
+        form.addRow(discover)
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
         self.engine_path=QLineEdit(self.original.get('engine_executable',''))
         self.engine_path.setReadOnly(True)
@@ -185,6 +513,14 @@ class Settings(QDialog):
         for size in ('Compact','Normal','Large'):self.button_size.addItem(size)
         self.button_size.setCurrentText(self.original.get('button_size','Normal'))
         form.addRow('Button size',self.button_size)
+        self.theme=QComboBox()
+        self.theme.addItems(['Green','Dark','Light'])
+        self.theme.setCurrentText(self.original.get('theme','Green'))
+        form.addRow('Appearance theme',self.theme)
+        self.guide_scale=QSpinBox()
+        self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
+        self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
+        form.addRow('TV guide density / size',self.guide_scale)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
@@ -229,6 +565,13 @@ class Settings(QDialog):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
 
+    def browse_iptv_directory(self):
+        active=list(dict.fromkeys(u.strip() for u in self.playlists.toPlainText().splitlines()
+                                  if u.strip()))
+        dialog=IPTVDirectoryDialog(active,self)
+        if dialog.exec()==QDialog.Accepted and dialog.added_urls:
+            self.playlists.setPlainText('\n'.join(dict.fromkeys([*active,*dialog.added_urls])))
+
     def pick_engine_path(self):
         path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
               self.engine_path.text() or os.environ.get('APPDATA',''),
@@ -253,14 +596,15 @@ class Settings(QDialog):
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
-                    engine_executable=self.engine_path.text())
+                    theme=self.theme.currentText(),
+                    guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
 class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
+        self.selected=None; self.global_search_dialog=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
@@ -268,16 +612,43 @@ class MainWindow(QMainWindow):
         self.detached_controls=None;self.detached_hide_timer=QTimer(self)
         self.detached_hide_timer.setSingleShot(True)
         self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
+        self.detached_mouse_position=None
+        self.detached_mouse_timer=QTimer(self)
+        self.detached_mouse_timer.setInterval(250)
+        self.detached_mouse_timer.timeout.connect(self.poll_detached_mouse)
+        self.popout_live_light=None;self.popout_live_button=None
+        self.light_phase=False
+        self.light_timer=QTimer(self)
+        self.light_timer.setInterval(850)
+        self.light_timer.timeout.connect(self.pulse_live_light)
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         topbar=QWidget(); top=QHBoxLayout(topbar);top.setContentsMargins(3,3,3,3)
         logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
-        brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand); top.addStretch()
+        brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand)
+        theme_label=QLabel('Theme')
+        theme_label.setObjectName('filterTitle')
+        top.addWidget(theme_label)
+        self.theme_picker=QComboBox()
+        self.theme_picker.setObjectName('themePicker')
+        self.theme_picker.setToolTip('Choose a DizyTV appearance; saved automatically')
+        self.theme_picker.addItems(['Green','Dark','Light'])
+        self.theme_picker.setCurrentText(self.state['settings'].get('theme','Green'))
+        self.theme_picker.currentTextChanged.connect(self.choose_theme)
+        top.addWidget(self.theme_picker)
+        top.addStretch()
         self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
         for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
+        self.tools_button=QPushButton('Tools ▾')
+        self.tools_button.setToolTip('Backup and restore your local DizyTV setup')
+        tools_menu=QMenu(self.tools_button)
+        tools_menu.addAction('Save local backup…',self.backup)
+        tools_menu.addAction('Restore local backup…',self.restore)
+        self.tools_button.setMenu(tools_menu)
+        top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
         self.header_scroll.setObjectName('toolbarScroll')
         self.header_scroll.setWidgetResizable(False)
@@ -291,15 +662,29 @@ class MainWindow(QMainWindow):
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
-        sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
-        self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox(); self.source_filter=QComboBox()
-        self.source_filter.addItem('All playlists','')
-        self.source_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.source_filter)
-        for widget,label in ((self.country_filter,'All countries'),(self.genre_filter,'All genres'),(self.kind_filter,'All stream types')):
-
-            widget.addItem(label,''); widget.currentIndexChanged.connect(self.render_channels); side.addWidget(widget)
-        self.section_filter=QComboBox(); self.section_filter.addItem('All categories','')
-        self.section_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.section_filter)
+        sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
+        self.country_filter=QComboBox(); self.genre_filter=QComboBox()
+        self.kind_filter=QComboBox(); self.source_filter=QComboBox()
+        self.section_filter=QComboBox()
+        filters=QWidget(); filter_layout=QVBoxLayout(filters)
+        filter_layout.setContentsMargins(0,0,0,0);filter_layout.setSpacing(3)
+        for widget,title,default in (
+            (self.source_filter,'Playlist','All playlists'),
+            (self.country_filter,'Country','All countries'),
+            (self.section_filter,'Category','All categories'),
+            (self.genre_filter,'EPG genre','All genres'),
+            (self.kind_filter,'TV / Radio / stream','All stream types')):
+            label=QLabel(title)
+            label.setObjectName('filterTitle')
+            filter_layout.addWidget(label)
+            widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            widget.setMinimumContentsLength(8)
+            widget.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
+            widget.setMinimumWidth(0)
+            widget.addItem(default,'')
+            widget.currentIndexChanged.connect(self.render_channels)
+            filter_layout.addWidget(widget)
+        side.addWidget(filters)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
         self.country_tree.setMaximumHeight(240)
@@ -315,14 +700,24 @@ class MainWindow(QMainWindow):
         sidebar.setMinimumWidth(0)
         sidebar.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
         split.addWidget(sidebar); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
+        self.tabs.setObjectName('mainTabs')
+        self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().setExpanding(False)
+        self.tabs.tabBar().setUsesScrollButtons(True)
+        self.tabs.tabBar().setElideMode(Qt.ElideRight)
         split.addWidget(self.tabs);split.setSizes([270,880])
         live=QWidget(); live_layout=QVBoxLayout(live); self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
-        self.channel_banner.setStyleSheet('background:#304d36; color:white; padding:8px;')
+        self.channel_banner.setObjectName('channelBanner')
         self.channel_banner.setWordWrap(True)
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
-        self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
+        self.video=QFrame(); self.video.setStyleSheet('background:black;')
+        # The offscreen Qt CI plugin cannot safely reparent native video
+        # windows. Real Windows/macOS players still use a native libVLC surface.
+        if os.environ.get('QT_QPA_PLATFORM')!='offscreen':
+            self.video.setAttribute(Qt.WA_NativeWindow)
+        self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
         controls_widget=QWidget()
         controls=QHBoxLayout(controls_widget)
         controls.setContentsMargins(4,2,4,2)
@@ -335,9 +730,16 @@ class MainWindow(QMainWindow):
         self.rewind_button=QPushButton('↶ 30s')
         self.rewind_button.clicked.connect(lambda:self.seek_relative(-30000))
         controls.addWidget(self.rewind_button)
-        self.live_button=QPushButton('● LIVE')
+        self.forward_button=QPushButton('↷ 30s')
+        self.forward_button.setToolTip('Skip forward 30 seconds in buffered TV, up to LIVE')
+        self.forward_button.clicked.connect(lambda:self.seek_relative(30000))
+        controls.addWidget(self.forward_button)
+        self.live_button=QPushButton('LIVE')
         self.live_button.clicked.connect(self.jump_to_live)
         controls.addWidget(self.live_button)
+        self.live_light=QLabel('●')
+        self.live_light.setToolTip('Green: live; amber: buffering, rewound or paused; red: stopped/error')
+        controls.addWidget(self.live_light)
         self.guide_button=QPushButton('☷ Guide')
         self.guide_button.clicked.connect(self.show_tv_guide)
         controls.addWidget(self.guide_button)
@@ -378,8 +780,9 @@ class MainWindow(QMainWindow):
         self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
-        self.seek_slider=QSlider(Qt.Horizontal)
+        self.seek_slider=TimeSeekSlider(Qt.Horizontal)
         self.seek_slider.setObjectName('seekBar')
+        self.seek_slider.seek_requested.connect(self.seek_relative)
         self.seek_slider.setRange(0,1000)
         self.seek_slider.setEnabled(False)
         self.seek_slider.sliderReleased.connect(self.seek_from_slider)
@@ -398,20 +801,26 @@ class MainWindow(QMainWindow):
         for label,delta in [('← Earlier',-21600),('Now',0),('Later →',21600)]:
             b=QPushButton(label); b.clicked.connect(lambda checked=False,d=delta:self.move_guide(d)); nav.addWidget(b)
         self.guide_date=QLabel(); nav.addWidget(self.guide_date); guide_layout.addLayout(nav)
-        self.grid=GuideGrid(); self.grid.channel_clicked.connect(self.play_guide_channel); self.grid.programme_record_requested.connect(self.schedule_programme); self.grid.channel_record_requested.connect(self.record_guide_channel); scroll=QScrollArea(); scroll.setWidget(self.grid); scroll.setWidgetResizable(True); guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
+        self.grid=GuideGrid(); self.grid.channel_clicked.connect(self.play_guide_channel); self.grid.programme_record_requested.connect(self.schedule_programme); self.grid.channel_record_requested.connect(self.record_guide_channel)
+        scroll=QScrollArea();scroll.setWidget(self.grid);scroll.setWidgetResizable(True)
+        self.guide_scroll=scroll
+        guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
         recordings=QWidget(); rec_layout=QVBoxLayout(recordings)
         self.jobs=QTableWidget(0,5); self.jobs.setHorizontalHeaderLabels(['Programme','Start','End','Status','Size']); self.jobs.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.jobs.setSelectionBehavior(QTableWidget.SelectRows); self.jobs.setSelectionMode(QTableWidget.SingleSelection); rec_layout.addWidget(self.jobs)
         rec_buttons=QHBoxLayout()
         for label,handler in [('Stop / cancel',self.cancel_job),('Rearm restored timer',self.rearm_job),('Play file',self.play_file),('Delete file',self.delete_file)]:
             b=QPushButton(label); b.clicked.connect(handler); rec_buttons.addWidget(b)
         rec_layout.addLayout(rec_buttons); hint=QLabel('One recording at a time. Closing this window leaves the recorder running.\nAfter a reboot, open DizyTV to resume future timers. This alpha does not wake a sleeping computer.'); hint.setWordWrap(True); rec_layout.addWidget(hint); self.tabs.addTab(recordings,'Recordings')
-        backup=QWidget(); back_layout=QVBoxLayout(backup); message=QLabel('Keep your DizyTV setup on your own device\n\nBack up favourites, channel listings, guide mappings, preferences and timers.\nVideo files and device storage permissions are excluded. Restored timers stay paused until you choose storage and rearm them.'); message.setWordWrap(True); back_layout.addWidget(message)
-        for label,handler in [('Save local backup',self.backup),('Restore local backup',self.restore)]:
-            b=QPushButton(label); b.clicked.connect(handler); back_layout.addWidget(b)
-        back_layout.addStretch(); self.tabs.addTab(backup,'Backup & Restore')
+        self.global_search_button=QPushButton('⌕ Search all channels & programmes   Ctrl+K')
+        self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
+        self.global_search_button.clicked.connect(self.open_global_search)
+        layout.insertWidget(1,self.global_search_button)
+        self.global_search_shortcut=QShortcut(QKeySequence('Ctrl+K'),self)
+        self.global_search_shortcut.activated.connect(self.open_global_search)
         self.status=QLabel('Native alpha • Configure your engine, XMLTV sources and recording storage in Settings'); layout.addWidget(self.status)
         self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
+        self.light_timer.start()
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
         self.guide_clock=QTimer(self); self.guide_clock.timeout.connect(self.refresh_guide); self.guide_clock.start(12*3600*1000)
@@ -431,8 +840,9 @@ class MainWindow(QMainWindow):
     def show_source_status(self):
         state=self.store.read(); counts={}
         for ch in state['channels']:
-            key=ch.get('source','https://search-ace.stream/playlist')
-            counts[key]=counts.get(key,0)+1
+            for key in set(ch.get('sources') or
+                           [ch.get('source','https://search-ace.stream/playlist')]):
+                counts[key]=counts.get(key,0)+1
         lines=['Saved unique channels per configured playlist (not guaranteed playable):']
         for url in configured_playlists(state['settings']):
             lines.append(f'{source_label(url)}: {counts.get(url,0)}')
@@ -527,8 +937,9 @@ class MainWindow(QMainWindow):
         urls=configured_playlists(self.state['settings'])
         counts={}
         for ch in source:
-            source_url=ch.get('source','https://search-ace.stream/playlist')
-            counts[source_url]=counts.get(source_url,0)+1
+            for source_url in set(ch.get('sources') or
+                                  [ch.get('source','https://search-ace.stream/playlist')]):
+                counts[source_url]=counts.get(source_url,0)+1
         self.source_filter.blockSignals(True); self.source_filter.clear()
         self.source_filter.addItem('All playlists','')
         self.source_filter.addItem('HTTP/HLS (no Ace engine)','<http>')
@@ -558,10 +969,10 @@ class MainWindow(QMainWindow):
         active_source=self.source_filter.currentData()
         for ch in source:
             transport=ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')
-            source_url=ch.get('source','https://search-ace.stream/playlist')
+            source_urls=ch.get('sources') or [ch.get('source','https://search-ace.stream/playlist')]
             if active_source=='<http>' and transport=='Ace Stream': continue
             if active_source=='<ace>' and transport!='Ace Stream': continue
-            if active_source not in ('','<http>','<ace>') and active_source!=source_url: continue
+            if active_source not in ('','<http>','<ace>') and active_source not in source_urls: continue
             if query not in (ch['name']+' '+display_channel_name(ch['name'])+' '+ch['group']).casefold() or self.favourites_only.isChecked() and ch['id'] not in favs:continue
             if self.section_filter.currentData() and channel_section(ch)!=self.section_filter.currentData():continue
             country=self.country_filter.currentData(); genre=self.genre_filter.currentData(); kind=self.kind_filter.currentData()
@@ -581,9 +992,9 @@ class MainWindow(QMainWindow):
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(display_channel_name(self.selected['name'])+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else display_channel_name(self.selected['name'])+' — no guide match')
     def render_guide(self):
-        # The grid only paints 250 visible channels within a six-hour window;
-        # never pass the complete XMLTV cache to its paintEvent.
-        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(min(self.channels.count(),250))]
+        # Pass ALL channels matching the catalogue's active filters. GuideGrid
+        # paints only its visible rows; channels without EPG are retained.
+        channels=[self.channels.item(i).data(Qt.UserRole) for i in range(self.channels.count())]
         genre=self.genre_filter.currentData()
         by_channel,_=self.guide_index()
         resolved={}
@@ -598,20 +1009,78 @@ class MainWindow(QMainWindow):
                 if genre and ch.get('genre','Unspecified')!=genre and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
                     continue
                 programmes.append(p)
+        self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
-        self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
+        self.guide_date.setText(
+            format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone())+
+            f'  •  {len(channels):,} selected channels')
     def move_guide(self,delta):
         self.guide_start=self.guide_start+delta if delta else int(time.time()/3600)*3600; self.render_guide()
     def apply_interface_scale(self):
         settings=self.state['settings']
         app=QApplication.instance()
+        theme=settings.get('theme','Green')
         if app:app.setStyleSheet(desktop_style(settings.get('ui_scale',100),
-                                               settings.get('button_size','Normal')))
+                                               settings.get('button_size','Normal'),theme))
+        self.theme_picker.blockSignals(True)
+        self.theme_picker.setCurrentText(theme)
+        self.theme_picker.blockSignals(False)
+        self.grid.set_theme(theme)
+        if self.detached_controls is not None:
+            self.detached_controls.setStyleSheet(
+                overlay_theme_style(self._detached_base_style,theme))
+        if self.screen_dialog is not None:
+            self.screen_dialog.setStyleSheet(
+                'QDialog#tvWindow { background:'+theme_color('#101713',theme)+'; }')
+        self.channel_banner.setStyleSheet(
+            'background:'+theme_color('#304d36',theme)+';color:'+
+            ('#1e293b' if theme=='Light' else '#ffffff')+';padding:8px;')
         for scroll in (self.header_scroll,self.controls_scroll):
             widget=scroll.widget()
             if widget:
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+20)
+
+    def playback_light_state(self):
+        if not self.player or not self.playback_started:
+            return 'stopped'
+        status=str(self.player.get_state())
+        if status.endswith(('.Error','.Ended','.Stopped')):
+            return 'stopped'
+        if status.endswith('.Paused') or self.timeshift_lag>3:
+            return 'buffering'
+        if status.endswith('.Playing'):
+            # Direct HTTP/HLS and Ace playback has no local timeshift watchdog.
+            # Do not report an otherwise healthy Playing stream as buffering
+            # just because last_good_video was set when playback started.
+            if self.timeshift is None:return 'live'
+            return 'live' if time.monotonic()-self.last_good_video<18 else 'buffering'
+        return 'buffering'
+
+    def pulse_live_light(self):
+        state=self.playback_light_state()
+        self.light_phase=not self.light_phase
+        variants={'live':('#3cdb80','#247744'),
+                  'buffering':('#f2b450','#a47524'),
+                  'stopped':('#f26a60','#873930')}
+        bright,dim=variants[state]
+        color=bright if self.light_phase else dim
+        for label in (self.live_light,self.popout_live_light):
+            if label is not None:
+                label.setText('●')
+                label.setStyleSheet('QLabel {background:transparent;color:'+color+
+                                    ';font-size:16px;font-weight:bold;}')
+                label.setToolTip({'live':'Stream playing near LIVE',
+                                  'buffering':'Buffering, paused or watching behind LIVE',
+                                  'stopped':'Stopped / stream error'}[state])
+        self.live_button.setStyleSheet(
+            'QPushButton {border:1px solid '+color+';'
+            'background:rgba(16,43,27,175);font-weight:700;'
+            'color:'+color+';}')
+        if self.popout_live_button is not None:
+            self.popout_live_button.setStyleSheet(
+                'QPushButton {background:rgba(8,30,20,120);'
+                'color:'+color+';border:1px solid '+color+';}')
 
     def media_activity(self):
         """VLC's decoded picture/audio counters catch freezes with State.Playing.
@@ -689,10 +1158,11 @@ class MainWindow(QMainWindow):
             if seekable and length>0 and position>=0 and not self.seek_slider.isSliderDown():
                 self.seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
             if self.screen_seek_slider is not None:
-                self.screen_seek_slider.setEnabled(seekable and length>0)
+                self.screen_seek_slider.setEnabled(local_active or (seekable and length>0))
                 if seekable and length>0 and position>=0 and not self.screen_seek_slider.isSliderDown():
                     self.screen_seek_slider.setValue(max(0,min(1000,int(position*1000/length))))
             self.rewind_button.setEnabled(seekable)
+            self.forward_button.setEnabled(seekable)
             self.pause_button.setEnabled(seekable)
             if local_active:
                 available=self.timeshift.window.latest_seconds()
@@ -756,6 +1226,12 @@ class MainWindow(QMainWindow):
             atomic_json(self.store.directory/'guide.json',guide); self.guide=guide; self.render_channels(); self.render_now()
             self.status.setText(f"Imported {len(guide['programmes'])} programmes"+(f" • {len(errors)} guide source(s) failed" if errors else '')+" • timers unchanged")
         self.async_task(fetch,done)
+    def choose_theme(self,theme):
+        if theme not in ('Green','Dark','Light'):return
+        if self.store.read()['settings'].get('theme','Green')!=theme:
+            self.state=self.store.update(lambda s:s['settings'].update(theme=theme))
+        self.apply_interface_scale()
+
     def settings(self):
         dialog=Settings(self.store.read(),self)
         if dialog.exec()==QDialog.Accepted:
@@ -841,6 +1317,47 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.playback_started=0
             self.error('Playback could not start. Check that VLC 3 is installed and the stream is available. '+str(exc))
+    def detected_timezone(self):
+        return detected_zone()
+
+    def open_global_search(self):
+        if self.global_search_dialog is not None:
+            self.global_search_dialog.show()
+            self.global_search_dialog.raise_()
+            self.global_search_dialog.activateWindow()
+            self.global_search_dialog.query.setFocus()
+            return
+        dialog=GlobalSearch(self)
+        self.global_search_dialog=dialog
+        dialog.finished.connect(lambda _:setattr(self,'global_search_dialog',None))
+        dialog.show()
+
+    def reveal_global_channel(self,ch,programme=None,show_guide=True):
+        """Show a global search result even when existing filters hide it."""
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self.favourites_only.blockSignals(True)
+        self.favourites_only.setChecked(False)
+        self.favourites_only.blockSignals(False)
+        for widget in (self.source_filter,self.country_filter,self.section_filter,
+                       self.genre_filter,self.kind_filter):
+            widget.blockSignals(True)
+            widget.setCurrentIndex(0)
+            widget.blockSignals(False)
+        self.render_channels()
+        self.select_guide_channel(ch)
+        if not show_guide:return
+        if programme is not None:
+            self.guide_start=(int(programme['start'])//3600)*3600
+        self.tabs.setCurrentIndex(1)
+        self.render_guide()
+        index=next((i for i,row in enumerate(self.grid.rows) if row['id']==ch['id']),None)
+        if index is not None:
+            height,_,_,_=self.grid.geometry_units()
+            self.guide_scroll.verticalScrollBar().setValue(max(0,48+index*height-40))
+        self.grid.update()
+
     def select_guide_channel(self,ch):
         self.selected=ch
         # Keep the sidebar and Now/Next label in step with the programme grid.
@@ -872,9 +1389,16 @@ class MainWindow(QMainWindow):
         from .core import ace_id
         is_ace=ace_id(self.selected['stream']) is not None
         if is_ace:
-            # Engine streams have peer/engine-specific failures, not a
-            # public channel endpoint that can safely be probed as a HLS URL.
-            self.status.setText('Ace Stream playback failed: check engine status, peers and content ID. Open Settings to locate your installed engine.')
+            self.source_check_serial+=1
+            serial=self.source_check_serial
+            channel=self.selected['id']
+            diagnostic=Task(lambda:engine_diagnostics(self.state['settings']['engine_url']))
+            self.source_check=diagnostic
+            def ready(message):
+                if serial==self.source_check_serial and self.selected and self.selected['id']==channel:
+                    self.status.setText(message+' If Ace was started in console mode, no tray icon is expected.')
+            diagnostic.signals.success.connect(ready)
+            self.pool.start(diagnostic)
             return
         self.source_check_serial+=1
         serial=self.source_check_serial
@@ -975,9 +1499,11 @@ class MainWindow(QMainWindow):
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
             return True
-        if self.screen_dialog is not None and obj in (self.video,self.screen_dialog):
+        if self.screen_dialog is not None and obj in (self.video,self.screen_dialog,self.detached_controls):
             if event.type() in (QEvent.MouseMove,QEvent.Enter):
                 self.show_detached_controls()
+            if obj is self.screen_dialog and event.type() in (QEvent.Resize,QEvent.Move,QEvent.Show):
+                self.position_detached_overlay()
         return super().eventFilter(obj,event)
 
     def set_tv_volume(self,volume):
@@ -998,6 +1524,10 @@ class MainWindow(QMainWindow):
             self.player.set_time(self.player.get_length()*position//1000)
 
     def _rebind_video(self):
+        if os.environ.get('QT_QPA_PLATFORM')=='offscreen':
+            # Native HWND/NSView reparenting is not testable by the offscreen
+            # platform plugin; UI ownership tests can still verify layout.
+            return
         if self.player:
             handle=int(self.video.winId())
             if sys.platform=='darwin':self.player.set_nsobject(handle)
@@ -1019,16 +1549,24 @@ class MainWindow(QMainWindow):
     def seek_relative(self,delta_ms):
         if not self.player or not self.playback_started:return
         if self.timeshift is not None:
-            seconds_back=max(0,self.timeshift_lag)+abs(delta_ms)/1000
+            available=self.timeshift.window.latest_seconds()
+            if available<=0:
+                self.seek_notice.setText('Local timeshift buffer is still filling.')
+                return
+            # A positive delta skips toward LIVE; a negative delta rewinds.
+            seconds_back=max(0.0,min(available,float(self.timeshift_lag)-delta_ms/1000.0))
+            if seconds_back<1.0:
+                self.jump_to_live()
+                return
             try:
                 self.play_url(self.timeshift.replay_url(seconds_back))
                 self.timeshift_lag=seconds_back
-                self.seek_notice.setText('Playing from device cache, about '+str(int(seconds_back))+' seconds behind LIVE')
+                self.seek_notice.setText('Device buffer: ~'+str(int(seconds_back))+' seconds behind LIVE')
             except (ValueError,RuntimeError) as exc:
-                self.seek_notice.setText('Rewind not ready: '+str(exc))
+                self.seek_notice.setText('Timeshift seek unavailable: '+str(exc))
             return
         if not self.player.is_seekable():
-            self.seek_notice.setText('Rewind is unavailable: this stream has no seekable DVR window.')
+            self.seek_notice.setText('This live stream has no seekable DVR window.')
             return
         current=self.player.get_time()
         length=self.player.get_length()
@@ -1096,7 +1634,9 @@ class MainWindow(QMainWindow):
         screen.setModal(False)
         screen.setMinimumSize(360,240)
         screen.resize(800,520)
-        screen.setStyleSheet('background:#111a15; color:#eef7ec')
+        screen.setObjectName('tvWindow')
+        screen.setStyleSheet('QDialog#tvWindow { background:'+
+                             theme_color('#101713',self.state['settings'].get('theme','Green'))+'; }')
         screen.setMouseTracking(True)
         screen.installEventFilter(self)
         vbox=QVBoxLayout(screen)
@@ -1106,25 +1646,90 @@ class MainWindow(QMainWindow):
         vbox.addWidget(self.video,1)
 
         # The same libVLC player remains attached; do not start a second feed.
-        panel=QFrame(screen)
+        # Separate owned translucent tool window overlays native VLC video HWND.
+        # Windows libVLC uses a native HWND: an owned translucent *window*
+        # is required to cover it. On macOS/Linux use a normal child overlay:
+        # native Qt.Tool children produce QWidgetWindow shutdown crashes there.
+        native_overlay=(os.name=='nt' and os.environ.get('QT_QPA_PLATFORM')!='offscreen')
+        if native_overlay:
+            panel=QDialog(screen,Qt.Tool|Qt.FramelessWindowHint)
+            panel.setModal(False)
+        else:
+            panel=QFrame(screen)
         panel.setObjectName('playerControls')
+        # WA_TranslucentBackground is only safe on a real native tool
+        # window. For Qt offscreen tests and other platforms use a
+        # stylesheet-transparent normal child without native promotion.
+        panel.setAttribute(Qt.WA_TranslucentBackground,native_overlay)
+        if native_overlay:panel.setAttribute(Qt.WA_ShowWithoutActivating,True)
+        panel.installEventFilter(self)
+        ratio=max(.75,min(1.5,self.state['settings'].get('ui_scale',100)/100))
+        compact=self.state['settings'].get('button_size','Normal')=='Compact'
+        padding=max(2,round((3 if compact else 5)*ratio))
+        # The floating overlay is FULLY TRANSPARENT between the controls.
+        # Only its small pill buttons and slider tracks have translucent fills.
+        # This panel is NOT in the video layout: no window or video resizing.
+        prefix=('QDialog' if native_overlay else 'QFrame')+'#playerControls '
+        self._detached_base_style=''.join((
+            prefix+'{background:transparent;border:0;}',
+            prefix+'QPushButton {background:rgba(10,35,23,135);color:#edfff0;'
+                'border:1px solid rgba(161,213,173,150);border-radius:7px;'
+                'padding:'+str(padding)+'px '+str(padding+3)+'px;'
+                'font-size:'+str(max(9,round(11*ratio)))+'px;}',
+            prefix+'QPushButton:hover {background:rgba(17,70,43,180);}',
+            prefix+'QLabel {background:transparent;color:#effff0;}',
+            prefix+'QSlider {background:transparent;}',
+            prefix+'QSlider::groove:horizontal {height:5px;'
+                'background:rgba(14,40,29,120);border:0;border-radius:2px;}',
+            prefix+'QSlider::sub-page:horizontal {'
+                'background:rgba(86,205,128,190);border-radius:2px;}',
+            prefix+'QSlider::handle:horizontal {width:13px;margin:-5px 0;'
+                'border:1px solid rgba(210,255,227,200);'
+                'background:rgba(106,227,147,215);border-radius:7px;}',
+        ))
+        panel.setStyleSheet(overlay_theme_style(self._detached_base_style,
+                                               self.state['settings'].get('theme','Green')))
         panel.setMouseTracking(True)
         panel_layout=QVBoxLayout(panel)
-        bar=QHBoxLayout()
-        for title,callback in (('⏯ Pause / Play',self.toggle_pause),
+        panel_layout.setContentsMargins(2,1,2,1)
+        panel_layout.setSpacing(2)
+        # Scrollable single-line controls, even in a narrow 360px pop-out.
+        button_row=QWidget(panel)
+        button_row.setStyleSheet('background:transparent;border:0;')
+        bar=QHBoxLayout(button_row)
+        bar.setContentsMargins(0,0,0,0)
+        bar.setSpacing(max(2,round(4*ratio)))
+        for title,callback in (('⏯ Play/Pause',self.toggle_pause),
                                ('↶ 30s',lambda:self.seek_relative(-30000)),
+                               ('↷ 30s',lambda:self.seek_relative(30000)),
                                ('● LIVE',self.jump_to_live),
                                ('☷ Guide',self.show_tv_guide),
                                ('Info',self.show_tv_info),
-                               ('⛶ Full screen',self.toggle_screen_fullscreen),
-                               ('↩ Back to app',self.exit_screen_fullscreen)):
+                               ('⛶ Full',self.toggle_screen_fullscreen),
+                               ('↩ Dock',self.exit_screen_fullscreen)):
             button=QPushButton(title,panel)
             button.clicked.connect(callback)
-            if title=='● LIVE':button.setObjectName('tvLive')
+            if title=='● LIVE':
+                button.setObjectName('tvLive')
+                self.popout_live_button=button
             bar.addWidget(button)
-        panel_layout.addLayout(bar)
-        self.screen_seek_slider=QSlider(Qt.Horizontal,panel)
+            if title=='● LIVE':
+                self.popout_live_light=QLabel('●',button_row)
+                bar.addWidget(self.popout_live_light)
+        button_scroll=QScrollArea(panel)
+        button_scroll.setFrameShape(QFrame.NoFrame)
+        button_scroll.setWidgetResizable(False)
+        button_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        button_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        button_scroll.setStyleSheet('QScrollArea {background:transparent;border:0;}'
+                                    'QWidget {background:transparent;}')
+        button_row.adjustSize()
+        button_scroll.setWidget(button_row)
+        button_scroll.setFixedHeight(button_row.sizeHint().height()+14)
+        panel_layout.addWidget(button_scroll)
+        self.screen_seek_slider=TimeSeekSlider(Qt.Horizontal,panel)
         self.screen_seek_slider.setObjectName('seekBar')
+        self.screen_seek_slider.seek_requested.connect(self.seek_relative)
         self.screen_seek_slider.setRange(0,1000)
         self.screen_seek_slider.sliderReleased.connect(self.seek_screen_slider)
         panel_layout.addWidget(self.screen_seek_slider)
@@ -1138,7 +1743,6 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(volume.setValue)
         volume_line.addWidget(volume,1)
         panel_layout.addLayout(volume_line)
-        vbox.addWidget(panel)
         self.detached_controls=panel
         self.screen_dialog=screen
         screen.finished.connect(self.exit_screen_fullscreen)
@@ -1148,16 +1752,41 @@ class MainWindow(QMainWindow):
         else:screen.show()
         self.video.show()
         self._rebind_video()
+        self.detached_mouse_position=QCursor.pos()
+        self.detached_mouse_timer.start()
         self.show_detached_controls()
+
+    def position_detached_overlay(self):
+        if self.screen_dialog is None or self.detached_controls is None:return
+        panel=self.detached_controls;screen=self.screen_dialog
+        panel.resize(max(300,screen.width()-16),panel.sizeHint().height())
+        point=QPoint(8,max(8,screen.height()-panel.height()-12))
+        panel.move(screen.mapToGlobal(point) if os.name=='nt' else point)
+
+    def cursor_over_detached_controls(self,point):
+        panel=self.detached_controls
+        return bool(panel is not None and panel.isVisible() and
+                    panel.rect().contains(panel.mapFromGlobal(point)))
+
+    def poll_detached_mouse(self):
+        if self.screen_dialog is None:return
+        point=QCursor.pos()
+        if point==self.detached_mouse_position:return
+        self.detached_mouse_position=point
+        if (self.screen_dialog.frameGeometry().contains(point) or
+                self.cursor_over_detached_controls(point)):
+            self.show_detached_controls()
 
     def show_detached_controls(self):
         if self.screen_dialog is None or self.detached_controls is None:return
+        self.position_detached_overlay()
         self.detached_controls.show()
+        self.detached_controls.raise_()
         self.detached_hide_timer.start(3500)
 
     def hide_detached_controls(self):
         if self.detached_controls is None or self.screen_dialog is None:return
-        if (self.detached_controls.underMouse() or
+        if (self.cursor_over_detached_controls(QCursor.pos()) or
                 (self.screen_seek_slider is not None and self.screen_seek_slider.isSliderDown())):
             self.detached_hide_timer.start(1600)
             return
@@ -1175,9 +1804,16 @@ class MainWindow(QMainWindow):
         screen=self.screen_dialog
         if screen is None:return
         self.detached_hide_timer.stop()
+        self.detached_mouse_timer.stop()
+        overlay=self.detached_controls
         self.screen_dialog=None
         self.screen_seek_slider=None
         self.detached_controls=None
+        self.popout_live_light=None;self.popout_live_button=None
+        if overlay:
+            overlay.hide()
+            overlay.close()
+            overlay.deleteLater()
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
@@ -1211,16 +1847,31 @@ class MainWindow(QMainWindow):
         layout.addWidget(query)
         results=QListWidget(dialog)
         layout.addWidget(results,1)
+        counter=QLabel(dialog)
+        layout.addWidget(counter)
+        more=QPushButton('Show next 150 channels',dialog)
+        layout.addWidget(more)
         channels=catalogue(self.store.read())
-        def populate():
-            results.clear()
-            needle=query.text().casefold().strip()
-            matches=(ch for ch in channels if needle in (display_channel_name(ch['name'])+' '+ch.get('country','')).casefold())
-            for index,ch in enumerate(matches):
-                if index>=120:break
+        page_size=150
+        matching=[]
+        shown=0
+        def show_more():
+            nonlocal shown
+            for ch in matching[shown:shown+page_size]:
                 item=QListWidgetItem(display_channel_name(ch['name'])+' · '+ch.get('country',''))
                 item.setData(Qt.UserRole,ch)
                 results.addItem(item)
+            shown=min(len(matching),shown+page_size)
+            counter.setText(f'{len(matching):,} matching channels · showing {shown:,}')
+            more.setEnabled(shown<len(matching))
+        def populate():
+            nonlocal matching,shown
+            results.clear()
+            needle=query.text().casefold().strip()
+            matching=[ch for ch in channels
+                      if needle in (display_channel_name(ch['name'])+' '+ch.get('country','')).casefold()]
+            shown=0
+            show_more()
         def tune(item):
             ch=item.data(Qt.UserRole)
             dialog.close()
@@ -1228,6 +1879,7 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(0)
             self.play()
         query.textChanged.connect(populate)
+        more.clicked.connect(show_more)
         results.itemDoubleClicked.connect(tune)
         layout.addWidget(QLabel('Double-click a channel to watch. Use TV Guide for recording.'))
         populate()
@@ -1240,6 +1892,7 @@ class MainWindow(QMainWindow):
         self.playback_started=0
         self.seek_slider.setEnabled(False)
         self.rewind_button.setEnabled(False)
+        self.forward_button.setEnabled(False)
         self.pause_button.setEnabled(False)
     def add_job(self,job):
         def change(s):
@@ -1318,9 +1971,13 @@ class MainWindow(QMainWindow):
             def change(s):
                 if any(j['status'] in ('starting','recording') for j in s['jobs']):raise ValueError('Stop the active recording before restoring a backup')
                 s.clear(); s.update(restored)
-            self.store.update(change); self.selected=None; self.guide={'names':{},'programmes':[]}; atomic_json(self.store.directory/'guide.json',self.guide); self.render_channels(); self.tick(); self.status.setText('Backup restored • choose storage and rearm timers explicitly')
+            self.store.update(change); self.selected=None; self.guide={'names':{},'programmes':[]}; atomic_json(self.store.directory/'guide.json',self.guide); self.state=self.store.read(); self.apply_interface_scale(); self.render_channels(); self.tick(); self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
+        for timer in (self.light_timer,self.detached_hide_timer,
+                      self.detached_mouse_timer,self.clock,
+                      self.refresh_clock,self.guide_clock):
+            timer.stop()
         self.exit_screen_fullscreen()
         self.stop_playback()
         if self.player:self.player.release(); self.player=None

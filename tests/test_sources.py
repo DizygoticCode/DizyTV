@@ -17,6 +17,68 @@ class FreeSourceTests(unittest.TestCase):
         self.assertEqual(0,success)
         self.assertEqual(['UK free television: OSError'],errors)
 
+    def test_new_country_and_classic_series_movies_comedy_presets(self):
+        from dizytv.sources import FREE_PLAYLISTS,source_label
+        sources=dict((label,url) for label,url,_ in FREE_PLAYLISTS)
+        for label,country in (
+            ('IPTV-org Canada','ca'),('IPTV-org Australia','au'),
+            ('IPTV-org New Zealand','nz'),('IPTV-org South Africa','za'),
+            ('IPTV-org Singapore','sg'),('IPTV-org Hong Kong','hk')):
+            self.assertIn('/countries/'+country+'.m3u',sources[label])
+        for category in ('classic','series','movies','comedy','sports'):
+            url='https://iptv-org.github.io/iptv/categories/'+category+'.m3u'
+            self.assertIn(url,DEFAULT_PLAYLIST_URLS)
+            self.assertIn('Free ',source_label(url))
+        self.assertEqual(16,len(DEFAULT_PLAYLIST_URLS))
+        self.assertEqual(17,len(FREE_PLAYLISTS))
+        state=default_state()
+        self.assertEqual(DEFAULT_PLAYLIST_URLS,state['settings']['playlist_urls'])
+        self.assertEqual(16,len(configured_playlists(state['settings'])))
+
+    def test_same_stream_is_searchable_under_region_and_series_feeds(self):
+        from dizytv.sources import FREE_PLAYLISTS
+        presets={label:url for label,url,_ in FREE_PLAYLISTS}
+        region=presets['IPTV-org Canada']
+        series=presets['Free television series channels']
+        url='https://example.com/same-stream.m3u8'
+        settings={'playlist_url':region,'playlist_urls':[region,series]}
+        rows,success,errors=refresh_catalogue(settings,[],lambda _:feed(url,'Old Show 24/7'))
+        self.assertEqual((2,[]),(success,errors))
+        self.assertEqual(1,len(rows))
+        self.assertEqual([region,series],rows[0]['sources'])
+        self.assertEqual('Canada',rows[0]['country'])
+        self.assertEqual('Series',rows[0]['genre'])
+        state=default_state()
+        state['channels']=rows
+        validate_state(state)
+        self.assertEqual([region,series],
+                         restore_backup(export_backup(state))['channels'][0]['sources'])
+        broken=default_state()
+        broken['channels']=[{**rows[0],'sources':[region,'not-an-http-url']}]
+        with self.assertRaises(ValueError):
+            validate_state(broken)
+
+    def test_region_and_24_7_source_hints_do_not_override_real_metadata(self):
+        from dizytv.sources import FREE_PLAYLISTS
+        urls={label:url for label,url,_ in FREE_PLAYLISTS}
+        canada=urls['IPTV-org Canada']
+        series=urls['Free television series channels']
+        settings={'playlist_url':canada,'playlist_urls':[canada,series]}
+        def fetch(url):
+            if url==canada:
+                return feed('https://example.com/canada.m3u8','Canadian Live')
+            return feed('https://example.com/series.m3u8','Classic Drama')
+        channels,success,errors=refresh_catalogue(settings,[],fetch)
+        self.assertEqual(2,success)
+        self.assertEqual([],errors)
+        self.assertEqual('Canada',channels[0]['country'])
+        self.assertEqual('Series',channels[1]['genre'])
+        def metadata(_):
+            return '#EXTM3U\n#EXTINF:-1 tvg-genre="Sport" tvg-country="AU",Sports Channel\nhttps://example.com/sport.m3u8\n'
+        rows,_,_=refresh_catalogue({'playlist_url':series,'playlist_urls':[series]},[],metadata)
+        self.assertEqual('Sport',rows[0]['genre'])
+        self.assertEqual('Australia',rows[0]['country'])
+
     def test_default_presets_include_uk_us_and_epg(self):
         state=default_state()
         self.assertTrue(any('countries/us.m3u' in u for u in state['settings']['playlist_urls']))
