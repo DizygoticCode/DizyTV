@@ -405,7 +405,12 @@ class MainWindow(QMainWindow):
         self.channel_banner.setWordWrap(True)
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
-        self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
+        self.video=QFrame(); self.video.setStyleSheet('background:black;')
+        # The offscreen Qt CI plugin cannot safely reparent native video
+        # windows. Real Windows/macOS players still use a native libVLC surface.
+        if os.environ.get('QT_QPA_PLATFORM')!='offscreen':
+            self.video.setAttribute(Qt.WA_NativeWindow)
+        self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
         controls_widget=QWidget()
         controls=QHBoxLayout(controls_widget)
         controls.setContentsMargins(4,2,4,2)
@@ -1190,6 +1195,10 @@ class MainWindow(QMainWindow):
             self.player.set_time(self.player.get_length()*position//1000)
 
     def _rebind_video(self):
+        if os.environ.get('QT_QPA_PLATFORM')=='offscreen':
+            # Native HWND/NSView reparenting is not testable by the offscreen
+            # platform plugin; UI ownership tests can still verify layout.
+            return
         if self.player:
             handle=int(self.video.winId())
             if sys.platform=='darwin':self.player.set_nsobject(handle)
