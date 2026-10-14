@@ -1,3 +1,4 @@
+import time
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import tempfile
@@ -40,6 +41,25 @@ class DesktopTests(unittest.TestCase):
             self.assertLessEqual(window.width(),720)
             self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
             s.close();window.close()
+
+    def test_live_light_reports_green_amber_red_and_follows_rewind(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            self.assertEqual('stopped',w.playback_light_state())
+            w.player=Mock()
+            w.playback_started=1
+            w.player.get_state.return_value='State.Playing'
+            w.last_good_video=time.monotonic()
+            self.assertEqual('live',w.playback_light_state())
+            w.pulse_live_light()
+            self.assertIn('3cdb80',w.live_button.styleSheet())
+            w.timeshift_lag=30
+            self.assertEqual('buffering',w.playback_light_state())
+            w.player.get_state.return_value='State.Error'
+            self.assertEqual('stopped',w.playback_light_state())
+            w.player=None
+            w.close()
 
     def test_vlc_reports_playing_but_picture_counters_frozen_auto_recovers(self):
         from unittest.mock import Mock

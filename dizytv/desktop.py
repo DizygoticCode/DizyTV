@@ -290,6 +290,11 @@ class MainWindow(QMainWindow):
         self.detached_mouse_timer=QTimer(self)
         self.detached_mouse_timer.setInterval(250)
         self.detached_mouse_timer.timeout.connect(self.poll_detached_mouse)
+        self.popout_live_light=None;self.popout_live_button=None
+        self.light_phase=False
+        self.light_timer=QTimer(self)
+        self.light_timer.setInterval(850)
+        self.light_timer.timeout.connect(self.pulse_live_light)
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
@@ -371,9 +376,12 @@ class MainWindow(QMainWindow):
         self.rewind_button=QPushButton('↶ 30s')
         self.rewind_button.clicked.connect(lambda:self.seek_relative(-30000))
         controls.addWidget(self.rewind_button)
-        self.live_button=QPushButton('● LIVE')
+        self.live_button=QPushButton('LIVE')
         self.live_button.clicked.connect(self.jump_to_live)
         controls.addWidget(self.live_button)
+        self.live_light=QLabel('●')
+        self.live_light.setToolTip('Green: live; amber: buffering, rewound or paused; red: stopped/error')
+        controls.addWidget(self.live_light)
         self.guide_button=QPushButton('☷ Guide')
         self.guide_button.clicked.connect(self.show_tv_guide)
         controls.addWidget(self.guide_button)
@@ -448,6 +456,7 @@ class MainWindow(QMainWindow):
         self.status=QLabel('Native alpha • Configure your engine, XMLTV sources and recording storage in Settings'); layout.addWidget(self.status)
         self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
+        self.light_timer.start()
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
         self.guide_clock=QTimer(self); self.guide_clock.timeout.connect(self.refresh_guide); self.guide_clock.start(12*3600*1000)
@@ -649,6 +658,43 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+20)
+
+    def playback_light_state(self):
+        if not self.player or not self.playback_started:
+            return 'stopped'
+        status=str(self.player.get_state())
+        if status.endswith(('.Error','.Ended','.Stopped')):
+            return 'stopped'
+        if status.endswith('.Paused') or self.timeshift_lag>3:
+            return 'buffering'
+        if status.endswith('.Playing'):
+            return 'live' if time.monotonic()-self.last_good_video<18 else 'buffering'
+        return 'buffering'
+
+    def pulse_live_light(self):
+        state=self.playback_light_state()
+        self.light_phase=not self.light_phase
+        variants={'live':('#3cdb80','#247744'),
+                  'buffering':('#f2b450','#a47524'),
+                  'stopped':('#f26a60','#873930')}
+        bright,dim=variants[state]
+        color=bright if self.light_phase else dim
+        for label in (self.live_light,self.popout_live_light):
+            if label is not None:
+                label.setText('●')
+                label.setStyleSheet('QLabel {background:transparent;color:'+color+
+                                    ';font-size:16px;font-weight:bold;}')
+                label.setToolTip({'live':'Stream playing near LIVE',
+                                  'buffering':'Buffering, paused or watching behind LIVE',
+                                  'stopped':'Stopped / stream error'}[state])
+        self.live_button.setStyleSheet(
+            'QPushButton {border:1px solid '+color+';'
+            'background:rgba(16,43,27,175);font-weight:700;'
+            'color:'+color+';}')
+        if self.popout_live_button is not None:
+            self.popout_live_button.setStyleSheet(
+                'QPushButton {background:rgba(8,30,20,120);'
+                'color:'+color+';border:1px solid '+color+';}')
 
     def media_activity(self):
         """VLC's decoded picture/audio counters catch freezes with State.Playing.
@@ -1201,8 +1247,13 @@ class MainWindow(QMainWindow):
                                ('↩ Dock',self.exit_screen_fullscreen)):
             button=QPushButton(title,panel)
             button.clicked.connect(callback)
-            if title=='● LIVE':button.setObjectName('tvLive')
+            if title=='● LIVE':
+                button.setObjectName('tvLive')
+                self.popout_live_button=button
             bar.addWidget(button)
+            if title=='● LIVE':
+                self.popout_live_light=QLabel('●',button_row)
+                bar.addWidget(self.popout_live_light)
         button_scroll=QScrollArea(panel)
         button_scroll.setFrameShape(QFrame.NoFrame)
         button_scroll.setWidgetResizable(False)
@@ -1289,6 +1340,7 @@ class MainWindow(QMainWindow):
         self.screen_dialog=None
         self.screen_seek_slider=None
         self.detached_controls=None
+        self.popout_live_light=None;self.popout_live_button=None
         if overlay:overlay.close();overlay.deleteLater()
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
