@@ -731,6 +731,10 @@ class MainWindow(QMainWindow):
         if status.endswith('.Paused') or self.timeshift_lag>3:
             return 'buffering'
         if status.endswith('.Playing'):
+            # Direct HTTP/HLS and Ace playback has no local timeshift watchdog.
+            # Do not report an otherwise healthy Playing stream as buffering
+            # just because last_good_video was set when playback started.
+            if self.timeshift is None:return 'live'
             return 'live' if time.monotonic()-self.last_good_video<18 else 'buffering'
         return 'buffering'
 
@@ -1431,13 +1435,18 @@ class MainWindow(QMainWindow):
         point=QPoint(8,max(8,screen.height()-panel.height()-12))
         panel.move(screen.mapToGlobal(point) if os.name=='nt' else point)
 
+    def cursor_over_detached_controls(self,point):
+        panel=self.detached_controls
+        return bool(panel is not None and panel.isVisible() and
+                    panel.rect().contains(panel.mapFromGlobal(point)))
+
     def poll_detached_mouse(self):
         if self.screen_dialog is None:return
         point=QCursor.pos()
         if point==self.detached_mouse_position:return
         self.detached_mouse_position=point
         if (self.screen_dialog.frameGeometry().contains(point) or
-            self.detached_controls and self.detached_controls.frameGeometry().contains(point)):
+                self.cursor_over_detached_controls(point)):
             self.show_detached_controls()
 
     def show_detached_controls(self):
@@ -1449,7 +1458,7 @@ class MainWindow(QMainWindow):
 
     def hide_detached_controls(self):
         if self.detached_controls is None or self.screen_dialog is None:return
-        if (self.detached_controls.frameGeometry().contains(QCursor.pos()) or
+        if (self.cursor_over_detached_controls(QCursor.pos()) or
                 (self.screen_seek_slider is not None and self.screen_seek_slider.isSliderDown())):
             self.detached_hide_timer.start(1600)
             return
