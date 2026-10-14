@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QDialog)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
@@ -36,7 +36,30 @@ QListWidget::item:selected { background:#416248; }
 QTabBar::tab { padding:12px 22px; background:#25362b; } QTabBar::tab:selected { background:#416248; }
 QTableWidget { gridline-color:#354638; background:#19251d; }
 QHeaderView::section { background:#2d4133; padding:8px; border:0; }
+QPushButton#tvPrimary { background:#397f51; border:1px solid #64b679; color:white; font-weight:700; }
+QPushButton#tvPrimary:hover { background:#4b9963; }
+QPushButton#tvDanger { background:#69352f; border:1px solid #b26354; }
+QPushButton#tvLive { background:#713b38; border:1px solid #cc7771; font-weight:700; color:#ffe2d4; }
+QSlider::groove:horizontal { height:8px; border:1px solid #355c48; background:#21392e; border-radius:4px; }
+QSlider::sub-page:horizontal { background:#61bd7c; border-radius:4px; }
+QSlider::handle:horizontal { width:16px; margin:-6px 0; border:2px solid #d9f6dd; background:#72df99; border-radius:8px; }
+QSlider:disabled::handle:horizontal { background:#6b746d; border-color:#99a69d; }
+QSlider#seekBar::groove:horizontal { height:10px; }
+QSlider#seekBar::handle:horizontal { width:20px; margin:-7px 0; border-radius:10px; }
+QSlider#volumeBar::sub-page:horizontal { background:#62adca; }
+QScrollArea#toolbarScroll, QScrollArea#playerControlScroll { border:0; background:transparent; }
 '''
+
+
+def desktop_style(scale=100, button_size='Normal'):
+    """Respect TV DPI while allowing smaller independent UI/controls."""
+    scale=max(75,min(150,int(scale)))/100
+    pad={'Compact':(4,8),'Normal':(9,15),'Large':(13,20)}.get(button_size,(9,15))
+    return (STYLE.replace('font-size:14px;',f'font-size:{round(14*scale)}px;')
+                 .replace('font-size:27px;',f'font-size:{round(27*scale)}px;')
+                 .replace('padding:9px 15px;',f'padding:{round(pad[0]*scale)}px {round(pad[1]*scale)}px;')
+                 .replace('padding:12px 22px;',f'padding:{round(10*scale)}px {round(18*scale)}px;')
+                 .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
 
 
 def detected_zone():
@@ -144,6 +167,23 @@ class Settings(QDialog):
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
+        self.engine_path=QLineEdit(self.original.get('engine_executable',''))
+        self.engine_path.setReadOnly(True)
+        self.engine_path.setPlaceholderText('Auto-detect from Windows registry / AppData')
+        exe_button=QPushButton('Choose installed EXE')
+        exe_button.clicked.connect(self.pick_engine_path)
+        exe_row=QWidget(); exe_layout=QHBoxLayout(exe_row)
+        exe_layout.setContentsMargins(0,0,0,0)
+        exe_layout.addWidget(self.engine_path,1); exe_layout.addWidget(exe_button)
+        form.addRow('Installed Ace engine',exe_row)
+        self.ui_scale=QSpinBox()
+        self.ui_scale.setRange(75,150);self.ui_scale.setSingleStep(5)
+        self.ui_scale.setSuffix(' %');self.ui_scale.setValue(self.original.get('ui_scale',100))
+        form.addRow('Interface scale',self.ui_scale)
+        self.button_size=QComboBox()
+        for size in ('Compact','Normal','Large'):self.button_size.addItem(size)
+        self.button_size.setCurrentText(self.original.get('button_size','Normal'))
+        form.addRow('Button size',self.button_size)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
@@ -188,6 +228,12 @@ class Settings(QDialog):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
 
+    def pick_engine_path(self):
+        path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
+              self.engine_path.text() or os.environ.get('APPDATA',''),
+              'Ace Stream engine (ace_engine.exe ace_console.exe)')
+        if path:self.engine_path.setText(path)
+
     def pick_folder(self):
         folder=QFileDialog.getExistingDirectory(self,'Recording destination',self.folder.text())
         if folder:self.folder.setText(folder)
@@ -204,7 +250,9 @@ class Settings(QDialog):
                     timeshift_enabled=self.timeshift_enabled.isChecked(),
                     timeshift_minutes=self.timeshift_minutes.value(),
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
-                    timeshift_dir=self.timeshift_folder.text())
+                    timeshift_dir=self.timeshift_folder.text(),
+                    ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
+                    engine_executable=self.engine_path.text())
 
 
 class MainWindow(QMainWindow):
@@ -212,16 +260,28 @@ class MainWindow(QMainWindow):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
         self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
-        self.setWindowTitle('DizyTV'); self.resize(1320,820); self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
+        self.setWindowTitle('DizyTV'); self.resize(1150,730)
+        self.setMinimumSize(480,360)
+        self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
-        top=QHBoxLayout(); logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
+        topbar=QWidget(); top=QHBoxLayout(topbar);top.setContentsMargins(3,3,3,3)
+        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand); top.addStretch()
         self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
         for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
-        layout.addLayout(top)
+        self.header_scroll=QScrollArea()
+        self.header_scroll.setObjectName('toolbarScroll')
+        self.header_scroll.setWidgetResizable(False)
+        self.header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.header_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
+        topbar.adjustSize()
+        self.header_scroll.setWidget(topbar)
+        self.header_scroll.setFixedHeight(topbar.sizeHint().height()+20)
+        layout.addWidget(self.header_scroll)
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
-        split=QSplitter(); layout.addWidget(split,1)
+        split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
         sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox(); self.source_filter=QComboBox()
@@ -244,7 +304,10 @@ class MainWindow(QMainWindow):
         for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
             b=QPushButton(label); b.clicked.connect(handler); side.addWidget(b)
         self.sidebar=sidebar
-        split.addWidget(sidebar); self.tabs=QTabWidget(); split.addWidget(self.tabs); split.setSizes([300,1000])
+        sidebar.setMinimumWidth(0)
+        sidebar.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
+        split.addWidget(sidebar); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
+        split.addWidget(self.tabs);split.setSizes([270,880])
         live=QWidget(); live_layout=QVBoxLayout(live); self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
         self.channel_banner.setStyleSheet('background:#304d36; color:white; padding:8px;')
@@ -252,7 +315,10 @@ class MainWindow(QMainWindow):
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
         self.video=QFrame(); self.video.setStyleSheet('background:black;'); self.video.setAttribute(Qt.WA_NativeWindow); self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
-        controls=QHBoxLayout()
+        controls_widget=QWidget()
+        controls=QHBoxLayout(controls_widget)
+        controls.setContentsMargins(4,2,4,2)
+        controls.setSpacing(6)
         for label,handler in [('▶ Play',self.play),('■ Stop',self.stop_playback),('● Record',self.record_now)]:
             b=QPushButton(label); b.clicked.connect(handler); controls.addWidget(b)
         self.pause_button=QPushButton('⏸ Pause')
@@ -280,12 +346,22 @@ class MainWindow(QMainWindow):
         setup_engine.setToolTip('Visit the official provider to install the optional P2P engine. Never needed for HTTP/HLS channels.')
         setup_engine.clicked.connect(self.open_ace_stream_setup)
         controls.addWidget(setup_engine)
-        live_layout.addLayout(controls)
+        self.controls_scroll=QScrollArea()
+        self.controls_scroll.setObjectName('playerControlScroll')
+        self.controls_scroll.setWidgetResizable(False)
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.controls_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
+        controls_widget.adjustSize()
+        self.controls_scroll.setWidget(controls_widget)
+        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+20)
+        live_layout.addWidget(self.controls_scroll)
         self.tv_controls=controls
         self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
         self.seek_slider=QSlider(Qt.Horizontal)
+        self.seek_slider.setObjectName('seekBar')
         self.seek_slider.setRange(0,1000)
         self.seek_slider.setEnabled(False)
         self.seek_slider.sliderReleased.connect(self.seek_from_slider)
@@ -293,6 +369,7 @@ class MainWindow(QMainWindow):
         volume_row=QHBoxLayout()
         volume_row.addWidget(QLabel('Volume'))
         self.volume_slider=QSlider(Qt.Horizontal)
+        self.volume_slider.setObjectName('volumeBar')
         self.volume_slider.setRange(0,100)
         self.volume_slider.setValue(85)
         self.volume_slider.valueChanged.connect(self.set_tv_volume)
@@ -315,6 +392,7 @@ class MainWindow(QMainWindow):
             b=QPushButton(label); b.clicked.connect(handler); back_layout.addWidget(b)
         back_layout.addStretch(); self.tabs.addTab(backup,'Backup & Restore')
         self.status=QLabel('Native alpha • Configure your engine, XMLTV sources and recording storage in Settings'); layout.addWidget(self.status)
+        self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
@@ -506,6 +584,17 @@ class MainWindow(QMainWindow):
         self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
     def move_guide(self,delta):
         self.guide_start=self.guide_start+delta if delta else int(time.time()/3600)*3600; self.render_guide()
+    def apply_interface_scale(self):
+        settings=self.state['settings']
+        app=QApplication.instance()
+        if app:app.setStyleSheet(desktop_style(settings.get('ui_scale',100),
+                                               settings.get('button_size','Normal')))
+        for scroll in (self.header_scroll,self.controls_scroll):
+            widget=scroll.widget()
+            if widget:
+                widget.adjustSize()
+                scroll.setFixedHeight(widget.sizeHint().height()+20)
+
     def tick(self):
         self.state=self.store.read(); zone=self.state['settings']['timezone']
         label=('Auto: '+detected_zone() if zone=='auto' else zone); local=format_time(time.time(),zone,False,detected_zone()); key=label+' '+local.rsplit(' ',1)[-1]
@@ -594,7 +683,12 @@ class MainWindow(QMainWindow):
     def settings(self):
         dialog=Settings(self.store.read(),self)
         if dialog.exec()==QDialog.Accepted:
-            try:self.store.update(lambda s:s.update(settings=dialog.values())); self.state=self.store.read(); self.render_guide(); self.tick()
+            try:
+                self.store.update(lambda s:s.update(settings=dialog.values()))
+                self.state=self.store.read()
+                self.apply_interface_scale()
+                self.render_guide()
+                self.tick()
             except ValueError as exc:self.error(str(exc))
     def favourite(self):
         if not self.selected:return
@@ -1048,7 +1142,7 @@ class MainWindow(QMainWindow):
 
 
 def run(directory=None,smoke=False):
-    app=QApplication(sys.argv); app.setApplicationName('DizyTV'); app.setOrganizationName('DizygoticCode'); app.setStyleSheet(STYLE)
+    app=QApplication(sys.argv); app.setApplicationName('DizyTV'); app.setOrganizationName('DizygoticCode'); app.setStyleSheet(desktop_style())
     window=MainWindow(Store(directory),start_worker=not smoke); window.show()
     if smoke:QTimer.singleShot(1200,app.quit)
     return app.exec()

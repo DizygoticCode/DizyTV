@@ -13,6 +13,24 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_compact_scaling_and_smaller_resizable_window(self):
+        from dizytv.desktop import desktop_style
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            s=Settings(window.state,window)
+            s.ui_scale.setValue(80)
+            s.button_size.setCurrentText('Compact')
+            self.assertEqual(80,s.values()['ui_scale'])
+            self.assertEqual('Compact',s.values()['button_size'])
+            self.assertIn('font-size:11px;',desktop_style(80,'Compact'))
+            window.resize(710,480)
+            window.show()
+            self.app.processEvents()
+            self.assertLessEqual(window.minimumWidth(),480)
+            self.assertLessEqual(window.width(),720)
+            self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
+            s.close();window.close()
+
     def test_tv_player_modes_and_seekable_dvr_controls(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:

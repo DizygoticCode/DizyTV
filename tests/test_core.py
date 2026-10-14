@@ -150,6 +150,17 @@ class CoreTests(unittest.TestCase):
         # Old installations remain valid without new keys.
         validate_state(s)
 
+    def test_windows_ui_settings_optional_for_old_backups(self):
+        from dizytv.core import default_state,validate_state
+        s=default_state()
+        for key in ('ui_scale','button_size','engine_executable'):
+            s['settings'].pop(key)
+        validate_state(s)
+        s['settings'].update(ui_scale=74,button_size='Normal')
+        with self.assertRaises(ValueError):validate_state(s)
+        s['settings'].update(ui_scale=90,button_size='Tiny')
+        with self.assertRaises(ValueError):validate_state(s)
+
     def test_xmltv_preserves_programme_genres(self):
         xml = XML.replace('<title>Clock change</title>','<title>Clock change</title><category>News</category><category>Current affairs</category>')
         self.assertEqual(['News','Current affairs'], parse_xmltv(xml)[1][0]['categories'])
