@@ -1516,6 +1516,11 @@ class MainWindow(QMainWindow):
         self.position_auto_caption_overlay()
         self._auto_caption_overlay.show()
         self._auto_caption_overlay.raise_()
+        # On Windows both caption text and pop-out controls are native tool
+        # windows. Keep controls above arriving caption updates while visible.
+        if (self.screen_dialog is not None and self.detached_controls is not None
+                and self.detached_controls.isVisible()):
+            self.detached_controls.raise_()
 
     def auto_caption_finished(self,serial,reason):
         # Cancellation invalidates the UI caption serial immediately, but
