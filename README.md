@@ -18,7 +18,7 @@
 </p>
 
 > [!IMPORTANT]
-> **0.1.9 alpha is a development build.** The features below are implemented. Package checks run on native Windows/Mac hosts and Android CI; live Ace Stream playback, physical-device storage, unattended recording and installer upgrades still need device testing. Desktop packages are unsigned for public distribution; Android uses a debug key. See [verification and known limits](docs/BUILD-VERIFICATION.md).
+> **0.1.10 alpha is a development build.** The features below are implemented. Package checks run on native Windows/Mac hosts and Android CI; live Ace Stream playback, physical-device storage, unattended recording and installer upgrades still need device testing. Desktop packages are unsigned for public distribution; Android uses a debug key. See [verification and known limits](docs/BUILD-VERIFICATION.md).
 
 ## Features
 
@@ -41,23 +41,23 @@ One recording runs at a time per device. The recorder saves the available live M
 
 ## Downloads
 
-**Direct native installers:** these links download the actual executable/package, **not a ZIP**. The `0.1.9-alpha` pre-release is for early device testing; installation, live playback and unattended recording still need real-world validation.
+**Direct native installers:** these links download the actual executable/package, **not a ZIP**. The `0.1.10-alpha` pre-release is for early device testing; installation, live playback and unattended recording still need real-world validation.
 
 | Platform | Direct download | Target |
 | --- | --- | --- |
-| **Windows** | [DizyTV Windows installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-Setup-0.1.9-alpha-windows-x64.exe) | x64 |
-| **Android** | [DizyTV Android installer (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-android-universal-debug.apk) | Android 8+ / API 26+ |
-| **MacBook / Apple Silicon** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-macos-arm64.pkg) | macOS 13+ / arm64 |
-| **MacBook / Intel** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-macos-x86_64.pkg) | macOS 13+ / x86_64 |
+| **Windows** | [DizyTV Windows installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-Setup-0.1.10-alpha-windows-x64.exe) | x64 |
+| **Android** | [DizyTV Android installer (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-android-universal-debug.apk) | Android 8+ / API 26+ |
+| **MacBook / Apple Silicon** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-macos-arm64.pkg) | macOS 13+ / arm64 |
+| **MacBook / Intel** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-macos-x86_64.pkg) | macOS 13+ / x86_64 |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-Setup-0.1.9-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/DizyTV-0.1.9-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-Setup-0.1.10-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/DizyTV-0.1.10-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
 </p>
 
-[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.9-alpha/SHA256SUMS.txt) · [Native CI evidence](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Build checks](docs/BUILD-VERIFICATION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.10-alpha/SHA256SUMS.txt) · [Native CI evidence](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Build checks](docs/BUILD-VERIFICATION.md)
 
 **Windows upgrade protection (0.1.3):** The installer now embeds the missing preflight script and detects the detached DizyTV recording worker that can remain active after its window closes. It stops only a verified idle DizyTV worker, never an active recording or a job due within two minutes; in those cases it explains why the upgrade must wait. Existing playlists, favourites and recordings remain in the separate user data folder. The installer may still ask to close a genuinely open DizyTV window. This is a targeted fix for Windows file-in-use/write-denied errors, not a fix for system-wide file permissions.
 
@@ -148,6 +148,12 @@ For compatible **clear MPEG-TS over HTTP** and **unencrypted HLS playlists conta
 - Live scheduled recordings remain independent of the timeshift cache. Do not use the cache as a substitute for saving a programme.
 
 The previous 0.1.6 release remains available. See [the timeshift development issue](https://github.com/DizygoticCode/DizyTV/issues/9) for remaining playback edge cases.
+
+## DizyTV 0.1.10-alpha — rolling buffer and subtitles testing
+
+This build adds desktop subtitle-track selection and styling, with opt-in experimental offline Vosk captions (install your own compatible speech model and FFmpeg). Android timeshift improvements include a longer local live-HLS window, safe handling of unsupported HLS formats, and local HTTP MPEG-TS/HLS fixture coverage in CI. Neither official Ace Stream nor Outpace is silently bundled in these installers.
+
+**Physical playback checks are still outstanding.** Native CI verifies the build and application startup but cannot prove real broadcaster and Ace channels on Windows or Huawei Android. On Windows, first finish any recordings, exit DizyTV, run the upgrade installer, try a direct MPEG-TS/HLS channel, test Pause / 30s Back / Live, and check that normal recording still works. Android may require backup and uninstall before using the newly debug-signed APK.
 
 ## DizyTV 0.1.9-alpha — Windows TV player and readability pass
 
