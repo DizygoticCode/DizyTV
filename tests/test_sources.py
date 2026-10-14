@@ -25,15 +25,15 @@ class FreeSourceTests(unittest.TestCase):
             ('IPTV-org New Zealand','nz'),('IPTV-org South Africa','za'),
             ('IPTV-org Singapore','sg'),('IPTV-org Hong Kong','hk')):
             self.assertIn('/countries/'+country+'.m3u',sources[label])
-        for category in ('classic','series','movies','comedy'):
+        for category in ('classic','series','movies','comedy','sports'):
             url='https://iptv-org.github.io/iptv/categories/'+category+'.m3u'
             self.assertIn(url,DEFAULT_PLAYLIST_URLS)
             self.assertIn('Free ',source_label(url))
-        self.assertEqual(15,len(DEFAULT_PLAYLIST_URLS))
-        self.assertEqual(16,len(FREE_PLAYLISTS))
+        self.assertEqual(16,len(DEFAULT_PLAYLIST_URLS))
+        self.assertEqual(17,len(FREE_PLAYLISTS))
         state=default_state()
         self.assertEqual(DEFAULT_PLAYLIST_URLS,state['settings']['playlist_urls'])
-        self.assertEqual(15,len(configured_playlists(state['settings'])))
+        self.assertEqual(16,len(configured_playlists(state['settings'])))
 
     def test_same_stream_is_searchable_under_region_and_series_feeds(self):
         from dizytv.sources import FREE_PLAYLISTS
