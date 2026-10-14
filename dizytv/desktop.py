@@ -550,7 +550,7 @@ class Settings(QDialog):
                                   if u.strip()))
         dialog=IPTVDirectoryDialog(active,self)
         if dialog.exec()==QDialog.Accepted and dialog.added_urls:
-            self.playlists.setPlainText('\\n'.join(dict.fromkeys([*active,*dialog.added_urls])))
+            self.playlists.setPlainText('\n'.join(dict.fromkeys([*active,*dialog.added_urls])))
 
     def pick_engine_path(self):
         path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
