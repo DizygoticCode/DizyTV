@@ -1219,24 +1219,24 @@ class MainWindow(QMainWindow):
         # The floating overlay is FULLY TRANSPARENT between the controls.
         # Only its small pill buttons and slider tracks have translucent fills.
         # This panel is NOT in the video layout: no window or video resizing.
-        selector='QDialog' if native_overlay else 'QFrame'
-        panel.setStyleSheet(
-          selector+'#playerControls {background:transparent;border:0;}'
-          selector+'#playerControls QPushButton {'
-          'background:rgba(10,35,23,135);color:#edfff0;'
-          'border:1px solid rgba(161,213,173,150);'
-          'border-radius:7px;padding:'+str(padding)+'px '+str(padding+3)+'px;'
-          'font-size:'+str(max(9,round(11*ratio)))+'px;}'
-          selector+'#playerControls QPushButton:hover {background:rgba(17,70,43,180);}'
-          selector+'#playerControls QLabel {background:transparent;color:#effff0;}'
-          selector+'#playerControls QSlider {background:transparent;}'
-          selector+'#playerControls QSlider::groove:horizontal {'
-          'height:5px;background:rgba(14,40,29,120);border:0;border-radius:2px;}'
-          selector+'#playerControls QSlider::sub-page:horizontal {'
-          'background:rgba(86,205,128,190);border-radius:2px;}'
-          selector+'#playerControls QSlider::handle:horizontal {'
-          'width:13px;margin:-5px 0;border:1px solid rgba(210,255,227,200);'
-          'background:rgba(106,227,147,215);border-radius:7px;}')
+        prefix=('QDialog' if native_overlay else 'QFrame')+'#playerControls '
+        panel.setStyleSheet(''.join((
+            prefix+'{background:transparent;border:0;}',
+            prefix+'QPushButton {background:rgba(10,35,23,135);color:#edfff0;'
+                'border:1px solid rgba(161,213,173,150);border-radius:7px;'
+                'padding:'+str(padding)+'px '+str(padding+3)+'px;'
+                'font-size:'+str(max(9,round(11*ratio)))+'px;}',
+            prefix+'QPushButton:hover {background:rgba(17,70,43,180);}',
+            prefix+'QLabel {background:transparent;color:#effff0;}',
+            prefix+'QSlider {background:transparent;}',
+            prefix+'QSlider::groove:horizontal {height:5px;'
+                'background:rgba(14,40,29,120);border:0;border-radius:2px;}',
+            prefix+'QSlider::sub-page:horizontal {'
+                'background:rgba(86,205,128,190);border-radius:2px;}',
+            prefix+'QSlider::handle:horizontal {width:13px;margin:-5px 0;'
+                'border:1px solid rgba(210,255,227,200);'
+                'background:rgba(106,227,147,215);border-radius:7px;}',
+        )))
         panel.setMouseTracking(True)
         panel_layout=QVBoxLayout(panel)
         panel_layout.setContentsMargins(2,1,2,1)
