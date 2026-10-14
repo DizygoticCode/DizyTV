@@ -129,7 +129,7 @@ class DesktopTests(unittest.TestCase):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:
             store=Store(folder)
-            channel=parse_playlist('#EXTM3U\\n#EXTINF:-1,BBC One\\nhttps://example.com/bbc.m3u8')[0]
+            channel=parse_playlist('#EXTM3U\n#EXTINF:-1,BBC One\nhttps://example.com/bbc.m3u8')[0]
             store.update(lambda s:s.update(channels=[channel]))
             w=MainWindow(store,start_worker=False)
             self.assertEqual('Green',w.theme_picker.currentText())
