@@ -6,6 +6,7 @@ This avoids restarting active live playback or disrupting recordings.
 """
 from __future__ import annotations
 from pathlib import Path
+import re
 
 COLOURS = {
     'White': '0xFFFFFF',
@@ -73,7 +74,10 @@ def suggested_subtitle(tracks,language='Auto'):
     if not tracks:return None
     if language=='English':
         for identifier,name in tracks:
-            if any(word in name.casefold() for word in ('english','eng ','[en]',' en ',' en-')):
+            label=name.casefold()
+            if ('english' in label or re.search(
+                    r'(?<![a-z])(?:eng|en)(?:[-_](?:us|gb|uk|au|ca|nz))?(?![a-z])',
+                    label)):
                 return identifier
     return tracks[0][0]
 
