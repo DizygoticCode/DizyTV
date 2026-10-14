@@ -138,6 +138,8 @@ def default_state():
     return {'settings': {'playlist_url': 'https://search-ace.stream/playlist',
                          'playlist_urls': list(DEFAULT_PLAYLIST_URLS),
                          'xmltv_urls': list(DEFAULT_GUIDE_URLS), 'engine_url': 'http://127.0.0.1:6878',
+                         'engine_type': 'Ace Stream', 'outpace_url': 'http://127.0.0.1:6879',
+                         'outpace_executable': '',
                          'timezone': 'auto', 'epg_offset_minutes': 0,
                          'padding_before': 2, 'padding_after': 5,
                          'reserve_bytes': 1073741824, 'recording_dir': '',
@@ -172,9 +174,13 @@ def ace_id(stream):
     return candidate.lower() if re.fullmatch('[a-fA-F0-9]{40}', candidate) else None
 
 
-def stream_url(stream, engine):
+def stream_url(stream, engine, engine_type='Ace Stream', outpace_url='http://127.0.0.1:6879'):
     identifier = ace_id(stream)
     if identifier:
+        if engine_type in ('Outpace','External Outpace'):
+            # Outpace's documented native HTTP surface does not require
+            # its experimental legacy Ace API to be enabled.
+            return http_url(outpace_url).rstrip('/') + '/streams/ace/cid:' + identifier + '.ts'
         return http_url(engine).rstrip('/') + '/ace/getstream?' + urlencode({'id': identifier})
     return http_url(stream)
 
@@ -351,10 +357,16 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','engine_type','outpace_url','outpace_executable'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
+    if settings.get('engine_type','Ace Stream') not in ('Ace Stream','Outpace','External Ace','External Outpace'):
+        raise ValueError('Unknown Ace-compatible engine selection')
+    if 'outpace_url' in settings:
+        http_url(settings['outpace_url'])
+    if 'outpace_executable' in settings and (not isinstance(settings['outpace_executable'],str) or len(settings['outpace_executable'])>4096):
+        raise ValueError('Invalid Outpace executable path')
     if not isinstance(settings['xmltv_urls'], list) or len(settings['xmltv_urls']) > 20:
         raise ValueError('Use at most 20 guide sources')
     for url in settings['xmltv_urls']:
@@ -495,6 +507,7 @@ def restore_backup(payload, now=None):
     state['settings']['timeshift_dir'] = ''
     state['settings']['timeshift_enabled'] = False
     state['settings']['engine_executable'] = ''
+    state['settings']['outpace_executable'] = ''
     state['settings']['auto_caption_model_dir'] = ''
     state['settings']['auto_caption_ffmpeg_path'] = ''
     now = int(time.time()) if now is None else now
