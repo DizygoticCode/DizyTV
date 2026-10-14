@@ -238,12 +238,43 @@ class DesktopTests(unittest.TestCase):
             w.timeshift=Mock()
             self.assertEqual('buffering',w.playback_light_state())
             w.timeshift=None
+            from PySide6.QtWidgets import QLabel
+            w.popout_live_button=QPushButton('LIVE',w)
+            w.popout_live_light=QLabel('●',w)
             w.pulse_live_light()
             self.assertIn('3cdb80',w.live_button.styleSheet())
+            main_button=w.live_button.styleSheet()
+            popout_button=w.popout_live_button.styleSheet()
+            first_dot=w.live_light.styleSheet()
+            first_popout_dot=w.popout_live_light.styleSheet()
+            w.pulse_live_light()
+            # Neither LIVE button changes (or repaints), but each green dot pulses.
+            self.assertEqual(main_button,w.live_button.styleSheet())
+            self.assertEqual(popout_button,w.popout_live_button.styleSheet())
+            self.assertNotEqual(first_dot,w.live_light.styleSheet())
+            self.assertNotEqual(first_popout_dot,w.popout_live_light.styleSheet())
+            self.assertEqual(w.live_light.styleSheet(),w.popout_live_light.styleSheet())
             w.timeshift_lag=30
             self.assertEqual('buffering',w.playback_light_state())
+            w.pulse_live_light()
+            self.assertIn('#f2b450',w.live_button.styleSheet())
+            solid_amber=w.live_light.styleSheet()
+            solid_button=w.live_button.styleSheet()
+            w.pulse_live_light()
+            self.assertEqual(solid_amber,w.live_light.styleSheet())
+            self.assertEqual(solid_button,w.live_button.styleSheet())
+            self.assertEqual(solid_amber,w.popout_live_light.styleSheet())
             w.player.get_state.return_value='State.Error'
             self.assertEqual('stopped',w.playback_light_state())
+            w.pulse_live_light()
+            self.assertIn('#f26a60',w.live_button.styleSheet())
+            solid_red=w.live_light.styleSheet()
+            w.pulse_live_light()
+            self.assertEqual(solid_red,w.live_light.styleSheet())
+            self.assertEqual(solid_red,w.popout_live_light.styleSheet())
+            # No duplicated glowing dot inside pop-out's LIVE button.
+            self.assertEqual('LIVE',w.popout_live_button.text())
+            w.popout_live_light=None;w.popout_live_button=None
             w.player=None
             w.close()
 
