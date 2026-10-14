@@ -84,3 +84,14 @@ Android: Cinema and immersive full-screen modes (Back exits), quick guide and pr
 - Both: storage is opt-in, restricted to 1–240 minutes with up to 32 GiB disk quota; never starts recording in the background on Android when the Activity is paused.
 - Windows: preserve 0.1.6 installer idle-recorder upgrade verification; timeshift buffer must not interfere with permanent recording workers.
 - Release is an **experimental alpha** requiring device testing. Do not claim universal HLS DVR; VideoLAN live HLS clients may interpret EXT-X-START and sliding playlist windows differently.
+
+## 0.1.8-alpha Windows regression matrix
+
+- Resize main window to 710×480 logical pixels with scrollable toolbars; apply 80% interface scale and Compact/Normal/Large button settings.
+- Open a separate windowed TV output while keeping main guide usable, enter/leave fullscreen, restore embedded player and verify the libVLC instance was not replaced.
+- Verify mouse-idle popout controls reappear on movement and that volume/seek controls are accessible.
+- Verify optional installed Windows engine path and working-directory startup. Confirm no foreign EXE can be selected.
+- Distinguish source HTTP 403, 404, 429 and HTML/manifest responses without exposing stream URL query strings.
+- Classify BBC Radio1/Radio Asian Network using actual UK Free-TV feed attributes while preserving original IDs, and retroactively organize existing cached state.
+- Local rolling HLS playlist exposes sufficient recent fragments to avoid overly aggressive VLC segment expiry. Buffer recovery never overrides an explicit pause.
+- Validate Windows in-place installer upgrade and active recorder exclusion on GitHub Actions. **Physical Windows/VLC playback remains mandatory** to confirm real streams/engine/variable-DPI behavior.

@@ -27,12 +27,12 @@ jobs:
       - name: Verify APK signature and checksum
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.7-alpha-android-universal-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.8-alpha-android-universal-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/*.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.7-alpha-android
+          name: DizyTV-0.1.8-alpha-android
           path: dist/
           if-no-files-found: error
           retention-days: 30
@@ -110,7 +110,7 @@ jobs:
             Start-Sleep -Seconds 3
             $old.Refresh()
             if ($old.HasExited) { throw 'Old worker did not start' }
-            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.7-alpha-windows-x64.exe').Path
+            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.8-alpha-windows-x64.exe').Path
             $install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $target + '"')) -PassThru -Wait
             if ($install.ExitCode -ne 0) { throw "Upgrade failed with running idle worker: exit $($install.ExitCode)" }
             $old.Refresh()
@@ -133,7 +133,7 @@ jobs:
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.7-alpha-${{ matrix.target }}
+          name: DizyTV-0.1.8-alpha-${{ matrix.target }}
           path: |
             dist/*.exe
             dist/*.pkg
@@ -152,7 +152,7 @@ jobs:
       - name: Download verified installers
         uses: actions/download-artifact@v4
         with:
-          pattern: DizyTV-0.1.7-alpha-*
+          pattern: DizyTV-0.1.8-alpha-*
           path: native-artifacts
       - name: Collect native files and generate release checksums
         shell: bash
@@ -161,10 +161,10 @@ jobs:
           mkdir -p release
           find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' \) -exec cp -- '{}' release/ \;
           for asset in \
-            DizyTV-Setup-0.1.7-alpha-windows-x64.exe \
-            DizyTV-0.1.7-alpha-android-universal-debug.apk \
-            DizyTV-0.1.7-alpha-macos-arm64.pkg \
-            DizyTV-0.1.7-alpha-macos-x86_64.pkg; do
+            DizyTV-Setup-0.1.8-alpha-windows-x64.exe \
+            DizyTV-0.1.8-alpha-android-universal-debug.apk \
+            DizyTV-0.1.8-alpha-macos-arm64.pkg \
+            DizyTV-0.1.8-alpha-macos-x86_64.pkg; do
             test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
           done
           test "$(find release -type f | wc -l)" -eq 4
@@ -176,13 +176,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.1.7-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'v0.1.7-alpha already exists; refusing to silently replace published binaries.'
+          if gh release view v0.1.8-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.8-alpha already exists; refusing to silently replace published binaries.'
             exit 0
           fi
-          gh release create v0.1.7-alpha release/* \
+          gh release create v0.1.8-alpha release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DizyTV 0.1.7 alpha — installed-engine upgrade repair' \
+            --title 'DizyTV 0.1.8 alpha — installed-engine upgrade repair' \
             --prerelease \
             --notes 'Windows updater embeds the recorder preflight (missing in 0.1.2) and checks in-place installation with a real running worker; active recordings remain protected; the 0.1.1 free IPTV/EPG sources remain available. Early device-testing builds, not a stable release. Installers are direct .exe/.apk/.pkg files (no Actions ZIP and no GitHub login needed). Windows and macOS packages are not publicly trusted-signed/notarized, and the Android APK uses an ephemeral CI debug signing key; browser or operating-system warnings may still occur. For Android upgrades, uninstalling the previous build may be necessary (back up app settings first). Ace Stream engine and desktop VLC are separate prerequisites. Verify downloads using SHA256SUMS.txt. See the README and docs/DISTRIBUTION.md for requirements and known limitations.'
