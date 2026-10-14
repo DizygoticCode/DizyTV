@@ -29,6 +29,7 @@ from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
+from .auto_captions import verify_caption_engine, LocalCaptionWorker, caption_text
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -215,6 +216,11 @@ class Task(QRunnable):
             self.signals.success.emit(self.function())
         except Exception as exc:
             self.signals.failure.emit(str(exc))
+
+
+class CaptionSignals(QObject):
+    caption=Signal(int,str)
+    finished=Signal(int,str)
 
 
 class TimeSeekSlider(QSlider):
@@ -535,6 +541,33 @@ class Settings(QDialog):
                     'Picture-based broadcast captions may ignore these settings. '
                     'Automatic speech-generated subtitles require a separate opt-in recognition engine.')
         hint.setWordWrap(True);form.addRow(hint)
+        self.auto_model_path=QLineEdit(self.original.get('auto_caption_model_dir',''))
+        self.auto_model_path.setObjectName('autoCaptionModelPath')
+        self.auto_model_path.setReadOnly(True)
+        self.auto_model_path.setPlaceholderText('Extracted Vosk speech model folder (user provided)')
+        model_btn=QPushButton('Browse…')
+        model_btn.clicked.connect(self.choose_auto_caption_model)
+        model_row=QWidget(); model_layout=QHBoxLayout(model_row)
+        model_layout.setContentsMargins(0,0,0,0)
+        model_layout.addWidget(self.auto_model_path,1)
+        model_layout.addWidget(model_btn)
+        form.addRow('Offline auto-caption model',model_row)
+        self.auto_ffmpeg_path=QLineEdit(self.original.get('auto_caption_ffmpeg_path',''))
+        self.auto_ffmpeg_path.setObjectName('autoCaptionFFmpegPath')
+        self.auto_ffmpeg_path.setReadOnly(True)
+        self.auto_ffmpeg_path.setPlaceholderText('FFmpeg on PATH (or choose installed executable)')
+        ffmpeg_btn=QPushButton('Browse…')
+        ffmpeg_btn.clicked.connect(self.choose_auto_caption_ffmpeg)
+        ffmpeg_row=QWidget();ffmpeg_layout=QHBoxLayout(ffmpeg_row)
+        ffmpeg_layout.setContentsMargins(0,0,0,0)
+        ffmpeg_layout.addWidget(self.auto_ffmpeg_path,1)
+        ffmpeg_layout.addWidget(ffmpeg_btn)
+        form.addRow('FFmpeg for local speech captions',ffmpeg_row)
+        generated=QLabel('Experimental: Start local speech captions separately from the CC menu while watching. '
+                         'Requires installed FFmpeg and an extracted Vosk model; makes a second connection '
+                         'to the playing stream, uses local CPU/RAM and may lag several seconds. '
+                         'Off by default. No cloud speech service or microphone capture.')
+        generated.setWordWrap(True);form.addRow(generated)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
@@ -586,6 +619,16 @@ class Settings(QDialog):
         if dialog.exec()==QDialog.Accepted and dialog.added_urls:
             self.playlists.setPlainText('\n'.join(dict.fromkeys([*active,*dialog.added_urls])))
 
+    def choose_auto_caption_model(self):
+        folder=QFileDialog.getExistingDirectory(
+            self,'Select extracted offline Vosk speech model',self.auto_model_path.text())
+        if folder:self.auto_model_path.setText(folder)
+
+    def choose_auto_caption_ffmpeg(self):
+        executable,_=QFileDialog.getOpenFileName(
+            self,'Select installed FFmpeg',self.auto_ffmpeg_path.text(),'FFmpeg (ffmpeg ffmpeg.exe)')
+        if executable:self.auto_ffmpeg_path.setText(executable)
+
     def pick_engine_path(self):
         path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
               self.engine_path.text() or os.environ.get('APPDATA',''),
@@ -614,6 +657,8 @@ class Settings(QDialog):
                     subtitles_enabled=self.cc_enabled.isChecked(),subtitle_language=self.cc_language.currentText(),
                     subtitle_font=self.cc_font.currentText(),subtitle_size=self.cc_size.value(),
                     subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
+                    auto_caption_model_dir=self.auto_model_path.text(),
+                    auto_caption_ffmpeg_path=self.auto_ffmpeg_path.text(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
@@ -627,6 +672,13 @@ class MainWindow(QMainWindow):
         self._subtitle_manual_track=None
         self._subtitle_track_signature=()
         self._vlc_subtitle_profile=None
+        self._playback_url=''
+        self._auto_caption_worker=None
+        self._auto_caption_seq=0
+        self._auto_caption_overlay=None
+        self._auto_caption_label=None
+        self._auto_caption_text=''
+        self._auto_caption_updated=0
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
