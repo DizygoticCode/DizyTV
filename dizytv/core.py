@@ -282,7 +282,83 @@ def _guide_name(value):
     value = re.sub(r'[ⒼⓈⓎⓐ-ⓩ]', '', value)
     value = re.sub(r'\s*\((?:\d{3,4}p|HD|SD|FHD|4K)\)', '', value, flags=re.I)
     value = re.sub(r'\s*\[(?:\d{3,4}p|HD|SD|FHD|4K)\]', '', value, flags=re.I)
-    value = re.sub(r'\s+(?:HD|SD|FHD|4K)def make_job(channel_id, title, start, end, before=2, after=5):
+    value = re.sub(r'\s+(?:HD|SD|FHD|4K)$', '', value, flags=re.I)
+    return re.sub(r'\s+', ' ', value).strip().casefold()
+
+
+def _guide_compact(value):
+    """Normalise presentation differences without dropping regional identities."""
+    text = _guide_name(display_channel_name(value)).replace('&', ' and ')
+    numbers = {'one':'1', 'two':'2', 'three':'3', 'four':'4', 'five':'5',
+               'six':'6', 'seven':'7', 'eight':'8', 'nine':'9', 'ten':'10'}
+    text = re.sub(r'\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b',
+                  lambda m:numbers[m.group()], text)
+    return ''.join(char for char in text if char.isalnum())
+
+
+def guide_suggestions(channel, guide_names, limit=8):
+    """Rank fuzzy candidates for *manual* confirmation, never automatic assignment."""
+    if limit<=0:return []
+    name = _guide_compact(channel.get('name',''))
+    tvg = _guide_compact(channel.get('tvg_id',''))
+    if not name and not tvg:return []
+    candidates=[]
+    for key,label in guide_names.items():
+        label_name=_guide_compact(label)
+        key_name=_guide_compact(key)
+        score=max(
+            SequenceMatcher(None,name,label_name).ratio() if name and label_name else 0,
+            SequenceMatcher(None,tvg,key_name).ratio() if tvg and key_name else 0,
+        )
+        if score>=0.5:
+            candidates.append((score,key,label))
+    candidates.sort(key=lambda entry:(-entry[0],str(entry[2]).casefold(),str(entry[1]).casefold()))
+    return [(key,label) for _,key,label in candidates[:limit]]
+
+
+def guide_lookup(guide_names):
+    """Pre-index names once: thousands of channel filters remain O(1) each."""
+    ids, labels = {}, {}
+    for key, name in guide_names.items():
+        # Compact labels recover safe spacing, punctuation and numeral variants.
+        # A separate namespace prevents them from shadowing exact labels.
+        alternatives=((ids, key.casefold()), (labels, _guide_name(name)),
+                      (labels, '\\0'+_guide_compact(name)))
+        for table, normalized in alternatives:
+            if normalized in table:
+                table[normalized] = None  # Ambiguous; require explicit mapping.
+            else:
+                table[normalized] = key
+    return ids, labels
+
+
+def match_guide(channel, mappings, guide_names, lookup=None):
+    if channel['id'] in mappings:
+        return mappings[channel['id']]
+    cid = channel.get('tvg_id', '')
+    if cid in guide_names:
+        return cid
+    ids, labels = lookup if lookup is not None else guide_lookup(guide_names)
+    if cid:
+        match = ids.get(cid.casefold())
+        if match:
+            return match
+        base = cid.partition('@')[0]
+        if base != cid:
+            match = ids.get(base.casefold())
+            if match:
+                return match
+        alias = UK_EPG_ALIASES.get(base.casefold())
+        if alias:
+            match = ids.get(alias.casefold())
+            if match:
+                return match
+    exact = labels.get(_guide_name(channel['name']))
+    if exact:return exact
+    return labels.get('\\0'+_guide_compact(channel['name'])) or cid
+
+
+def make_job(channel_id, title, start, end, before=2, after=5):
     if end <= start or before < 0 or after < 0:
         raise ValueError('A recording must end after its start')
     return {'id': str(uuid.uuid4()), 'channel_id': channel_id, 'title': title[:1024],
