@@ -1200,7 +1200,11 @@ class MainWindow(QMainWindow):
 
         # The same libVLC player remains attached; do not start a second feed.
         # Separate owned translucent tool window overlays native VLC video HWND.
-        panel=QFrame(screen,Qt.Tool|Qt.FramelessWindowHint)
+        # QDialog is a proper native tool-window owner on Win/macOS.
+        # A QFrame carrying Qt.Tool creates a QWidgetWindow with invalid
+        # ownership on macOS and can crash interpreter shutdown.
+        panel=QDialog(screen,Qt.Tool|Qt.FramelessWindowHint)
+        panel.setModal(False)
         panel.setObjectName('playerControls')
         panel.setAttribute(Qt.WA_TranslucentBackground,True)
         panel.setAttribute(Qt.WA_ShowWithoutActivating,True)
@@ -1212,20 +1216,20 @@ class MainWindow(QMainWindow):
         # Only its small pill buttons and slider tracks have translucent fills.
         # This panel is NOT in the video layout: no window or video resizing.
         panel.setStyleSheet(
-          'QFrame#playerControls {background:transparent;border:0;}'
-          'QFrame#playerControls QPushButton {'
+          'QDialog#playerControls {background:transparent;border:0;}'
+          'QDialog#playerControls QPushButton {'
           'background:rgba(10,35,23,135);color:#edfff0;'
           'border:1px solid rgba(161,213,173,150);'
           'border-radius:7px;padding:'+str(padding)+'px '+str(padding+3)+'px;'
           'font-size:'+str(max(9,round(11*ratio)))+'px;}'
-          'QFrame#playerControls QPushButton:hover {background:rgba(17,70,43,180);}'
-          'QFrame#playerControls QLabel {background:transparent;color:#effff0;}'
-          'QFrame#playerControls QSlider {background:transparent;}'
-          'QFrame#playerControls QSlider::groove:horizontal {'
+          'QDialog#playerControls QPushButton:hover {background:rgba(17,70,43,180);}'
+          'QDialog#playerControls QLabel {background:transparent;color:#effff0;}'
+          'QDialog#playerControls QSlider {background:transparent;}'
+          'QDialog#playerControls QSlider::groove:horizontal {'
           'height:5px;background:rgba(14,40,29,120);border:0;border-radius:2px;}'
-          'QFrame#playerControls QSlider::sub-page:horizontal {'
+          'QDialog#playerControls QSlider::sub-page:horizontal {'
           'background:rgba(86,205,128,190);border-radius:2px;}'
-          'QFrame#playerControls QSlider::handle:horizontal {'
+          'QDialog#playerControls QSlider::handle:horizontal {'
           'width:13px;margin:-5px 0;border:1px solid rgba(210,255,227,200);'
           'background:rgba(106,227,147,215);border-radius:7px;}')
         panel.setMouseTracking(True)
@@ -1341,7 +1345,10 @@ class MainWindow(QMainWindow):
         self.screen_seek_slider=None
         self.detached_controls=None
         self.popout_live_light=None;self.popout_live_button=None
-        if overlay:overlay.close();overlay.deleteLater()
+        if overlay:
+            overlay.hide()
+            overlay.close()
+            overlay.deleteLater()
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
