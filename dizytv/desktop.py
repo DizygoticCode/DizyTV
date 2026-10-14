@@ -23,6 +23,7 @@ from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready
 from .timeshift import RollingTimeshift
+from .stream_diagnostics import probe_stream
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -262,6 +263,7 @@ class MainWindow(QMainWindow):
         self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
+        self.source_check=None;self.source_check_serial=0
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
@@ -670,10 +672,12 @@ class MainWindow(QMainWindow):
                 self.status.setText('Now playing inside DizyTV')
             elif state.endswith('.Error') or state.endswith('.Ended'):
                 self.playback_reported=True
-                self.status.setText('This stream did not play. It may be offline, geoblocked, DRM-protected, or need a different source.')
+                self.status.setText('VLC could not play this source. Checking the provider response…')
+                if self.timeshift is None:self.diagnose_stream()
             elif time.monotonic()-self.playback_started>25:
                 self.playback_reported=True
-                self.status.setText('Playback timed out. Try another channel or check the stream/engine.')
+                self.status.setText('Stream did not begin within 25 seconds; checking host response…')
+                if self.timeshift is None:self.diagnose_stream()
     def async_task(self,function,success):
         if self.task:self.status.setText('A refresh is already running'); return
         self.task=Task(function)
@@ -777,9 +781,14 @@ class MainWindow(QMainWindow):
             self.init_player()
             self.player.stop()
             media=self.vlc_instance.media_new(url)
+            # Some free HLS origins reject libVLC's default User-Agent.
+            # This is format compatibility, not bypassing geo/DRM restrictions.
+            if url.startswith('http'):
+                media.add_option(':http-user-agent=Mozilla/5.0 (compatible; DizyTV/0.1)')
             self.player.set_media(media); media.release()
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.playback_started=time.monotonic(); self.playback_reported=False
+            self.source_check_serial+=1
             self.pause_button.setText('⏸ Pause')
             if self.selected:
                 key=self.matched_guide(self.selected)
@@ -818,6 +827,29 @@ class MainWindow(QMainWindow):
         # The browser opens the provider's official page with the latest Windows version.
         if not QDesktopServices.openUrl(QUrl('https://docs.acestream.net/products/')):
             self.error('Could not open the official Ace Stream products page in your browser.')
+
+    def diagnose_stream(self):
+        if not self.selected:
+            return
+        from .core import ace_id
+        is_ace=ace_id(self.selected['stream']) is not None
+        if is_ace:
+            # Engine streams have peer/engine-specific failures, not a
+            # public channel endpoint that can safely be probed as a HLS URL.
+            self.status.setText('Ace Stream playback failed: check engine status, peers and content ID. Open Settings to locate your installed engine.')
+            return
+        self.source_check_serial+=1
+        serial=self.source_check_serial
+        channel=self.selected['id']
+        diagnostic=Task(lambda:probe_stream(self.selected['stream']))
+        self.source_check=diagnostic
+        def ready(message):
+            if (serial==self.source_check_serial and self.selected and
+                    self.selected['id']==channel):
+                self.status.setText(message)
+        diagnostic.signals.success.connect(ready)
+        diagnostic.signals.failure.connect(lambda _message:None)
+        self.pool.start(diagnostic)
 
     def close_timeshift(self):
         prior=self.timeshift
@@ -879,7 +911,8 @@ class MainWindow(QMainWindow):
         if active:self.error('A different channel is recording. Stop or finish that recording before switching playback.'); return
         ch=self.selected
         url=stream_url(ch['stream'],self.state['settings']['engine_url'])
-        if ch['stream'].startswith('acestream:'):
+        from .core import ace_id
+        if ace_id(ch['stream']):
             if self.engine_task is not None:
                 self.status.setText('Ace Stream engine startup is already in progress…'); return
             self.status.setText('Checking/starting your installed Ace Stream engine…')
