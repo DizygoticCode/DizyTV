@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from zoneinfo import available_timezones
 
-from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent, QPoint
+from PySide6.QtCore import Qt, QUrl, QTimer, QTimeZone, QRunnable, QThreadPool, QObject, Signal, QRectF, QEvent, QPoint, QPointF
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServices, QShortcut, QKeySequence, QCursor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
@@ -366,7 +366,94 @@ class CaptionSignals(QObject):
     finished=Signal(int,str)
 
 
-class TimeSeekSlider(QSlider):
+class MediaRailSlider(QSlider):
+    """Draw the actual TV timeline/volume rail ourselves, not the Windows QSlider.
+
+    QSS groove overrides alone still allowed the platform style to paint two
+    full-height grey native grooves in the 0.1.13 installer. This widget owns
+    every pixel, including the background, on Windows and macOS.
+    """
+    BACKGROUNDS={'Green':'#101712','Dark':'#121821','Light':'#f4f7fb'}
+    COLOURS={
+        'Green':('#2a4434','#65dca0','#70c5dc','#f1f7f1'),
+        'Dark':('#293544','#84b4fa','#78c8eb','#f1f5fb'),
+        'Light':('#d7e2f0','#2678cb','#358eaf','#ffffff'),
+    }
+
+    def __init__(self,orientation=Qt.Horizontal,parent=None):
+        super().__init__(orientation,parent)
+        self.rail_theme='Green'
+        self.setFixedHeight(25)
+        self.setMinimumWidth(35)
+        self.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed)
+        self.setAutoFillBackground(False)
+
+    def set_rail_theme(self,theme):
+        self.rail_theme=theme if theme in self.COLOURS else 'Green'
+        self.update()
+
+    def _rail_geometry(self):
+        left=12.0
+        length=max(1.0,float(self.width())-24.0)
+        y=self.height()/2.0
+        span=self.maximum()-self.minimum()
+        fraction=(self.value()-self.minimum())/span if span>0 else 0.0
+        return left,length,y,max(0.0,min(1.0,fraction))
+
+    def paintEvent(self,event):
+        painter=QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        # Explicitly cover the whole widget with the SAME surrounding
+        # application surface, never the operating system's grey slider plate.
+        painter.fillRect(self.rect(),QColor(self.BACKGROUNDS[self.rail_theme]))
+        track,seek_colour,volume_colour,thumb=self.COLOURS[self.rail_theme]
+        left,length,y,fraction=self._rail_geometry()
+        is_volume=self.objectName()=='volumeBar'
+        accent=volume_colour if is_volume else seek_colour
+        if not self.isEnabled():accent=track
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(track))
+        painter.drawRoundedRect(QRectF(left,y-2.0,length,4.0),2.0,2.0)
+        if fraction>0:
+            painter.setBrush(QColor(accent))
+            painter.drawRoundedRect(QRectF(left,y-2.0,max(1.0,length*fraction),4.0),2.0,2.0)
+        centre=left+length*fraction
+        painter.setBrush(QColor(thumb if self.isEnabled() else '#9aabba'))
+        painter.setPen(QColor(accent if self.isEnabled() else track))
+        painter.drawEllipse(QPointF(centre,y),6.5,6.5)
+        painter.end()
+
+    def _set_from_mouse(self,x):
+        left,length,_,_=self._rail_geometry()
+        position=max(0.0,min(1.0,(float(x)-left)/length))
+        self.setSliderPosition(round(self.minimum()+position*(self.maximum()-self.minimum())))
+
+    def mousePressEvent(self,event):
+        if event.button()==Qt.LeftButton and self.isEnabled():
+            self.setFocus(Qt.MouseFocusReason)
+            self.setSliderDown(True)
+            self._set_from_mouse(event.position().x())
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self,event):
+        if self.isSliderDown() and event.buttons() & Qt.LeftButton:
+            self._set_from_mouse(event.position().x())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self,event):
+        if event.button()==Qt.LeftButton and self.isSliderDown():
+            self._set_from_mouse(event.position().x())
+            self.setSliderDown(False)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+
+class TimeSeekSlider(MediaRailSlider):
     """Mouse wheel seeks only when directly over the video timeline."""
     seek_requested=Signal(int)
     def __init__(self,orientation=Qt.Horizontal,parent=None):
@@ -1064,7 +1151,7 @@ class MainWindow(QMainWindow):
         live_layout.addWidget(self.seek_slider)
         volume_row=QHBoxLayout()
         volume_row.addWidget(QLabel('Volume'))
-        self.volume_slider=QSlider(Qt.Horizontal)
+        self.volume_slider=MediaRailSlider(Qt.Horizontal)
         self.volume_slider.setObjectName('volumeBar')
         self.volume_slider.setRange(0,100)
         self.volume_slider.setValue(85)
@@ -1301,6 +1388,11 @@ class MainWindow(QMainWindow):
         self.theme_picker.setCurrentText(theme)
         self.theme_picker.blockSignals(False)
         self.grid.set_theme(theme)
+        for rail in (self.seek_slider,self.volume_slider,self.screen_seek_slider):
+            if rail is not None:rail.set_rail_theme(theme)
+        if self.detached_controls is not None:
+            for rail in self.detached_controls.findChildren(MediaRailSlider):
+                rail.set_rail_theme(theme)
         self.style_auto_caption_overlay()
         if self.detached_controls is not None:
             self.detached_controls.setStyleSheet(
@@ -2447,14 +2539,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0,sync_popout_arrows)
         self.screen_seek_slider=TimeSeekSlider(Qt.Horizontal,panel)
         self.screen_seek_slider.setObjectName('seekBar')
+        self.screen_seek_slider.set_rail_theme(self.state['settings'].get('theme','Green'))
         self.screen_seek_slider.seek_requested.connect(self.seek_relative)
         self.screen_seek_slider.setRange(0,1000)
         self.screen_seek_slider.sliderReleased.connect(self.seek_screen_slider)
         panel_layout.addWidget(self.screen_seek_slider)
         volume_line=QHBoxLayout()
         volume_line.addWidget(QLabel('Volume',panel))
-        volume=QSlider(Qt.Horizontal,panel)
+        volume=MediaRailSlider(Qt.Horizontal,panel)
         volume.setObjectName('volumeBar')
+        volume.set_rail_theme(self.state['settings'].get('theme','Green'))
         volume.setRange(0,100)
         volume.setValue(self.volume_slider.value())
         volume.valueChanged.connect(self.volume_slider.setValue)
