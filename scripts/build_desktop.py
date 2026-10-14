@@ -77,7 +77,7 @@ if sys.platform=='darwin':
     # Read the packaging version from pyproject instead of keeping a stale
     # macOS-only number after the Windows/Android release has been bumped.
     project_version = tomllib.loads((ROOT/'pyproject.toml').read_text(encoding='utf-8'))['project']['version']
-    matched = re.fullmatch(r'(\\d+\\.\\d+\\.\\d+)a\\d+', project_version)
+    matched = re.fullmatch(r'([0-9]+[.][0-9]+[.][0-9]+)a[0-9]+', project_version)
     if not matched:
         raise RuntimeError('Unsupported alpha project version: '+project_version)
     mac_version = matched.group(1)
