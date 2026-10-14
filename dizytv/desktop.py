@@ -24,6 +24,7 @@ from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics
 from .timeshift import RollingTimeshift
 from .stream_diagnostics import probe_stream
+from .global_search import GlobalSearch
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -319,7 +320,7 @@ class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
-        self.selected=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
+        self.selected=None; self.global_search_dialog=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
@@ -359,7 +360,7 @@ class MainWindow(QMainWindow):
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
-        sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
+        sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox()
         self.kind_filter=QComboBox(); self.source_filter=QComboBox()
         self.section_filter=QComboBox()
@@ -488,7 +489,10 @@ class MainWindow(QMainWindow):
         for label,delta in [('← Earlier',-21600),('Now',0),('Later →',21600)]:
             b=QPushButton(label); b.clicked.connect(lambda checked=False,d=delta:self.move_guide(d)); nav.addWidget(b)
         self.guide_date=QLabel(); nav.addWidget(self.guide_date); guide_layout.addLayout(nav)
-        self.grid=GuideGrid(); self.grid.channel_clicked.connect(self.play_guide_channel); self.grid.programme_record_requested.connect(self.schedule_programme); self.grid.channel_record_requested.connect(self.record_guide_channel); scroll=QScrollArea(); scroll.setWidget(self.grid); scroll.setWidgetResizable(True); guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
+        self.grid=GuideGrid(); self.grid.channel_clicked.connect(self.play_guide_channel); self.grid.programme_record_requested.connect(self.schedule_programme); self.grid.channel_record_requested.connect(self.record_guide_channel)
+        scroll=QScrollArea();scroll.setWidget(self.grid);scroll.setWidgetResizable(True)
+        self.guide_scroll=scroll
+        guide_layout.addWidget(scroll); self.tabs.addTab(guide_page,'TV Guide')
         recordings=QWidget(); rec_layout=QVBoxLayout(recordings)
         self.jobs=QTableWidget(0,5); self.jobs.setHorizontalHeaderLabels(['Programme','Start','End','Status','Size']); self.jobs.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch); self.jobs.setSelectionBehavior(QTableWidget.SelectRows); self.jobs.setSelectionMode(QTableWidget.SingleSelection); rec_layout.addWidget(self.jobs)
         rec_buttons=QHBoxLayout()
@@ -499,6 +503,12 @@ class MainWindow(QMainWindow):
         for label,handler in [('Save local backup',self.backup),('Restore local backup',self.restore)]:
             b=QPushButton(label); b.clicked.connect(handler); back_layout.addWidget(b)
         back_layout.addStretch(); self.tabs.addTab(backup,'Backup & Restore')
+        self.global_search_button=QPushButton('⌕ Search all channels & programmes   Ctrl+K')
+        self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
+        self.global_search_button.clicked.connect(self.open_global_search)
+        layout.insertWidget(1,self.global_search_button)
+        self.global_search_shortcut=QShortcut(QKeySequence('Ctrl+K'),self)
+        self.global_search_shortcut.activated.connect(self.open_global_search)
         self.status=QLabel('Native alpha • Configure your engine, XMLTV sources and recording storage in Settings'); layout.addWidget(self.status)
         self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
@@ -973,6 +983,47 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.playback_started=0
             self.error('Playback could not start. Check that VLC 3 is installed and the stream is available. '+str(exc))
+    def detected_timezone(self):
+        return detected_zone()
+
+    def open_global_search(self):
+        if self.global_search_dialog is not None:
+            self.global_search_dialog.show()
+            self.global_search_dialog.raise_()
+            self.global_search_dialog.activateWindow()
+            self.global_search_dialog.query.setFocus()
+            return
+        dialog=GlobalSearch(self)
+        self.global_search_dialog=dialog
+        dialog.finished.connect(lambda _:setattr(self,'global_search_dialog',None))
+        dialog.show()
+
+    def reveal_global_channel(self,ch,programme=None,show_guide=True):
+        """Show a global search result even when existing filters hide it."""
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self.favourites_only.blockSignals(True)
+        self.favourites_only.setChecked(False)
+        self.favourites_only.blockSignals(False)
+        for widget in (self.source_filter,self.country_filter,self.section_filter,
+                       self.genre_filter,self.kind_filter):
+            widget.blockSignals(True)
+            widget.setCurrentIndex(0)
+            widget.blockSignals(False)
+        self.render_channels()
+        self.select_guide_channel(ch)
+        if not show_guide:return
+        if programme is not None:
+            self.guide_start=(int(programme['start'])//3600)*3600
+        self.tabs.setCurrentIndex(1)
+        self.render_guide()
+        index=next((i for i,row in enumerate(self.grid.rows) if row['id']==ch['id']),None)
+        if index is not None:
+            height,_,_,_=self.grid.geometry_units()
+            self.guide_scroll.verticalScrollBar().setValue(max(0,48+index*height-40))
+        self.grid.update()
+
     def select_guide_channel(self,ch):
         self.selected=ch
         # Keep the sidebar and Now/Next label in step with the programme grid.

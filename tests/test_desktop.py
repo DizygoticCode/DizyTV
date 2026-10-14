@@ -54,6 +54,35 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(65,len(w.grid.rows))
             w.close()
 
+    def test_global_search_finds_programme_hidden_by_source_filter(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            now=int(time.time())
+            ch={'id':'global-ace','name':'Global Science News','stream':'acestream://'+('a'*40),
+                'tvg_id':'global-science','group':'Ace News','country':'United Kingdom',
+                'genre':'News','kind':'TV','transport':'Ace Stream'}
+            store.update(lambda state:state.update(channels=[ch]))
+            w=MainWindow(store,start_worker=False)
+            w.guide={'names':{'global-science':'Global Science News'},
+                     'programmes':[{'channel':'global-science','title':'Solar Observatory Report',
+                                    'start':now+3600,'end':now+5400}]}
+            w._indexed_guide=None
+            w.source_filter.setCurrentIndex(w.source_filter.findData('<http>'))
+            self.assertEqual(0,w.channels.count())
+            w.open_global_search()
+            dlg=w.global_search_dialog
+            dlg.query.setText('solar')
+            dlg.debounce.stop() if hasattr(dlg,'debounce') else dlg.timer.stop()
+            dlg.search()
+            self.assertEqual(1,dlg.results.count())
+            self.assertEqual('programme',dlg.results.item(0).data(Qt.UserRole)[0])
+            dlg.results.setCurrentRow(0)
+            dlg.show_in_guide() if hasattr(dlg,'show_in_guide') else dlg.show_hit()
+            self.assertEqual(1,w.channels.count())
+            self.assertEqual('global-ace',w.grid.rows[0]['id'])
+            self.assertEqual(1,w.tabs.currentIndex())
+            w.close()
+
     def test_guide_scale_reduces_geometry(self):
         grid=GuideGrid()
         grid.set_data([{'id':'a','name':'BBC One','tvg_id':'bbc'}],[],{},'auto',0)
