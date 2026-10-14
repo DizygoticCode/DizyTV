@@ -95,3 +95,22 @@ Android: Cinema and immersive full-screen modes (Back exits), quick guide and pr
 - Classify BBC Radio1/Radio Asian Network using actual UK Free-TV feed attributes while preserving original IDs, and retroactively organize existing cached state.
 - Local rolling HLS playlist exposes sufficient recent fragments to avoid overly aggressive VLC segment expiry. Buffer recovery never overrides an explicit pause.
 - Validate Windows in-place installer upgrade and active recorder exclusion on GitHub Actions. **Physical Windows/VLC playback remains mandatory** to confirm real streams/engine/variable-DPI behavior.
+
+## 0.1.9-alpha Windows and guide checks
+
+- Search 2,200+ imported Ace Stream channels via Ctrl+K globally even with HTTP-only filter selected. No 250-row rendering cap in the guide; no XMLTV match still displays the channel.
+- Search an upcoming XMLTV title; jump to the correct channel and broadcast hour, or schedule a recording only after user approval.
+- Verify programme result pagination (150/page) and all-source matching independent of favourites, category or selected playlist.
+- Check transparent pop-out tool controls show/hide above native video without resizing the video or outer TV window; control size follows UI/button scaling.
+- In a seekable stream or buffered timeshift: left/right 30s and timeline wheel scroll advance/rewind appropriately, clipped at LIVE or oldest cache. Unseekable streams keep controls unavailable.
+- Exercise Windows Ace Engine startup, local API diagnostics, and colour status, then physically check at least one HTTP/HLS and Ace channel.
+- Qt offscreen CI verifies layout/content and excludes unavailable native video reparenting. Only a real Windows GUI can validate HWND overlay layering.
+
+## 0.1.9-alpha appearance and public-catalogue verification
+
+- In Windows Settings switch **Green**, **Dark**, and **Light**; repeat with the toolbar theme picker beside DizyTV. Confirm guide text, selected rows, category filters, and pop-out controls remain legible and the video is unchanged; close/reopen to confirm persistence.
+- Resize the main window to 480 × 360: **Live TV**, **TV Guide**, and **Recordings** rounded tabs must stay usable via overflow scroll buttons and not overlap the window border. Backup/Restore is under **Tools** in the toolbar. Restore should still require confirmation and leave recordings protected.
+- Existing upgrades preserve configured M3U links. Click **Settings → Add built-in free playlists** to add Canada/Australia/New Zealand/South Africa/Singapore/Hong Kong and the Classic/Series/Movies/Comedy/Sports indexes. A fresh profile has the expanded preset set already.
+- Filter by each new playlist and check source-status counts. If a stream is present in both a country feed and a Series/Movies feed it should appear in both source filters, **once** under All Playlists, and retain one favourite and guide mapping. Its playback/EPG is not guaranteed.
+- Search a favourite 24/7-style programme channel. Channel existence, availability in the UK, and live/EPG continuity must be checked in VLC on Windows; avoid treating third-party M3U links as verified broadcasting rights.
+- Recheck Codex fixes: a normally playing direct HTTP/HLS/Ace stream stays green past 18 seconds, and pop-out mouse hover does not hide the control panel on an off-origin secondary display. Do not automatically resume paused timeshift playback.
