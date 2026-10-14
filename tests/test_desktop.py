@@ -743,6 +743,21 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(['On now'],[p['title'] for p in window.grid.programmes])
             window.close()
 
+    def test_programme_context_hit_test_ignores_partial_paint_cache(self):
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            channel=parse_playlist('#EXTM3U\n#EXTINF:-1 tvg-id="one",Channel\nhttps://example.com/live.m3u8')[0]
+            start=window.guide_start
+            programme={'channel':'one','start':start,'end':start+3600,'title':'Record me','categories':[]}
+            window.grid.set_data([channel],[programme],{},'auto',start)
+            # Even without any paint event, the context menu must resolve
+            # the programme. A partial Qt repaint cannot erase this result.
+            window.grid.hitboxes.clear()
+            self.assertEqual(programme,window.grid.programme_at(QPoint(240,75)))
+            self.assertIsNone(window.grid.programme_at(QPoint(50,75)))
+            window.close()
+
     def test_non_ace_playback_bypasses_engine_check(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:
@@ -773,7 +788,7 @@ class DesktopTests(unittest.TestCase):
             self.app.processEvents()
             window.grid.repaint()
             self.app.processEvents()
-            self.assertGreater(len(window.grid.hitboxes),0)
+            self.assertIsNotNone(window.grid.programme_at(QPoint(230,75)))
             watched=[]; scheduled=[]
             window.play=lambda:watched.append(window.selected['id'])
             window.schedule_programme=lambda ch,p:scheduled.append((ch['id'],p['title']))
