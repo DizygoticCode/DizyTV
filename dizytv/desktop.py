@@ -1510,16 +1510,31 @@ class MainWindow(QMainWindow):
         layout.addWidget(query)
         results=QListWidget(dialog)
         layout.addWidget(results,1)
+        counter=QLabel(dialog)
+        layout.addWidget(counter)
+        more=QPushButton('Show next 150 channels',dialog)
+        layout.addWidget(more)
         channels=catalogue(self.store.read())
-        def populate():
-            results.clear()
-            needle=query.text().casefold().strip()
-            matches=(ch for ch in channels if needle in (display_channel_name(ch['name'])+' '+ch.get('country','')).casefold())
-            for index,ch in enumerate(matches):
-                if index>=120:break
+        page_size=150
+        matching=[]
+        shown=0
+        def show_more():
+            nonlocal shown
+            for ch in matching[shown:shown+page_size]:
                 item=QListWidgetItem(display_channel_name(ch['name'])+' · '+ch.get('country',''))
                 item.setData(Qt.UserRole,ch)
                 results.addItem(item)
+            shown=min(len(matching),shown+page_size)
+            counter.setText(f'{len(matching):,} matching channels · showing {shown:,}')
+            more.setEnabled(shown<len(matching))
+        def populate():
+            nonlocal matching,shown
+            results.clear()
+            needle=query.text().casefold().strip()
+            matching=[ch for ch in channels
+                      if needle in (display_channel_name(ch['name'])+' '+ch.get('country','')).casefold()]
+            shown=0
+            show_more()
         def tune(item):
             ch=item.data(Qt.UserRole)
             dialog.close()
@@ -1527,6 +1542,7 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(0)
             self.play()
         query.textChanged.connect(populate)
+        more.clicked.connect(show_more)
         results.itemDoubleClicked.connect(tune)
         layout.addWidget(QLabel('Double-click a channel to watch. Use TV Guide for recording.'))
         populate()
