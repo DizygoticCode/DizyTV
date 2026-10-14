@@ -674,6 +674,8 @@ class MainWindow(QMainWindow):
         self._vlc_subtitle_profile=None
         self._playback_url=''
         self._auto_caption_worker=None
+        self._auto_caption_worker_serial=None
+        self._auto_caption_stopping=False
         self._auto_caption_seq=0
         self._auto_caption_overlay=None
         self._auto_caption_label=None
@@ -1450,23 +1452,33 @@ class MainWindow(QMainWindow):
         self._auto_caption_overlay.raise_()
 
     def auto_caption_finished(self,serial,reason):
-        if serial!=self._auto_caption_seq:return
+        # Cancellation invalidates the UI caption serial immediately, but
+        # retain the worker until its (possibly slow) model load really ends.
+        if serial!=self._auto_caption_worker_serial:return
+        was_stopping=self._auto_caption_stopping
         self._auto_caption_worker=None
+        self._auto_caption_worker_serial=None
+        self._auto_caption_stopping=False
+        self._auto_caption_signals=None
         self.destroy_auto_caption_overlay()
-        if reason:self.status.setText(reason)
+        if reason and not was_stopping:self.status.setText(reason)
 
     def stop_auto_captions(self):
         self._auto_caption_seq+=1
         worker=self._auto_caption_worker
-        self._auto_caption_worker=None
-        if worker is not None:worker.stop()
+        if worker is not None:
+            self._auto_caption_stopping=True
+            worker.stop()
         self._auto_caption_text=''
         self.destroy_auto_caption_overlay()
 
     def toggle_auto_captions(self):
         if self._auto_caption_worker is not None:
+            if self._auto_caption_stopping:
+                self.status.setText('Previous offline caption model is still shutting down. Please wait.')
+                return
             self.stop_auto_captions()
-            self.status.setText('Local speech-generated captions stopped.')
+            self.status.setText('Stopping local speech captions; waiting for speech model cleanup…')
             return
         if not self.player or not self.playback_started or not self._playback_url:
             self.status.setText('Play a live channel before starting local speech captions.')
@@ -1496,6 +1508,8 @@ class MainWindow(QMainWindow):
             except RuntimeError:pass
         worker=LocalCaptionWorker(ffmpeg,self._playback_url,model,safe_caption,safe_finished)
         self._auto_caption_worker=worker
+        self._auto_caption_worker_serial=serial
+        self._auto_caption_stopping=False
         self.status.setText('Starting optional offline captions; recognising live audio locally. '
                             'A second connection to this stream is used; no microphone or cloud STT.')
         worker.start()
@@ -1596,8 +1610,10 @@ class MainWindow(QMainWindow):
         appearance=menu.addAction('Subtitle size, font, colour, position…')
         appearance.triggered.connect(self.settings)
         menu.addSection('Speech-generated captions')
-        auto=menu.addAction('Stop local speech captions' if self._auto_caption_worker
-                            else 'Generate live subtitles (offline Vosk + FFmpeg)')
+        auto=menu.addAction('Stopping local speech captions…' if self._auto_caption_stopping
+                            else ('Stop local speech captions' if self._auto_caption_worker
+                                  else 'Generate live subtitles (offline Vosk + FFmpeg)'))
+        auto.setEnabled(not self._auto_caption_stopping)
         auto.triggered.connect(self.toggle_auto_captions)
         menu.exec(QCursor.pos())
 
