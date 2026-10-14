@@ -13,7 +13,7 @@ os.chdir(ROOT)
 from PIL import Image
 licences=ROOT/'assets'/'licenses'
 shutil.copyfile(ROOT/'THIRD-PARTY-NOTICES.md',licences/'NOTICES.md')
-for package in ('python-vlc','tzdata','pyinstaller'):
+for package in ('python-vlc','tzdata','pyinstaller','vosk'):
     wheel=distribution(package)
     for entry in wheel.files or []:
         if any(word in entry.name.lower() for word in ('license','licence','copying')):
@@ -25,7 +25,7 @@ image.save('assets/branding/dizytv.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(
 image.save('assets/branding/dizytv.icns')
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','DizyTV',
       '--paths',str(ROOT),'--add-data','assets'+os.pathsep+'assets',
-      '--collect-data','tzdata','--hidden-import','vlc']
+      '--collect-data','tzdata','--collect-binaries','vosk','--hidden-import','vlc','--hidden-import','vosk']
 if sys.platform=='darwin':
     args += ['--windowed','--icon','assets/branding/dizytv.icns','--osx-bundle-identifier','dev.dizygotic.dizytv']
 elif os.name=='nt':
