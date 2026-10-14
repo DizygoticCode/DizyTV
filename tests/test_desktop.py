@@ -428,6 +428,24 @@ class DesktopTests(unittest.TestCase):
             w.player.video_set_spu.assert_called_with(3)
             w.player=None;w.close()
 
+    def test_disable_subtitles_retries_after_vlc_initially_rejects_off(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda s:s['settings'].update(subtitles_enabled=False))
+            w=MainWindow(store,start_worker=False)
+            w.player=Mock()
+            w.playback_started=1
+            w.player.video_set_spu.side_effect=[-1,0]
+            w.sync_subtitles()
+            self.assertFalse(w._subtitle_auto_applied)
+            w.sync_subtitles()
+            self.assertTrue(w._subtitle_auto_applied)
+            w.sync_subtitles()
+            self.assertEqual(2,w.player.video_set_spu.call_count)
+            w.player.video_set_spu.assert_called_with(-1)
+            w.player=None;w.close()
+
     def test_automatic_subtitles_retry_track_until_vlc_accepts_selection(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
