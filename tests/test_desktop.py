@@ -167,6 +167,39 @@ class DesktopTests(unittest.TestCase):
                 self.assertEqual('https://docs.acestream.net/products/',open_url.call_args.args[0].toString())
             window.close()
 
+    def test_epg_mapping_picker_suggests_regions_and_saves_only_confirmed_choice(self):
+        from PySide6.QtWidgets import QDialog, QLineEdit, QListWidget
+        from dizytv.core import parse_playlist
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            channel=parse_playlist('#EXTM3U\n#EXTINF:-1,BBC One\nhttps://example.com/bbc.m3u8')[0]
+            store.update(lambda state:state.update(channels=[channel]))
+            w=MainWindow(store,start_worker=False)
+            w.guide={'names':{'bbc-london':'BBC One London HD',
+                              'bbc-south':'BBC One South HD',
+                              'bbc-two':'BBC Two HD'},'programmes':[]}
+            w.render_channels()
+            w.selected=channel
+            self.assertEqual('',w.matched_guide(channel))
+            def confirm(dialog):
+                search=dialog.findChild(QLineEdit,'epgMappingSearch')
+                results=dialog.findChild(QListWidget,'epgMappingOptions')
+                self.assertIsNotNone(search)
+                self.assertIsNotNone(results)
+                self.assertIn('Suggested',results.item(1).text())
+                search.setText('BBC One South')
+                visible=[results.item(i) for i in range(results.count())
+                         if not results.item(i).isHidden()]
+                self.assertEqual(1,len(visible))
+                self.assertEqual('bbc-south',visible[0].data(Qt.UserRole))
+                results.setCurrentItem(visible[0])
+                return QDialog.Accepted
+            with patch.object(QDialog,'exec',confirm):
+                w.map_channel()
+            self.assertEqual('bbc-south',store.read()['mappings'][channel['id']])
+            self.assertEqual('bbc-south',w.matched_guide(channel))
+            w.close()
+
     def test_guide_index_reuses_programmes_and_limits_painting_to_visible_window(self):
         from dizytv.core import parse_playlist
         with tempfile.TemporaryDirectory() as folder:
