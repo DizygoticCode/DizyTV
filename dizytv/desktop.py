@@ -286,7 +286,6 @@ class GuideGrid(QWidget):
         visible=event.rect()
         p.setClipRect(visible)
         p.fillRect(visible,QColor(theme_color('#15221a',self.theme)))
-        self.hitboxes=[]
         rowheight,left,hour,font=self.geometry_units()
         p.setFont(QFont('Sans Serif',font)); scale=hour/3600
         for i in range(7):
@@ -311,10 +310,32 @@ class GuideGrid(QWidget):
                 fill='#3c5c42' if item['start']<=time.time()<item['end'] else '#283e30'
                 p.fillRect(rect,QColor(theme_color(fill,self.theme)))
                 p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(rect.adjusted(8,2,-8,-2),Qt.AlignVCenter|Qt.TextWordWrap,item['title'])
-                self.hitboxes.append((rect,ch,item))
+
         x=left+(time.time()-self.start)*scale
         if left<=x<=left+6*hour:
             p.setPen(QColor(theme_color('#f4af71',self.theme))); p.drawLine(int(x),40,int(x),self.height())
+    def programme_at(self,point,row=None):
+        """Determine the programme from its data, not partial paint rectangles.
+
+        Qt repaints narrow dirty rectangles while scrolling; caching hitboxes
+        only from paintEvent causes invisible context-menu regressions.
+        """
+        rowheight,left,hour,_=self.geometry_units()
+        if row is None:row=int((point.y()-48)//rowheight)
+        if not 0<=row<len(self.rows) or point.x()<left:return None
+        channel=self.rows[row]
+        key=self.mappings.get(channel['id'],channel['tvg_id'])
+        scale=hour/3600
+        for item in self._programmes_by_channel.get(key,()):
+            span_start=max(item['start'],self.start)
+            span_end=min(item['end'],self.start+6*3600)
+            if span_end<=span_start:continue
+            x=left+(span_start-self.start)*scale
+            width=(span_end-span_start)*scale
+            rect=QRectF(x+2,48+row*rowheight+2,max(0,width-4),rowheight-6)
+            if rect.contains(point):return item
+        return None
+
     def mousePressEvent(self,event):
         # Row identity does not depend on whether this channel has XMLTV data.
         rowheight,_,_,_=self.geometry_units()
@@ -328,8 +349,7 @@ class GuideGrid(QWidget):
             return
         if event.button()==Qt.RightButton:
             # Offer recording only through an explicit menu, never by default click.
-            programme=next((p for rect,ch,p in reversed(self.hitboxes)
-                            if ch['id']==channel['id'] and rect.contains(event.position())),None)
+            programme=self.programme_at(event.position(),row)
             menu=QMenu(self)
             watch=menu.addAction('▶ Watch channel')
             watch.triggered.connect(lambda checked=False,ch=channel:self.channel_clicked.emit(ch))
