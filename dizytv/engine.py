@@ -6,12 +6,13 @@ background worker, so checking/installing an engine cannot freeze the Qt GUI.
 from __future__ import annotations
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 
@@ -89,6 +90,63 @@ def engine_diagnostics(address,timeout=3):
     except (HTTPError,URLError,TimeoutError,OSError,ValueError,TypeError):
         return ('Ace Engine API is not responding on localhost port '+str(port)+
                 '. Check the engine, its HTTP port and Windows firewall.')
+
+
+def start_playback_session(stream, address, timeout=20):
+    """Ask the engine for the actual VLC URL, not just an open TCP port.
+
+    Ace Engine's documented format=json middleware reports a playback_url or
+    a content/peer error. We never pass an unverified outside URL to VLC.
+    """
+    from .core import ace_request_params, http_url
+    params=ace_request_params(stream)
+    if params is None:
+        raise ValueError('Selected channel has no supported Ace Stream content ID')
+    engine=http_url(address).rstrip('/')
+    split=urlsplit(engine+'/ace/getstream')
+    query=urlencode({**params,'format':'json'})
+    request=urlunsplit((split.scheme,split.netloc,split.path,query,''))
+    try:
+        with urlopen(request,timeout=timeout) as response:
+            data=response.read(32769)
+    except HTTPError as exc:
+        raise RuntimeError('Ace Stream rejected this channel (HTTP '+str(exc.code)+
+                           '). The stream may be offline, blocked, or unavailable.') from None
+    except (URLError,TimeoutError,OSError) as exc:
+        raise RuntimeError('Ace Stream engine is reachable but did not prepare a playable stream. '
+                           'Check available peers and try the channel in the official Ace player. '
+                           '('+type(exc).__name__+')') from None
+    if len(data)>32768:
+        raise RuntimeError('Ace Stream returned an oversized session response')
+    try:
+        payload=json.loads(data)
+    except (ValueError,UnicodeDecodeError):
+        raise RuntimeError('Ace Stream returned no valid playback session. Update the installed engine.') from None
+    if not isinstance(payload,dict):
+        raise RuntimeError('Ace Stream returned an invalid playback session')
+    error=payload.get('error')
+    if error:
+        # Never expose a raw URL/token from an engine-generated error.
+        detail=re.sub(r'https?://\\S+','[stream URL]',str(error))[:180]
+        raise RuntimeError('Ace Stream could not start the channel: '+detail)
+    result=payload.get('response')
+    playback=result.get('playback_url') if isinstance(result,dict) else None
+    if not isinstance(playback,str):
+        raise RuntimeError('Engine responded but provided no playback URL. '
+                           'The content ID may be stale or have no active peers.')
+    parsed=urlparse(playback)
+    host,port=engine_endpoint(address)
+    try:
+        returned_port=parsed.port or (443 if parsed.scheme=='https' else 80)
+    except ValueError:
+        raise RuntimeError('Engine returned an invalid playback port') from None
+    same_host=parsed.hostname==host or (
+        host in ('localhost','127.0.0.1','::1')
+        and parsed.hostname in ('localhost','127.0.0.1','::1'))
+    if parsed.scheme not in ('http','https') or not same_host or returned_port!=port:
+        raise RuntimeError('Engine returned a playback URL outside its configured endpoint')
+    return http_url(playback)
+
 
 def ensure_ready(address, startup_seconds=25, executable_path=''):
     """Called off the UI thread. Never launch for a remote/custom engine URL."""
