@@ -252,7 +252,7 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNone(diagnose_video_output(0,0,0,0))
         self.assertIsNone(diagnose_video_output(24,32,28,1,(1920,1080)))
         self.assertIn('no video track',diagnose_video_output(24,0,0,0))
-        self.assertIn('decoding video',diagnose_video_output(24,45,0,1,(1920,1080)))
+        self.assertIn('video are decoding',diagnose_video_output(24,45,0,1,(1920,1080)))
         self.assertIn('not decoding',diagnose_video_output(24,0,0,1))
         self.assertIn('surface',diagnose_video_output(24,45,32,1,(0,0)))
 
