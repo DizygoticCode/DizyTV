@@ -26,7 +26,7 @@ def bundled_speech_directory():
     return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent)) / 'speech'
 
 
-def verify_caption_engine(model_dir,ffmpeg_path=''):
+def verify_caption_engine(model_dir='',ffmpeg_path=''):
     packaged = bundled_speech_directory()
     if not model_dir and (packaged / 'vosk-model-small-en-us-0.15').is_dir():
         model_dir = str(packaged / 'vosk-model-small-en-us-0.15')
