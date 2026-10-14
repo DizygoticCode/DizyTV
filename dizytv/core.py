@@ -356,8 +356,8 @@ def validate_state(state):
     for url in settings['xmltv_urls']:
         http_url(url)
     if 'playlist_urls' in settings:
-        if not isinstance(settings['playlist_urls'], list) or not 1 <= len(settings['playlist_urls']) <= 16:
-            raise ValueError('Use 1 to 16 playlist URLs')
+        if not isinstance(settings['playlist_urls'], list) or not 1 <= len(settings['playlist_urls']) <= 24:
+            raise ValueError('Use 1 to 24 playlist URLs')
         for url in settings['playlist_urls']:
             http_url(url)
     try:
@@ -403,6 +403,12 @@ def validate_state(state):
         ids.add(ch['id'])
         if 'source' in ch:
             http_url(ch['source'])
+        if 'sources' in ch:
+            if (not isinstance(ch['sources'],list) or len(ch['sources'])>24 or
+                    len(ch['sources'])!=len(set(str(s) for s in ch['sources']))):
+                raise ValueError('Invalid channel source membership')
+            for origin in ch['sources']:
+                http_url(origin)
         for key in ('country','genre','kind','transport'):
             if key in ch and (not isinstance(ch[key],str) or len(ch[key])>512):
                 raise ValueError('Invalid channel category')
