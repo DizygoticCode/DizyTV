@@ -27,6 +27,8 @@ from .timeshift import RollingTimeshift
 from .stream_diagnostics import probe_stream
 from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
+from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
+                        subtitle_tracks, suggested_subtitle, external_subtitle_path)
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -501,6 +503,38 @@ class Settings(QDialog):
         self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
         self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
         form.addRow('TV guide density / size',self.guide_scale)
+        self.cc_enabled=QCheckBox('Use broadcast subtitles when available')
+        self.cc_enabled.setObjectName('subtitleEnabled')
+        self.cc_enabled.setChecked(self.original.get('subtitles_enabled',True))
+        form.addRow('Subtitles / closed captions',self.cc_enabled)
+        self.cc_language=QComboBox()
+        self.cc_language.addItems(['Auto','English'])
+        self.cc_language.setCurrentText(self.original.get('subtitle_language','Auto'))
+        form.addRow('Preferred caption language',self.cc_language)
+        self.cc_font=QComboBox()
+        self.cc_font.addItems(FONTS)
+        self.cc_font.setCurrentText(self.original.get('subtitle_font','Sans'))
+        form.addRow('Subtitle text font',self.cc_font)
+        self.cc_size=QSpinBox()
+        self.cc_size.setObjectName('subtitleSize')
+        self.cc_size.setRange(12,64)
+        self.cc_size.setSuffix(' px')
+        self.cc_size.setValue(self.original.get('subtitle_size',28))
+        form.addRow('Subtitle text size',self.cc_size)
+        self.cc_colour=QComboBox()
+        self.cc_colour.setObjectName('subtitleColour')
+        self.cc_colour.addItems(list(COLOURS))
+        self.cc_colour.setCurrentText(self.original.get('subtitle_colour','White'))
+        form.addRow('Subtitle text colour',self.cc_colour)
+        self.cc_position=QComboBox()
+        self.cc_position.setObjectName('subtitlePosition')
+        self.cc_position.addItems(list(POSITIONS))
+        self.cc_position.setCurrentText(self.original.get('subtitle_position','Bottom'))
+        form.addRow('Subtitle screen position',self.cc_position)
+        hint=QLabel('Text size, font, colour and vertical position apply to newly opened VLC playback. '
+                    'Picture-based broadcast captions may ignore these settings. '
+                    'Automatic speech-generated subtitles require a separate opt-in recognition engine.')
+        hint.setWordWrap(True);form.addRow(hint)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
@@ -577,6 +611,9 @@ class Settings(QDialog):
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
                     theme=self.theme.currentText(),
+                    subtitles_enabled=self.cc_enabled.isChecked(),subtitle_language=self.cc_language.currentText(),
+                    subtitle_font=self.cc_font.currentText(),subtitle_size=self.cc_size.value(),
+                    subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
@@ -586,6 +623,10 @@ class MainWindow(QMainWindow):
         self.state=self.store.read(); self.guide={'names':{},'programmes':[]}; self.guide_start=int(time.time()/3600)*3600
         self.selected=None; self.global_search_dialog=None; self.start_worker=start_worker; self.pool=QThreadPool.globalInstance(); self.displayed_zone=''; self.source_errors=[]; self.engine_task=None; self.playback_started=0; self.playback_reported=False; self.cinema_mode=False; self.screen_dialog=None; self.guide_popup=None; self.screen_seek_slider=None; self.timeshift=None; self.timeshift_task=None; self.timeshift_lag=0
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
+        self._subtitle_auto_applied=False
+        self._subtitle_manual_track=None
+        self._subtitle_track_signature=()
+        self._vlc_subtitle_profile=None
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
@@ -726,6 +767,11 @@ class MainWindow(QMainWindow):
         self.info_button=QPushButton('Info')
         self.info_button.clicked.connect(self.show_tv_info)
         controls.addWidget(self.info_button)
+        self.subtitle_button=QPushButton('CC Subtitles')
+        self.subtitle_button.setObjectName('subtitleButton')
+        self.subtitle_button.setToolTip('Subtitle tracks, closed captions and optional local subtitle files')
+        self.subtitle_button.clicked.connect(self.show_subtitle_menu)
+        controls.addWidget(self.subtitle_button)
         self.cinema_button=QPushButton('▣ Cinema')
         self.cinema_button.clicked.connect(self.toggle_cinema)
         controls.addWidget(self.cinema_button)
@@ -1129,6 +1175,7 @@ class MainWindow(QMainWindow):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
         self.check_live_timeshift()
+        self.sync_subtitles()
         if self.player and self.playback_started:
             local_active=self.timeshift is not None and bool(self.timeshift.window.snapshot())
             seekable=bool(self.player.is_seekable()) or local_active
@@ -1219,8 +1266,13 @@ class MainWindow(QMainWindow):
                 self.store.update(lambda s:s.update(settings=dialog.values()))
                 self.state=self.store.read()
                 self.apply_interface_scale()
+                self._subtitle_auto_applied=False
+                self.sync_subtitles()
                 self.render_guide()
                 self.tick()
+                if self._vlc_subtitle_profile is not None and tuple(vlc_subtitle_options(self.state['settings']))!=self._vlc_subtitle_profile:
+                    self.status.setText('Subtitle appearance saved; new font, size, colour and position apply after restarting DizyTV.')
+
             except ValueError as exc:self.error(str(exc))
     def favourite(self):
         if not self.selected:return
@@ -1254,6 +1306,93 @@ class MainWindow(QMainWindow):
         if ok:
             cid=self.selected['id']; target='' if value=='No mapping' else value.split(' — ')[0]
             self.store.update(lambda s:s['mappings'].update({cid:target})); self.state=self.store.read(); self.render_guide(); self.render_now()
+    def sync_subtitles(self):
+        """Use the embedded subtitle stream without another video connection.
+
+        Transport manifests may reveal subtitle tracks after playback begins,
+        so a cheap periodic scan is safer than a one-shot lookup on Play.
+        """
+        if not self.player or not self.playback_started:return
+        tracks=subtitle_tracks(self.player)
+        signature=tuple(tracks)
+        if not self.state['settings'].get('subtitles_enabled',True):
+            if not self._subtitle_auto_applied:
+                try:self.player.video_set_spu(-1)
+                except (AttributeError,OSError,RuntimeError):pass
+                self._subtitle_auto_applied=True
+            return
+        if self._subtitle_manual_track is not None:
+            return
+        if not tracks:return
+        if self._subtitle_auto_applied and signature==self._subtitle_track_signature:return
+        target=suggested_subtitle(tracks,self.state['settings'].get('subtitle_language','Auto'))
+        try:
+            if target is not None and self.player.video_get_spu()!=target:
+                self.player.video_set_spu(target)
+            self._subtitle_auto_applied=True
+            self._subtitle_track_signature=signature
+        except (AttributeError,OSError,RuntimeError):pass
+
+    def choose_subtitle_track(self,track):
+        if not self.player or not self.playback_started:return
+        if track!=-1 and track not in {key for key,_ in subtitle_tracks(self.player)}:return
+        try:
+            if self.player.video_set_spu(track)!=0:
+                self.status.setText('This channel cannot enable the selected subtitle track.')
+                return
+        except (AttributeError,OSError,RuntimeError):
+            self.status.setText('Subtitle selection is not available from this VLC build.')
+            return
+        self._subtitle_manual_track=track
+        self._subtitle_auto_applied=True
+        self.status.setText('Subtitles off' if track==-1 else 'Subtitle track '+str(track)+' selected')
+
+    def load_subtitle_file(self):
+        if not self.player or not self.playback_started:
+            self.status.setText('Play a programme before adding subtitle files.')
+            return
+        path,_=QFileDialog.getOpenFileName(
+            self,'Load captions for current video','','Subtitles (*.srt *.ass *.ssa *.vtt *.sub)')
+        if not path:return
+        try:
+            path=external_subtitle_path(path)
+            if not self.player.video_set_subtitle_file(path):
+                raise ValueError('VLC could not read this subtitle file')
+            self._subtitle_auto_applied=False
+            self._subtitle_manual_track=None
+            self.status.setText('Subtitle file attached to current playback (not saved to recordings)')
+        except (ValueError,OSError,RuntimeError,AttributeError) as exc:
+            self.status.setText('Cannot load subtitles: '+str(exc))
+
+    def show_subtitle_menu(self):
+        menu=QMenu(self.screen_dialog or self)
+        tracks=subtitle_tracks(self.player)
+        menu.addSection('Broadcast subtitle tracks')
+        if self.player and self.playback_started:
+            action=menu.addAction('Off')
+            action.triggered.connect(lambda:self.choose_subtitle_track(-1))
+            for key,name in tracks:
+                action=menu.addAction('CC  '+name)
+                action.setCheckable(True)
+                try:action.setChecked(self.player.video_get_spu()==key)
+                except (RuntimeError,OSError,AttributeError):pass
+                action.triggered.connect(lambda _,id=key:self.choose_subtitle_track(id))
+            if not tracks:
+                no_captions=menu.addAction('No embedded captions reported by this stream')
+                no_captions.setEnabled(False)
+        else:
+            not_playing=menu.addAction('Play a channel to discover its caption tracks')
+            not_playing.setEnabled(False)
+        menu.addSeparator()
+        load=menu.addAction('Load SRT / ASS / VTT file…')
+        load.triggered.connect(self.load_subtitle_file)
+        appearance=menu.addAction('Subtitle size, font, colour, position…')
+        appearance.triggered.connect(self.settings)
+        menu.addSection('Speech-generated captions')
+        note=menu.addAction('Local auto captions — separate optional engine required')
+        note.setEnabled(False)
+        menu.exec(QCursor.pos())
+
     def init_player(self):
         if self.player:return
         if os.name=='nt':
@@ -1262,7 +1401,9 @@ class MainWindow(QMainWindow):
                 if (folder/'libvlc.dll').exists():
                     os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH',''); self.dll_dir=os.add_dll_directory(str(folder)); break
         import vlc
-        self.vlc_instance=vlc.Instance('--no-video-title-show'); self.player=self.vlc_instance.media_player_new()
+        self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
+        self.vlc_instance=vlc.Instance('--no-video-title-show',*self._vlc_subtitle_profile)
+        self.player=self.vlc_instance.media_player_new()
         self.player.audio_set_volume(self.volume_slider.value())
         win=int(self.video.winId())
         if sys.platform=='darwin':self.player.set_nsobject(win)
@@ -1278,6 +1419,9 @@ class MainWindow(QMainWindow):
             if url.startswith('http'):
                 media.add_option(':http-user-agent=Mozilla/5.0 (compatible; DizyTV/0.1)')
             self.player.set_media(media); media.release()
+            self._subtitle_auto_applied=False
+            self._subtitle_manual_track=None
+            self._subtitle_track_signature=()
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.playback_started=time.monotonic(); self.playback_reported=False
             self._last_media_activity=None
@@ -1685,6 +1829,7 @@ class MainWindow(QMainWindow):
                                ('● LIVE',self.jump_to_live),
                                ('☷ Guide',self.show_tv_guide),
                                ('Info',self.show_tv_info),
+                               ('CC Subtitles',self.show_subtitle_menu),
                                ('⛶ Full',self.toggle_screen_fullscreen),
                                ('↩ Dock',self.exit_screen_fullscreen)):
             button=QPushButton(title,panel)
