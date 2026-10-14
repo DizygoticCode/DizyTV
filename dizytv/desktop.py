@@ -51,14 +51,35 @@ QPushButton#tvPrimary { background:#397f51; border:1px solid #64b679; color:whit
 QPushButton#tvPrimary:hover { background:#4b9963; }
 QPushButton#tvDanger { background:#69352f; border:1px solid #b26354; }
 QPushButton#tvLive { background:#713b38; border:1px solid #cc7771; font-weight:700; color:#ffe2d4; }
-QSlider::groove:horizontal { height:8px; border:1px solid #355c48; background:#21392e; border-radius:4px; }
-QSlider::sub-page:horizontal { background:#61bd7c; border-radius:4px; }
-QSlider::handle:horizontal { width:16px; margin:-6px 0; border:2px solid #d9f6dd; background:#72df99; border-radius:8px; }
-QSlider:disabled::handle:horizontal { background:#6b746d; border-color:#99a69d; }
-QSlider#seekBar::groove:horizontal { height:10px; }
-QSlider#seekBar::handle:horizontal { width:20px; margin:-7px 0; border-radius:10px; }
-QSlider#volumeBar::sub-page:horizontal { background:#62adca; }
+/* Compact media-player rails: never paint the slider's full rectangular widget. */
+QSlider#seekBar, QSlider#volumeBar { background:transparent; border:0; padding:0; margin:0; }
+QSlider#seekBar::groove:horizontal, QSlider#volumeBar::groove:horizontal {
+    height:4px; border:0; border-radius:2px; background:#23352c;
+}
+QSlider#seekBar::add-page:horizontal, QSlider#volumeBar::add-page:horizontal {
+    background:#23352c; border:0; border-radius:2px;
+}
+QSlider#seekBar::sub-page:horizontal {
+    background:#63d89b; border:0; border-radius:2px;
+}
+QSlider#volumeBar::sub-page:horizontal {
+    background:#68bde0; border:0; border-radius:2px;
+}
+QSlider#seekBar::handle:horizontal, QSlider#volumeBar::handle:horizontal {
+    background:#dbffeb; border:2px solid #3b9364; border-radius:7px;
+    width:14px; margin:-7px 0;
+}
+QSlider#seekBar::handle:horizontal:hover, QSlider#volumeBar::handle:horizontal:hover {
+    background:#ffffff; border-color:#63d89b;
+}
+QSlider#seekBar:disabled::sub-page:horizontal, QSlider#volumeBar:disabled::sub-page:horizontal {
+    background:#53655b;
+}
+QSlider#seekBar:disabled::handle:horizontal, QSlider#volumeBar:disabled::handle:horizontal {
+    background:#9ca9a1; border-color:#637267;
+}
 QScrollArea#toolbarScroll, QScrollArea#playerControlScroll { border:0; background:transparent; }
+QWidget#playbackControlsRow { background:transparent; border:0; }
 '''
 
 
@@ -95,6 +116,14 @@ THEME_COLORS = {
         '#6b746d':'#747983',
         '#99a69d':'#a7afbc',
         '#62adca':'#759dbf',
+        '#23352c':'#323b4a',
+        '#63d89b':'#79aeff',
+        '#68bde0':'#85c7f5',
+        '#dbffeb':'#edf5ff',
+        '#3b9364':'#5e8dce',
+        '#53655b':'#687487',
+        '#9ca9a1':'#abb6c5',
+        '#637267':'#748299',
         '#a8c5ad':'#c1cada',
         '#15221a':'#151922',
         '#253b2b':'#283448',
@@ -138,6 +167,14 @@ THEME_COLORS = {
         '#6b746d':'#bcc4cf',
         '#99a69d':'#919cae',
         '#62adca':'#3480a3',
+        '#23352c':'#d7e2ef',
+        '#63d89b':'#2a76c7',
+        '#68bde0':'#3d93bf',
+        '#dbffeb':'#ffffff',
+        '#3b9364':'#2a76c7',
+        '#53655b':'#bac4d0',
+        '#9ca9a1':'#bcc8d5',
+        '#637267':'#9dacbe',
         '#a8c5ad':'#51657e',
         '#15221a':'#f1f5fb',
         '#253b2b':'#dde7f4',
@@ -814,6 +851,7 @@ class MainWindow(QMainWindow):
             self.video.setAttribute(Qt.WA_NativeWindow)
         self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
         controls_widget=QWidget()
+        controls_widget.setObjectName('playbackControlsRow')
         controls=QHBoxLayout(controls_widget)
         controls.setContentsMargins(4,2,4,2)
         controls.setSpacing(6)
@@ -2140,13 +2178,15 @@ class MainWindow(QMainWindow):
                 'font-size:'+str(max(9,round(11*ratio)))+'px;}',
             prefix+'QPushButton:hover {background:rgba(17,70,43,180);}',
             prefix+'QLabel {background:transparent;color:#effff0;}',
-            prefix+'QSlider {background:transparent;}',
-            prefix+'QSlider::groove:horizontal {height:5px;'
+            prefix+'QSlider {background:transparent;border:0;padding:0;margin:0;}',
+            prefix+'QSlider::groove:horizontal {height:4px;'
+                'background:rgba(14,40,29,120);border:0;border-radius:2px;}',
+            prefix+'QSlider::add-page:horizontal {'
                 'background:rgba(14,40,29,120);border:0;border-radius:2px;}',
             prefix+'QSlider::sub-page:horizontal {'
                 'background:rgba(86,205,128,190);border-radius:2px;}',
             prefix+'QSlider::handle:horizontal {width:13px;margin:-5px 0;'
-                'border:1px solid rgba(210,255,227,200);'
+                'border:2px solid rgba(210,255,227,200);'
                 'background:rgba(106,227,147,215);border-radius:7px;}',
         ))
         panel.setStyleSheet(overlay_theme_style(self._detached_base_style,
