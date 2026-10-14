@@ -1438,6 +1438,251 @@ class MainWindow(QMainWindow):
             self.store.update(lambda s:s['mappings'].update({cid:target}))
             self.state=self.store.read()
             self.render_guide();self.render_now()
+    def create_auto_caption_overlay(self):
+        if self._auto_caption_overlay is not None:return
+        native=(os.name=='nt' and os.environ.get('QT_QPA_PLATFORM')!='offscreen')
+        if native:
+            parent=self.screen_dialog or self
+            overlay=QDialog(parent,Qt.Tool|Qt.FramelessWindowHint|Qt.WindowTransparentForInput)
+            overlay.setAttribute(Qt.WA_TranslucentBackground,True)
+            overlay.setAttribute(Qt.WA_ShowWithoutActivating,True)
+            content=QVBoxLayout(overlay)
+            content.setContentsMargins(0,0,0,0)
+        else:
+            overlay=QFrame(self.video)
+            overlay.setAttribute(Qt.WA_TransparentForMouseEvents,True)
+            content=QVBoxLayout(overlay)
+            content.setContentsMargins(0,0,0,0)
+        overlay.setObjectName('autoCaptionOverlay')
+        caption=QLabel(overlay)
+        caption.setObjectName('autoCaptionText')
+        caption.setTextFormat(Qt.PlainText)
+        caption.setWordWrap(True)
+        caption.setAlignment(Qt.AlignCenter)
+        content.addWidget(caption)
+        self._auto_caption_overlay=overlay
+        self._auto_caption_label=caption
+        self.style_auto_caption_overlay()
+        self.position_auto_caption_overlay()
+
+    def style_auto_caption_overlay(self):
+        label=self._auto_caption_label
+        if label is None:return
+        settings=self.state['settings']
+        rgb=COLOURS.get(settings.get('subtitle_colour','White'),'0xFFFFFF')
+        colour='#'+rgb[2:]
+        backdrop='rgba(255,255,255,222)' if colour=='#000000' else 'rgba(0,0,0,190)'
+        font={'Sans':'Arial','Serif':'Georgia','Monospace':'Consolas'}.get(
+            settings.get('subtitle_font','Sans'),'Arial')
+        size=settings.get('subtitle_size',28)
+        label.setStyleSheet(
+            'QLabel#autoCaptionText {font-family:"'+font+'";font-size:'+str(size)+'px;'
+            'font-weight:700;color:'+colour+';background:'+backdrop+';'
+            'border-radius:10px;padding:10px 18px;}')
+        self.position_auto_caption_overlay()
+
+    def position_auto_caption_overlay(self):
+        overlay=self._auto_caption_overlay
+        if overlay is None or self.video.width()<1 or self.video.height()<1:return
+        size=self.state['settings'].get('subtitle_size',28)
+        width=max(100,int(self.video.width()*.86))
+        height=max(64,min(self.video.height()//2,size*3+26))
+        margin=POSITIONS.get(self.state['settings'].get('subtitle_position','Bottom'),16)
+        x=max(0,(self.video.width()-width)//2)
+        y=max(0,self.video.height()-height-margin)
+        overlay.resize(width,height)
+        if isinstance(overlay,QDialog):
+            overlay.move(self.video.mapToGlobal(QPoint(x,y)))
+        else:
+            overlay.move(x,y)
+
+    def destroy_auto_caption_overlay(self):
+        overlay=self._auto_caption_overlay
+        self._auto_caption_overlay=None
+        self._auto_caption_label=None
+        if overlay is not None:
+            overlay.hide()
+            overlay.close()
+            overlay.deleteLater()
+
+    def receive_auto_caption(self,serial,text):
+        if serial!=self._auto_caption_seq or self._auto_caption_worker is None:return
+        text=caption_text(text)
+        if not text:return
+        self._auto_caption_text=text
+        self._auto_caption_updated=time.monotonic()
+        self.create_auto_caption_overlay()
+        self._auto_caption_label.setText(text)
+        self.position_auto_caption_overlay()
+        self._auto_caption_overlay.show()
+        self._auto_caption_overlay.raise_()
+
+    def auto_caption_finished(self,serial,reason):
+        # Cancellation invalidates the UI caption serial immediately, but
+        # retain the worker until its (possibly slow) model load really ends.
+        if serial!=self._auto_caption_worker_serial:return
+        was_stopping=self._auto_caption_stopping
+        self._auto_caption_worker=None
+        self._auto_caption_worker_serial=None
+        self._auto_caption_stopping=False
+        self._auto_caption_signals=None
+        self.destroy_auto_caption_overlay()
+        if reason and not was_stopping:self.status.setText(reason)
+
+    def stop_auto_captions(self):
+        self._auto_caption_seq+=1
+        worker=self._auto_caption_worker
+        if worker is not None:
+            self._auto_caption_stopping=True
+            worker.stop()
+        self._auto_caption_text=''
+        self.destroy_auto_caption_overlay()
+
+    def toggle_auto_captions(self):
+        if self._auto_caption_worker is not None:
+            if self._auto_caption_stopping:
+                self.status.setText('Previous offline caption model is still shutting down. Please wait.')
+                return
+            self.stop_auto_captions()
+            self.status.setText('Stopping local speech captions; waiting for speech model cleanup…')
+            return
+        if not self.player or not self.playback_started or not self._playback_url:
+            self.status.setText('Play a live channel before starting local speech captions.')
+            return
+        if self.timeshift is not None:
+            self.status.setText('Return to direct live playback and disable rolling timeshift before generating captions.')
+            return
+        settings=self.state['settings']
+        try:
+            ffmpeg,model=verify_caption_engine(settings.get('auto_caption_model_dir',''),
+                                               settings.get('auto_caption_ffmpeg_path',''))
+        except (ValueError,OSError) as exc:
+            self.status.setText('Local captions unavailable: '+str(exc)+
+                                ' Open Settings to choose the model/FFmpeg.')
+            return
+        self._auto_caption_seq+=1
+        serial=self._auto_caption_seq
+        signals=CaptionSignals(self)
+        signals.caption.connect(self.receive_auto_caption)
+        signals.finished.connect(self.auto_caption_finished)
+        self._auto_caption_signals=signals
+        def safe_caption(text):
+            try:signals.caption.emit(serial,text)
+            except RuntimeError:pass  # Window was closed while worker was stopping.
+        def safe_finished(reason):
+            try:signals.finished.emit(serial,reason)
+            except RuntimeError:pass
+        worker=LocalCaptionWorker(ffmpeg,self._playback_url,model,safe_caption,safe_finished)
+        self._auto_caption_worker=worker
+        self._auto_caption_worker_serial=serial
+        self._auto_caption_stopping=False
+        self.status.setText('Starting optional offline captions; recognising live audio locally. '
+                            'A second connection to this stream is used; no microphone or cloud STT.')
+        worker.start()
+
+    def sync_subtitles(self):
+        """Use the embedded subtitle stream without another video connection.
+
+        Transport manifests may reveal subtitle tracks after playback begins,
+        so a cheap periodic scan is safer than a one-shot lookup on Play.
+        """
+        if not self.player or not self.playback_started:return
+        # Turning captions off does not require enumerating decoder tracks.
+        # Some streams also expose the track list only after startup.
+        if not self.state['settings'].get('subtitles_enabled',True):
+            if not self._subtitle_auto_applied:
+                try:
+                    # VLC may list a stream before its subtitle decoder is
+                    # ready. Retry until it actually accepts the Off request.
+                    if self.player.video_set_spu(-1)==0:
+                        self._subtitle_auto_applied=True
+                except (AttributeError,OSError,RuntimeError):pass
+            return
+        if self._subtitle_manual_track is not None:
+            return
+        tracks=subtitle_tracks(self.player)
+        signature=tuple(tracks)
+        if not tracks:return
+        if self._subtitle_auto_applied and signature==self._subtitle_track_signature:return
+        target=suggested_subtitle(tracks,self.state['settings'].get('subtitle_language','Auto'))
+        try:
+            if target is None:return
+            if self.player.video_get_spu()!=target and self.player.video_set_spu(target)!=0:
+                # HLS caption tracks can be listed before VLC is ready to
+                # activate them. Try again on the next timer tick.
+                return
+            self._subtitle_auto_applied=True
+            self._subtitle_track_signature=signature
+        except (AttributeError,OSError,RuntimeError):pass
+
+    def choose_subtitle_track(self,track):
+        if not self.player or not self.playback_started:return
+        if track!=-1 and track not in {key for key,_ in subtitle_tracks(self.player)}:return
+        try:
+            if self.player.video_set_spu(track)!=0:
+                self.status.setText('This channel cannot enable the selected subtitle track.')
+                return
+        except (AttributeError,OSError,RuntimeError):
+            self.status.setText('Subtitle selection is not available from this VLC build.')
+            return
+        self._subtitle_manual_track=track
+        self._subtitle_auto_applied=True
+        self.status.setText('Subtitles off' if track==-1 else 'Subtitle track '+str(track)+' selected')
+
+    def load_subtitle_file(self):
+        if not self.player or not self.playback_started:
+            self.status.setText('Play a programme before adding subtitle files.')
+            return
+        path,_=QFileDialog.getOpenFileName(
+            self,'Load captions for current video','','Subtitles (*.srt *.ass *.ssa *.vtt *.sub)')
+        if not path:return
+        try:
+            path=external_subtitle_path(path)
+            if not self.player.video_set_subtitle_file(path):
+                raise ValueError('VLC could not read this subtitle file')
+            # File subtitles are an explicit user choice: the periodic
+            # broadcast preference must not replace the newly attached slave.
+            self._subtitle_manual_track='external'
+            self._subtitle_auto_applied=True
+            if not self.state['settings'].get('subtitles_enabled',True):
+                self.state=self.store.update(
+                    lambda s:s['settings'].update(subtitles_enabled=True))
+            self.status.setText('Subtitle file attached to current playback (not saved to recordings)')
+        except (ValueError,OSError,RuntimeError,AttributeError) as exc:
+            self.status.setText('Cannot load subtitles: '+str(exc))
+
+    def show_subtitle_menu(self):
+        menu=QMenu(self.screen_dialog or self)
+        tracks=subtitle_tracks(self.player)
+        menu.addSection('Broadcast subtitle tracks')
+        if self.player and self.playback_started:
+            action=menu.addAction('Off')
+            action.triggered.connect(lambda:self.choose_subtitle_track(-1))
+            for key,name in tracks:
+                action=menu.addAction('CC  '+name)
+                action.setCheckable(True)
+                try:action.setChecked(self.player.video_get_spu()==key)
+                except (RuntimeError,OSError,AttributeError):pass
+                action.triggered.connect(lambda _,id=key:self.choose_subtitle_track(id))
+            if not tracks:
+                no_captions=menu.addAction('No embedded captions reported by this stream')
+                no_captions.setEnabled(False)
+        else:
+            not_playing=menu.addAction('Play a channel to discover its caption tracks')
+            not_playing.setEnabled(False)
+        menu.addSeparator()
+        load=menu.addAction('Load SRT / ASS / VTT file…')
+        load.triggered.connect(self.load_subtitle_file)
+        appearance=menu.addAction('Subtitle size, font, colour, position…')
+        appearance.triggered.connect(self.settings)
+        menu.addSection('Speech-generated captions')
+        auto=menu.addAction('Stopping local speech captions…' if self._auto_caption_stopping
+                            else ('Stop local speech captions' if self._auto_caption_worker
+                                  else 'Generate live subtitles (offline Vosk + FFmpeg)'))
+        auto.setEnabled(not self._auto_caption_stopping)
+        auto.triggered.connect(self.toggle_auto_captions)
+        menu.exec(QCursor.pos())
+
     def init_player(self):
         if self.player:return
         if os.name=='nt':
