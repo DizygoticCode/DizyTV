@@ -214,7 +214,13 @@ class GuideGrid(QWidget):
     def __init__(self):
         super().__init__(); self.rows=[]; self.programmes=[]; self.hitboxes=[]; self.zone='auto'; self.start=0
         self.guide_scale=100
+        self.theme='Green'
         self._programmes_by_channel={}
+    def set_theme(self,theme):
+        if theme!=self.theme:
+            self.theme=theme
+            self.update()
+
     def geometry_units(self):
         ratio=max(55,min(130,self.guide_scale))/100.0
         return (max(25,int(58*ratio)),max(125,int(210*ratio)),
@@ -247,35 +253,35 @@ class GuideGrid(QWidget):
         p=QPainter(self)
         visible=event.rect()
         p.setClipRect(visible)
-        p.fillRect(visible,QColor('#15221a'))
+        p.fillRect(visible,QColor(theme_color('#15221a',self.theme)))
         self.hitboxes=[]
         rowheight,left,hour,font=self.geometry_units()
         p.setFont(QFont('Sans Serif',font)); scale=hour/3600
         for i in range(7):
             x=left+i*hour
-            p.setPen(QColor('#47654b')); p.drawLine(x,visible.top(),x,visible.bottom())
+            p.setPen(QColor(theme_color('#47654b',self.theme))); p.drawLine(x,visible.top(),x,visible.bottom())
             if visible.top()<=48:
-                p.setPen(QColor('#f3ead5')); p.drawText(x+5,30,format_time(self.start+i*3600,self.zone,False,detected_zone()))
+                p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(x+5,30,format_time(self.start+i*3600,self.zone,False,detected_zone()))
         first,last=self.visible_row_range(visible)
         for row in range(first,last):
             ch=self.rows[row]
             y=48+row*rowheight
-            p.fillRect(0,y,left,rowheight-3,QColor('#253b2b'))
-            p.setPen(QColor('#f3ead5')); p.drawText(QRectF(12,y+4,left-20,rowheight-8),Qt.AlignVCenter|Qt.TextWordWrap,display_channel_name(ch['name']))
+            p.fillRect(0,y,left,rowheight-3,QColor(theme_color('#253b2b',self.theme)))
+            p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(QRectF(12,y+4,left-20,rowheight-8),Qt.AlignVCenter|Qt.TextWordWrap,display_channel_name(ch['name']))
             key=self.mappings.get(ch['id'],ch['tvg_id'])
             entries=self._programmes_by_channel.get(key,[])
             if not entries:
-                p.setPen(QColor('#95a695')); p.drawText(left+15,y+33,'No guide match — choose Map EPG for this channel')
+                p.setPen(QColor(theme_color('#95a695',self.theme))); p.drawText(left+15,y+33,'No guide match — choose Map EPG for this channel')
             for item in entries:
                 x=left+max(0,item['start']-self.start)*scale
                 width=(min(item['end'],self.start+6*3600)-max(item['start'],self.start))*scale
                 rect=QRectF(x+2,y+2,max(0,width-4),rowheight-6)
                 p.fillRect(rect,QColor('#3c5c42' if item['start']<=time.time()<item['end'] else '#283e30'))
-                p.setPen(QColor('#f3ead5')); p.drawText(rect.adjusted(8,2,-8,-2),Qt.AlignVCenter|Qt.TextWordWrap,item['title'])
+                p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(rect.adjusted(8,2,-8,-2),Qt.AlignVCenter|Qt.TextWordWrap,item['title'])
                 self.hitboxes.append((rect,ch,item))
         x=left+(time.time()-self.start)*scale
         if left<=x<=left+6*hour:
-            p.setPen(QColor('#f4af71')); p.drawLine(int(x),40,int(x),self.height())
+            p.setPen(QColor(theme_color('#f4af71',self.theme))); p.drawLine(int(x),40,int(x),self.height())
     def mousePressEvent(self,event):
         # Row identity does not depend on whether this channel has XMLTV data.
         rowheight,_,_,_=self.geometry_units()
@@ -340,6 +346,10 @@ class Settings(QDialog):
         for size in ('Compact','Normal','Large'):self.button_size.addItem(size)
         self.button_size.setCurrentText(self.original.get('button_size','Normal'))
         form.addRow('Button size',self.button_size)
+        self.theme=QComboBox()
+        self.theme.addItems(['Green','Dark','Light'])
+        self.theme.setCurrentText(self.original.get('theme','Green'))
+        form.addRow('Appearance theme',self.theme)
         self.guide_scale=QSpinBox()
         self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
         self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
@@ -412,6 +422,7 @@ class Settings(QDialog):
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
+                    theme=self.theme.currentText(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
