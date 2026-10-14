@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton, QDialog
 from PySide6.QtCore import QTimeZone
 
 from dizytv.desktop import MainWindow, GuideGrid, Settings, TimeSeekSlider
@@ -123,6 +123,44 @@ class DesktopTests(unittest.TestCase):
         grid.set_guide_scale(60)
         self.assertLess(grid.minimumWidth(),default)
         self.assertLess(grid.geometry_units()[0],58)
+
+    def test_complete_iptv_directory_picker_filters_cities_and_imports_only_selected(self):
+        from dizytv.desktop import IPTVDirectoryDialog
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            settings=Settings(store.read(),w)
+            self.assertIsNotNone(settings.findChild(QPushButton,'browseIPTVDirectory'))
+            active=settings.values()['playlist_urls']
+            dialog=IPTVDirectoryDialog(active,settings)
+            self.assertGreaterEqual(dialog.results.count(),1200)
+            dialog.kind_filter.setCurrentText('Cities')
+            dialog.query.setText('sydney australia')
+            self.assertEqual(1,dialog.results.count())
+            item=dialog.results.item(0)
+            self.assertEqual('https://iptv-org.github.io/iptv/cities/ausyd.m3u',
+                             item.data(Qt.UserRole))
+            item.setSelected(True)
+            dialog.add_selected()
+            self.assertEqual(QDialog.Accepted,dialog.result())
+            self.assertEqual(['https://iptv-org.github.io/iptv/cities/ausyd.m3u'],
+                             dialog.added_urls)
+            self.assertEqual(active,settings.values()['playlist_urls'])
+            with patch.object(IPTVDirectoryDialog,'exec',lambda d:(
+                    setattr(d,'added_urls',dialog.added_urls) or QDialog.Accepted)):
+                settings.browse_iptv_directory()
+            self.assertEqual(len(active)+1,len(settings.values()['playlist_urls']))
+            self.assertIn(dialog.added_urls[0],settings.values()['playlist_urls'])
+            world=IPTVDirectoryDialog(active,settings)
+            world.add_worldwide()
+            self.assertEqual(QDialog.Accepted,world.result())
+            self.assertEqual(['https://iptv-org.github.io/iptv/index.m3u'],world.added_urls)
+            crowded=['https://example.com/'+str(i)+'.m3u' for i in range(24)]
+            limited=IPTVDirectoryDialog(crowded,settings)
+            limited.add_worldwide()
+            self.assertEqual(QDialog.Rejected,limited.result())
+            self.assertIn('Remove an active feed',limited.status_label.text())
+            limited.close();world.close();dialog.close();settings.close();w.close()
 
     def test_appearance_picker_and_settings_restyle_guide_without_losing_channels(self):
         from dizytv.desktop import desktop_style,overlay_theme_style
