@@ -61,6 +61,14 @@ class SubtitleContractTests(unittest.TestCase):
         player.video_get_spu_description.return_value=None
         self.assertEqual([],subtitle_tracks(player))
 
+    def test_bare_english_language_codes_are_preferred_over_first_foreign_track(self):
+        for code in ('eng','en','en-US','en_GB','[en]','ENG','English (United Kingdom)'):
+            with self.subTest(label=code):
+                self.assertEqual(4,suggested_subtitle([(1,'French'),(4,code)],'English'))
+        # Do not conflate arbitrary titles containing similar letters.
+        self.assertEqual(1,suggested_subtitle([(1,'Français'),(4,'Engagement')],
+                                              'English'))
+
     def test_external_subtitle_file_must_exist_and_be_bounded(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'captions.srt'
