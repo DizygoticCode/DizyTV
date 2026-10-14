@@ -22,7 +22,7 @@ from .network import download
 from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
-from .engine import ensure_ready, engine_diagnostics
+from .engine import ensure_ready, engine_diagnostics, start_playback_session
 from .timeshift import RollingTimeshift
 from .stream_diagnostics import probe_stream
 from .global_search import GlobalSearch
@@ -1898,19 +1898,23 @@ class MainWindow(QMainWindow):
         if ace_id(ch['stream']):
             if self.engine_task is not None:
                 self.status.setText('Ace Stream engine startup is already in progress…'); return
-            self.status.setText('Checking/starting your installed Ace Stream engine…')
-            task=Task(lambda:ensure_ready(self.state['settings']['engine_url'],
-                                          executable_path=self.state['settings'].get('engine_executable','')))
+            self.status.setText('Connecting to Ace Engine and preparing channel; waiting for available peers…')
+            def prepare():
+                ensure_ready(self.state['settings']['engine_url'],
+                             executable_path=self.state['settings'].get('engine_executable',''))
+                return start_playback_session(ch['stream'],self.state['settings']['engine_url'])
+            task=Task(prepare)
             self.engine_task=task
-            def ready(_):
+            def ready(playback_url):
                 self.engine_task=None
                 if self.selected and self.selected['id']==ch['id']:
-                    self.play_stream(url)
+                    self.play_stream(playback_url)
             def failed(message):
                 self.engine_task=None
-                self.status.setText('Ace Stream unavailable: '+message)
-                self.error('Could not start Ace Stream. '+message+
-                           '\n\nYou can choose the installed engine EXE in Settings.')
+                if self.selected and self.selected['id']==ch['id']:
+                    self.status.setText('Ace playback failed: '+message)
+                    self.error('Ace Stream engine was detected, but could not prepare this channel. '+
+                               message+'\\n\\nTry the channel in the official Ace player to check peers.')
             task.signals.success.connect(ready); task.signals.failure.connect(failed)
             self.pool.start(task)
         else:
