@@ -305,6 +305,37 @@ QSlider#seekBar:disabled::handle:horizontal {{background:{muted};border-color:{r
 """
 
 
+
+def diagnose_video_output(decoded_audio, decoded_video, displayed_pictures,
+                          video_tracks=None, video_size=None):
+    """Classify a playing, audible stream without treating VLC Playing as video proof.
+
+    MediaStats counters are advisory, so these are diagnostic hints, not codec
+    promises. Inspect only after playback has had time to initialise.
+    """
+    if decoded_audio <= 0:
+        return None
+    if video_tracks == 0:
+        return ('Audio is playing but VLC reports no video track. '
+                'This channel source may be audio-only; try another feed.')
+    if displayed_pictures > 0:
+        if video_size == (0, 0):
+            return ('Video frames are being displayed according to VLC, but no '
+                    'video output dimensions are available. Check VLC video '
+                    'surface / Windows hardware acceleration.')
+        return None
+    if decoded_video > 0:
+        return ('Audio and video are decoding, but VLC is displaying no video '
+                'frames. Suspect libVLC video rendering / output / hardware '
+                'acceleration on this PC.')
+    if video_tracks is not None and video_tracks > 0:
+        return ('Audio is playing and a video track exists, but VLC is not '
+                'decoding video frames. Suspect the codec, damaged source, '
+                'or VLC decoder rather than the playback controls.')
+    return ('Audio is playing but VLC has not reported video frames. '
+            'Check source video tracks, libVLC decoding and Windows video output.')
+
+
 def detected_zone():
     value = bytes(QTimeZone.systemTimeZoneId()).decode('utf-8')
     return value if value in available_timezones() else 'UTC'
@@ -811,6 +842,7 @@ class MainWindow(QMainWindow):
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
+        self._video_issue_notified=False
         self.detached_controls=None;self.detached_hide_timer=QTimer(self)
         self.detached_hide_timer.setSingleShot(True)
         self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
@@ -1299,6 +1331,25 @@ class MainWindow(QMainWindow):
                 if button.styleSheet()!=steady_style:button.setStyleSheet(steady_style)
                 if button.toolTip()!=hint:button.setToolTip(hint)
 
+    def video_output_warning(self):
+        """Inspect actual video and audio counters without restarting playback."""
+        if not self.player or not self.playback_started:
+            return None
+        try:
+            import vlc
+            media=self.player.get_media()
+            if media is None:return None
+            stats=vlc.MediaStats()
+            if not media.get_stats(stats):return None
+            tracks=self.player.video_get_track_count()
+            size=self.player.video_get_size(0)
+            if not isinstance(size,tuple) or len(size)!=2:size=None
+            return diagnose_video_output(
+                int(stats.decoded_audio),int(stats.decoded_video),
+                int(stats.displayed_pictures),tracks if tracks>=0 else None,size)
+        except (AttributeError,TypeError,RuntimeError,OSError):
+            return None
+
     def media_activity(self):
         """VLC's decoded picture/audio counters catch freezes with State.Playing.
 
@@ -1391,11 +1442,21 @@ class MainWindow(QMainWindow):
                     self.seek_slider.setValue(max(0,1000-int(self.timeshift_lag/max(1,available)*1000)))
             else:
                 self.seek_notice.setText('DVR window available' if seekable else 'LIVE — no local time-shift enabled')
+        # VLC can be in State.Playing with audible audio and a black video
+        # surface. Inspect decoded/displayed frames separately after startup.
+        if (self.player and self.playback_started and not self._video_issue_notified
+                and time.monotonic()-self.playback_started>=15
+                and str(self.player.get_state()).endswith('.Playing')
+                and (not self.selected or channel_kind(self.selected)!='Radio')):
+            warning=self.video_output_warning()
+            if warning:
+                self._video_issue_notified=True
+                self.status.setText('Video diagnostic: '+warning)
         if self.player and self.playback_started and not self.playback_reported:
             state=str(self.player.get_state())
             if state.endswith('.Playing'):
                 self.playback_reported=True
-                self.status.setText('Now playing inside DizyTV')
+                if not self._video_issue_notified:self.status.setText('Now playing inside DizyTV')
             elif state.endswith('.Error') or state.endswith('.Ended'):
                 self.playback_reported=True
                 from .core import ace_id
@@ -1850,6 +1911,7 @@ class MainWindow(QMainWindow):
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.playback_started=time.monotonic(); self.playback_reported=False
             self._last_media_activity=None
+            self._video_issue_notified=False
             self.last_good_video=time.monotonic()
             self.source_check_serial+=1
             self.pause_button.setText('⏸ Pause')
