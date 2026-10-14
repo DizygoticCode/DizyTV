@@ -663,6 +663,11 @@ class Settings(QDialog):
         self.theme.addItems(['Green','Dark','Light'])
         self.theme.setCurrentText(self.original.get('theme','Green'))
         form.addRow('Appearance theme',self.theme)
+        self.vlc_decoder=QComboBox()
+        self.vlc_decoder.addItems(['Auto','Software'])
+        self.vlc_decoder.setCurrentText(self.original.get('vlc_decoder','Auto'))
+        self.vlc_decoder.setToolTip('If audio plays but video stays black, try Software. Restart DizyTV after changing this setting.')
+        form.addRow('VLC video decoding',self.vlc_decoder)
         self.guide_scale=QSpinBox()
         self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
         self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
@@ -811,7 +816,7 @@ class Settings(QDialog):
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
-                    theme=self.theme.currentText(),
+                    theme=self.theme.currentText(),vlc_decoder=self.vlc_decoder.currentText(),
                     subtitles_enabled=self.cc_enabled.isChecked(),subtitle_language=self.cc_language.currentText(),
                     subtitle_font=self.cc_font.currentText(),subtitle_size=self.cc_size.value(),
                     subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
@@ -1543,7 +1548,10 @@ class MainWindow(QMainWindow):
                 self.sync_subtitles()
                 self.render_guide()
                 self.tick()
-                if self._vlc_subtitle_profile is not None and tuple(vlc_subtitle_options(self.state['settings']))!=self._vlc_subtitle_profile:
+                if (self.player is not None and
+                        before.get('vlc_decoder','Auto')!=updated.get('vlc_decoder','Auto')):
+                    self.status.setText('VLC video decoding saved ('+updated['vlc_decoder']+'). Restart DizyTV to apply; active playback was not interrupted.')
+                elif self._vlc_subtitle_profile is not None and tuple(vlc_subtitle_options(self.state['settings']))!=self._vlc_subtitle_profile:
                     self.status.setText('Subtitle appearance saved; new font, size, colour and position apply after restarting DizyTV.')
 
             except ValueError as exc:self.error(str(exc))
@@ -1884,7 +1892,10 @@ class MainWindow(QMainWindow):
                     os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH',''); self.dll_dir=os.add_dll_directory(str(folder)); break
         import vlc
         self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
-        self.vlc_instance=vlc.Instance('--no-video-title-show',*self._vlc_subtitle_profile)
+        vlc_options=['--no-video-title-show',*self._vlc_subtitle_profile]
+        if self.state['settings'].get('vlc_decoder','Auto')=='Software':
+            vlc_options.append('--avcodec-hw=none')
+        self.vlc_instance=vlc.Instance(*vlc_options)
         self.player=self.vlc_instance.media_player_new()
         self.player.audio_set_volume(self.volume_slider.value())
         win=int(self.video.winId())
