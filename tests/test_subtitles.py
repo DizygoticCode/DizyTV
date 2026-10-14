@@ -48,6 +48,20 @@ class SubtitleContractTests(unittest.TestCase):
                 validate_state(state)
             s[key]=original
 
+    def test_malformed_caption_colours_and_positions_fail_cleanly(self):
+        state=default_state()
+        settings=state['settings']
+        for key in ('subtitle_colour','subtitle_position',
+                    'subtitle_font','subtitle_language'):
+            default=settings[key]
+            for invalid in ([],{},None,7):
+                with self.subTest(key=key,value=invalid):
+                    settings[key]=invalid
+                    with self.assertRaises(ValueError):
+                        validate_state(state)
+            settings[key]=default
+        validate_state(state)
+
     def test_vlc_tracks_handle_bytes_and_missing_subtitles(self):
         player=Mock()
         player.video_get_spu_description.return_value=[
