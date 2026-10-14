@@ -31,6 +31,14 @@ class AcePlaybackTests(unittest.TestCase):
         self.assertTrue(converted.startswith("http://127.0.0.1:6879/"))
         self.assertNotIn("?id=", converted)
 
+    def test_original_ace_hls_output_request_remains_hls(self):
+        original = ENGINE + "/ace/manifest.m3u8?infohash=" + HASH
+        self.assertIn("/ace/manifest.m3u8?infohash=", stream_url(original, ENGINE))
+        with patch.object(engine, "urlopen", return_value=self.session_response(ENGINE + "/ace/m/live.m3u8")) as get:
+            engine.start_playback_session(original, ENGINE)
+        self.assertIn("/ace/manifest.m3u8?", get.call_args.args[0])
+        self.assertIn("format=json", get.call_args.args[0])
+
     def test_acestream_content_id_preserves_existing_behavior(self):
         self.assertEqual(ace_id("acestream://" + HASH), HASH)
         self.assertEqual(stream_url("acestream://" + HASH, ENGINE), ENGINE + "/ace/getstream?id=" + HASH)
