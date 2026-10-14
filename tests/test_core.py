@@ -88,6 +88,38 @@ class CoreTests(unittest.TestCase):
         self.assertEqual('',match_guide(make('BBCOne.uk','BBC One Ⓖ'),{'a'*40:''},names))
         self.assertEqual('ITV1.uk',match_guide(make('ITV1.uk','ITV 1'),{},names))
 
+    def test_safe_compact_epg_matching_recovers_punctuation_and_numbers(self):
+        from dizytv.core import guide_lookup, match_guide
+        names={'itv1':'ITV 1 HD','bbc2':'BBC Two HD','arts':'Arts & Culture',
+               'bbc1l':'BBC One London HD','bbc1s':'BBC One South HD'}
+        lookup=guide_lookup(names)
+        make=lambda name,key='':{'id':'b'*40,'tvg_id':key,'name':name}
+        self.assertEqual('itv1',match_guide(make('ITV-1'),{},names,lookup))
+        self.assertEqual('bbc2',match_guide(make('BBC 2 @HD'),{},names,lookup))
+        self.assertEqual('arts',match_guide(make('Arts and Culture'),{},names,lookup))
+        # Similar regional channels must never be silently conflated.
+        self.assertEqual('',match_guide(make('BBC One'),{},names,lookup))
+        self.assertEqual('bbc1l',match_guide(make('BBC One', 'bbc1l'),{},names,lookup))
+        self.assertEqual('bbc1s',match_guide(make('BBC One'),{'b'*40:'bbc1s'},names,lookup))
+        self.assertEqual('',match_guide(make('ITV-1'),{'b'*40:''},names,lookup))
+
+    def test_epg_compact_ambiguity_falls_back_to_manual_suggestions(self):
+        from dizytv.core import guide_lookup, match_guide, guide_suggestions
+        names={'itv-hyphen':'ITV-1','itv-space':'ITV 1',
+               'london':'BBC One London HD','south':'BBC One South HD',
+               'bbc2':'BBC Two HD'}
+        lookup=guide_lookup(names)
+        channel={'id':'a'*40,'name':'ITV1','tvg_id':''}
+        self.assertEqual('',match_guide(channel,{},names,lookup))
+        proposals=guide_suggestions(channel,names)
+        self.assertEqual({'itv-hyphen','itv-space'},set(key for key,_ in proposals[:2]))
+        bbc={'id':'b'*40,'name':'BBC One','tvg_id':''}
+        self.assertEqual('',match_guide(bbc,{},names,lookup))
+        suggested=dict(guide_suggestions(bbc,names))
+        self.assertIn('london',suggested)
+        self.assertIn('south',suggested)
+        self.assertEqual([],guide_suggestions(bbc,names,0))
+
     def test_radio_from_uk_playlist_ids_and_names(self):
         from dizytv.core import channel_kind,channel_section,parse_playlist
         m3u=('#EXTM3U\n'
