@@ -1,0 +1,21 @@
+DizyTV 0.1.11 alpha - Included Windows Components
+
+The installer ALWAYS copies these components into DizyTV's private
+application folder, regardless of whether Windows already has a separate
+installation. You do NOT need to download or install these yourself:
+
+  - Vosk 0.3.40 offline speech-recognition runtime (Apache 2.0)
+  - Vosk Small English US 0.15 language model (Apache 2.0)
+  - FFmpeg 8.1.2 essentials executable (GPL-licensed build)
+
+These are used only when you opt into "Generate live subtitles"
+from DizyTV's CC Subtitles menu. They do not run during installation.
+FFmpeg is not added to the system PATH and does not modify existing
+FFmpeg installations.
+
+Still separate:
+  - VLC 3 x64 for the Windows playback engine
+  - Ace Stream engine for the optional Ace Stream channels
+
+DizyTV cannot bypass broadcaster DRM or geographical access restrictions.
+See THIRD-PARTY-NOTICES.md for source links, licence terms and notices.
