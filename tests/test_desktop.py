@@ -13,6 +13,14 @@ from dizytv.storage import Store
 
 
 class DesktopTests(unittest.TestCase):
+    def test_guide_scale_reduces_geometry(self):
+        grid=GuideGrid()
+        grid.set_data([{'id':'a','name':'BBC One','tvg_id':'bbc'}],[],{},'auto',0)
+        default=grid.minimumWidth()
+        grid.set_guide_scale(60)
+        self.assertLess(grid.minimumWidth(),default)
+        self.assertLess(grid.geometry_units()[0],58)
+
     def test_compact_scaling_and_smaller_resizable_window(self):
         from dizytv.desktop import desktop_style
         with tempfile.TemporaryDirectory() as folder:
@@ -22,6 +30,8 @@ class DesktopTests(unittest.TestCase):
             s.button_size.setCurrentText('Compact')
             self.assertEqual(80,s.values()['ui_scale'])
             self.assertEqual('Compact',s.values()['button_size'])
+            s.guide_scale.setValue(65)
+            self.assertEqual(65,s.values()['guide_scale'])
             self.assertIn('font-size:11px;',desktop_style(80,'Compact'))
             window.resize(710,480)
             window.show()

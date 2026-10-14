@@ -89,15 +89,28 @@ class GuideGrid(QWidget):
     channel_record_requested = Signal(object)
     def __init__(self):
         super().__init__(); self.rows=[]; self.programmes=[]; self.hitboxes=[]; self.zone='auto'; self.start=0
+        self.guide_scale=100
+    def geometry_units(self):
+        ratio=max(55,min(130,self.guide_scale))/100.0
+        return (max(25,int(58*ratio)),max(125,int(210*ratio)),
+                max(86,int(180*ratio)),max(8,int(11*ratio)))
+    def set_guide_scale(self,value):
+        self.guide_scale=max(55,min(130,int(value)))
+        self.update_dimensions()
+    def update_dimensions(self):
+        row,left,hour,font=self.geometry_units()
+        self.setMinimumSize(left+6*hour+30,max(230,48+len(self.rows)*row+12))
+        self.update()
     def set_data(self,channels,programmes,mappings,zone,start):
         self.rows = channels[:250]; self.programmes = programmes; self.mappings=mappings
         self.zone=zone; self.start=start
-        self.setMinimumSize(1350,max(420,60+len(self.rows)*58)); self.update()
+        self.update_dimensions()
     def paintEvent(self,event):
         p=QPainter(self); p.fillRect(self.rect(),QColor('#15221a')); self.hitboxes=[]
-        p.setFont(QFont('Sans Serif',11)); rowheight=58; left=210; scale=180/3600
+        rowheight,left,hour,font=self.geometry_units()
+        p.setFont(QFont('Sans Serif',font)); scale=hour/3600
         for i in range(7):
-            x=left+i*180
+            x=left+i*hour
             p.setPen(QColor('#47654b')); p.drawLine(x,0,x,self.height())
             p.setPen(QColor('#f3ead5')); p.drawText(x+5,30,format_time(self.start+i*3600,self.zone,False,detected_zone()))
         by_channel={}
@@ -120,11 +133,12 @@ class GuideGrid(QWidget):
                 p.setPen(QColor('#f3ead5')); p.drawText(rect.adjusted(8,2,-8,-2),Qt.AlignVCenter|Qt.TextWordWrap,item['title'])
                 self.hitboxes.append((rect,ch,item))
         x=left+(time.time()-self.start)*scale
-        if left<=x<=left+1080:
+        if left<=x<=left+6*hour:
             p.setPen(QColor('#f4af71')); p.drawLine(int(x),40,int(x),self.height())
     def mousePressEvent(self,event):
         # Row identity does not depend on whether this channel has XMLTV data.
-        row=int((event.position().y()-48)//58)
+        rowheight,_,_,_=self.geometry_units()
+        row=int((event.position().y()-48)//rowheight)
         if not (0<=row<len(self.rows)):
             return super().mousePressEvent(event)
         channel=self.rows[row]
@@ -185,6 +199,10 @@ class Settings(QDialog):
         for size in ('Compact','Normal','Large'):self.button_size.addItem(size)
         self.button_size.setCurrentText(self.original.get('button_size','Normal'))
         form.addRow('Button size',self.button_size)
+        self.guide_scale=QSpinBox()
+        self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
+        self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
+        form.addRow('TV guide density / size',self.guide_scale)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
@@ -253,7 +271,7 @@ class Settings(QDialog):
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
-                    engine_executable=self.engine_path.text())
+                    guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
 class MainWindow(QMainWindow):
@@ -292,14 +310,28 @@ class MainWindow(QMainWindow):
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
         sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Search channels or groups'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
-        self.country_filter=QComboBox(); self.genre_filter=QComboBox(); self.kind_filter=QComboBox(); self.source_filter=QComboBox()
-        self.source_filter.addItem('All playlists','')
-        self.source_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.source_filter)
-        for widget,label in ((self.country_filter,'All countries'),(self.genre_filter,'All genres'),(self.kind_filter,'All stream types')):
-
-            widget.addItem(label,''); widget.currentIndexChanged.connect(self.render_channels); side.addWidget(widget)
-        self.section_filter=QComboBox(); self.section_filter.addItem('All categories','')
-        self.section_filter.currentIndexChanged.connect(self.render_channels); side.addWidget(self.section_filter)
+        self.country_filter=QComboBox(); self.genre_filter=QComboBox()
+        self.kind_filter=QComboBox(); self.source_filter=QComboBox()
+        self.section_filter=QComboBox()
+        filters=QWidget(); filter_layout=QVBoxLayout(filters)
+        filter_layout.setContentsMargins(0,0,0,0);filter_layout.setSpacing(3)
+        for widget,title,default in (
+            (self.source_filter,'Playlist','All playlists'),
+            (self.country_filter,'Country','All countries'),
+            (self.section_filter,'Category','All categories'),
+            (self.genre_filter,'EPG genre','All genres'),
+            (self.kind_filter,'TV / Radio / stream','All stream types')):
+            label=QLabel(title)
+            label.setStyleSheet('color:#a8c5ad')
+            filter_layout.addWidget(label)
+            widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            widget.setMinimumContentsLength(8)
+            widget.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
+            widget.setMinimumWidth(0)
+            widget.addItem(default,'')
+            widget.currentIndexChanged.connect(self.render_channels)
+            filter_layout.addWidget(widget)
+        side.addWidget(filters)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
         self.country_tree.setMaximumHeight(240)
@@ -598,6 +630,7 @@ class MainWindow(QMainWindow):
                 if genre and ch.get('genre','Unspecified')!=genre and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
                     continue
                 programmes.append(p)
+        self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone()))
     def move_guide(self,delta):
