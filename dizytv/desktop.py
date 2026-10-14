@@ -93,6 +93,7 @@ THEME_COLORS = {
         '#62adca':'#759dbf',
         '#a8c5ad':'#c1cada',
         '#15221a':'#151922',
+        '#253b2b':'#283448',
         '#47654b':'#465267',
         '#95a695':'#bbc1cd',
         '#3c5c42':'#354966',
@@ -135,6 +136,7 @@ THEME_COLORS = {
         '#62adca':'#3480a3',
         '#a8c5ad':'#51657e',
         '#15221a':'#f1f5fb',
+        '#253b2b':'#dde7f4',
         '#47654b':'#ccd7e5',
         '#95a695':'#526078',
         '#3c5c42':'#d7e7fb',
@@ -305,7 +307,8 @@ class GuideGrid(QWidget):
                 x=left+max(0,item['start']-self.start)*scale
                 width=(min(item['end'],self.start+6*3600)-max(item['start'],self.start))*scale
                 rect=QRectF(x+2,y+2,max(0,width-4),rowheight-6)
-                p.fillRect(rect,QColor('#3c5c42' if item['start']<=time.time()<item['end'] else '#283e30'))
+                fill='#3c5c42' if item['start']<=time.time()<item['end'] else '#283e30'
+                p.fillRect(rect,QColor(theme_color(fill,self.theme)))
                 p.setPen(QColor(theme_color('#f3ead5',self.theme))); p.drawText(rect.adjusted(8,2,-8,-2),Qt.AlignVCenter|Qt.TextWordWrap,item['title'])
                 self.hitboxes.append((rect,ch,item))
         x=left+(time.time()-self.start)*scale
