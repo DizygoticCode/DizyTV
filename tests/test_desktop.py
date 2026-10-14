@@ -336,6 +336,40 @@ class DesktopTests(unittest.TestCase):
             w.timeshift=None;w.player=None
             w.close()
 
+    def test_opt_in_offline_caption_window_and_worker_are_stopped_on_channel_change(self):
+        from unittest.mock import Mock, patch
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            w.show()
+            settings=Settings(store.read(),w)
+            self.assertIsNotNone(settings.auto_model_path)
+            self.assertIsNotNone(settings.auto_ffmpeg_path)
+            w.player=Mock()
+            w.playback_started=1
+            w._playback_url='https://example.com/authorized-live.m3u8'
+            fake=Mock()
+            with patch('dizytv.desktop.verify_caption_engine',
+                       return_value=('ffmpeg','C:/models/vosk')), \
+                 patch('dizytv.desktop.LocalCaptionWorker',return_value=fake):
+                w.toggle_auto_captions()
+                fake.start.assert_called_once()
+                self.assertIs(w._auto_caption_worker,fake)
+                serial=w._auto_caption_seq
+                w.receive_auto_caption(serial,'Some example spoken words')
+                self.assertEqual('Some example spoken words',w._auto_caption_label.text())
+                self.assertEqual(Qt.PlainText,w._auto_caption_label.textFormat())
+                self.assertEqual('autoCaptionOverlay',w._auto_caption_overlay.objectName())
+                w.toggle_auto_captions()
+                fake.stop.assert_called_once()
+                self.assertIsNone(w._auto_caption_overlay)
+                self.assertIsNone(w._auto_caption_worker)
+            # Late transcription messages cannot resurrect an overlay.
+            w.receive_auto_caption(serial,'stale result')
+            self.assertIsNone(w._auto_caption_overlay)
+            w.player=None
+            settings.close();w.close()
+
     def test_vlc_closed_captions_track_lifecycle_and_preferences(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
