@@ -5,7 +5,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -40,9 +43,14 @@ class MainActivity:Activity() {
     private lateinit var brandRow:LinearLayout; private lateinit var mainNav:HorizontalScrollView
     private var cinemaMode=false; private var screenMode=false
     private var seekBar:SeekBar?=null; private var seekInfo:TextView?=null
+    private var liveIndicator:TextView?=null
+    private var liveAction:Button?=null
+    private var liveDotBright=false
+    private val navigationButtons=mutableMapOf<String,Button>()
     private val playbackTicker=object:Runnable {
         override fun run() {
             if(page=="Live") {
+                refreshLiveIndicator()
                 val length=player.length
                 val current=player.time
                 val cached=timeshift
@@ -88,21 +96,70 @@ class MainActivity:Activity() {
     private val executor=Executors.newSingleThreadExecutor(); private val handler=Handler(Looper.getMainLooper())
     private val ticker=object:Runnable { override fun run() { val changed=updateZone(); if(page=="Recordings" || changed && page=="Guide") render(); handler.postDelayed(this,5000) } }
     private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
-    private fun text(value:String,size:Float=15f)=TextView(this).apply { text=value; textSize=size; setTextColor(Color.rgb(243,234,213)); setPadding(dp(10),dp(8),dp(10),dp(8)) }
-    private fun button(label:String,action:()->Unit)=Button(this).apply { text=label; setOnClickListener { attempt(action) } }
+    // Modern streaming-player palette: rounded controls without stock grey blocks.
+    private val bg=Color.rgb(15,22,18)
+    private val panel=Color.rgb(31,47,37)
+    private val edge=Color.rgb(56,83,67)
+    private val ink=Color.rgb(232,245,235)
+    private val muted=Color.rgb(163,191,170)
+    private val accent=Color.rgb(92,220,151)
+    private fun rounded(fill:Int,stroke:Int=edge,radius:Int=10):GradientDrawable =
+        GradientDrawable().apply {
+            shape=GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius=dp(radius).toFloat()
+            setStroke(dp(1),stroke)
+        }
+    private fun text(value:String,size:Float=15f)=TextView(this).apply {
+        text=value; textSize=size;setTextColor(ink)
+        setPadding(dp(9),dp(7),dp(9),dp(7))
+    }
+    private fun button(label:String,action:()->Unit)=Button(this).apply {
+        text=label;isAllCaps=false
+        textSize=13f;setTextColor(ink);typeface=Typeface.DEFAULT_BOLD
+        backgroundTintList=null
+        background=rounded(panel)
+        elevation=0f;minimumHeight=dp(40);minimumWidth=dp(48)
+        setPadding(dp(12),dp(6),dp(12),dp(6))
+        setOnClickListener { attempt(action) }
+    }
+    private fun styleSlider(seek:SeekBar,tint:Int) {
+        seek.progressTintList=ColorStateList.valueOf(tint)
+        seek.thumbTintList=ColorStateList.valueOf(tint)
+        seek.progressBackgroundTintList=ColorStateList.valueOf(edge)
+        seek.setBackgroundColor(Color.TRANSPARENT)
+        seek.setPadding(dp(8),0,dp(8),0)
+    }
+    private fun refreshLiveIndicator() {
+        val dot=liveIndicator ?:return
+        val playing=player.isPlaying
+        val buffering=selected!=null && !playing
+        val color=if(playing) accent else if(buffering) Color.rgb(242,180,80) else Color.rgb(242,106,96)
+        liveDotBright=!liveDotBright
+        dot.setTextColor(if(playing && !liveDotBright) Color.rgb(38,117,72) else color)
+        val action=liveAction
+        if(action!=null && action.tag!=color) {
+            action.tag=color
+            action.setTextColor(color)
+            action.background=rounded(panel,color)
+        }
+    }
     private fun row()=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
     private fun attempt(action:()->Unit) { try { action() } catch(e:Exception) { error(e.message?:e.javaClass.simpleName) } }
     private fun error(message:String) { status.text=message; AlertDialog.Builder(this).setTitle("DizyTV").setMessage(message).setPositiveButton("OK",null).show() }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState); store=DeviceStore(this); lib=LibVLC(this,arrayListOf("--no-video-title-show","--network-caching=1500")); player=MediaPlayer(lib)
-        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(21,32,25)); setPadding(dp(8),dp(8),dp(8),dp(8)) }
-        val brand=row(); brandRow=brand; val image=ImageView(this); image.setImageResource(R.drawable.dizytv_logo); brand.addView(image,LinearLayout.LayoutParams(dp(64),dp(64))); brand.addView(text("DizyTV",28f)); root.addView(brand)
+        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(dp(10),dp(8),dp(10),dp(8)) }
+        val brand=row();brandRow=brand;brand.gravity=android.view.Gravity.CENTER_VERTICAL;val image=ImageView(this);image.setImageResource(R.drawable.dizytv_logo);brand.addView(image,LinearLayout.LayoutParams(dp(54),dp(54)));brand.addView(text("DizyTV",24f).apply { typeface=Typeface.DEFAULT_BOLD });root.addView(brand)
         zoneLabel=text(""); root.addView(zoneLabel)
         val nav=HorizontalScrollView(this); mainNav=nav; val buttons=row()
-        for(name in listOf("Channels","Live","Guide","Recordings","Backup","Settings")) buttons.addView(button(name) { page=name; render() })
+        for(name in listOf("Channels","Live","Guide","Recordings","Backup","Settings")) {
+            val action=button(name) { page=name;render() }
+            navigationButtons[name]=action;buttons.addView(action)
+        }
         nav.addView(buttons); root.addView(nav)
         body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; root.addView(body,LinearLayout.LayoutParams(-1,0,1f))
-        status=text("Native alpha • Install/open Ace Stream, configure XMLTV and choose recording storage",12f); root.addView(status); setContentView(root)
+        status=text("Ready • Choose a channel, or configure sources in Settings",12f).apply {setTextColor(muted)};root.addView(status);setContentView(root)
         handler.post(playbackTicker)
         runCatching { val file=File(filesDir,"guide.json"); if(file.exists() && file.length()<=100*1024*1024) guide=JSONObject(file.readText()) }
         render(); if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),20)
@@ -170,7 +227,12 @@ class MainActivity:Activity() {
             player.stop()
             clearTimeshift()
         }
-        player.detachViews(); video=null; seekBar=null; seekInfo=null; body.removeAllViews(); updateZone()
+        player.detachViews();video=null;seekBar=null;seekInfo=null;liveIndicator=null;liveAction=null;body.removeAllViews();updateZone()
+        navigationButtons.forEach { (name,action)->
+            val chosen=name==page
+            action.background=rounded(if(chosen) edge else panel,if(chosen) accent else edge)
+            action.setTextColor(if(chosen) accent else ink)
+        }
         brandRow.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         mainNav.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         zoneLabel.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
@@ -266,7 +328,11 @@ class MainActivity:Activity() {
         controls.addView(button("▶ Play") { play() })
         controls.addView(button("⏯ Pause") { pauseLive() })
         controls.addView(button("↶ 30s") { rewindLive() })
-        controls.addView(button("● LIVE") { jumpLive() })
+        liveAction=button("LIVE") { jumpLive() }
+        controls.addView(liveAction)
+        liveIndicator=text("●",20f).apply { setTextColor(accent);setPadding(dp(3),dp(6),dp(9),dp(6)) }
+        controls.addView(liveIndicator)
+        refreshLiveIndicator()
         body.addView(HorizontalScrollView(this).apply { addView(controls) })
         val navigation=row()
         navigation.addView(button("☷ Guide") { quickGuide() })
@@ -275,7 +341,7 @@ class MainActivity:Activity() {
         navigation.addView(button(if(screenMode) "Exit Screen" else "Full Screen") { setTvMode(!screenMode,!screenMode) })
         body.addView(HorizontalScrollView(this).apply { addView(navigation) })
         seekInfo=text("LIVE • DVR availability depends on the channel",12f);body.addView(seekInfo)
-        val scrub=SeekBar(this); scrub.max=1000; seekBar=scrub
+        val scrub=SeekBar(this);scrub.max=1000;seekBar=scrub;styleSlider(scrub,accent)
         scrub.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seekBar:SeekBar?){}
             override fun onStopTrackingTouch(seekBar:SeekBar?) {
@@ -294,7 +360,7 @@ class MainActivity:Activity() {
         body.addView(scrub)
         val volumeBar=row()
         volumeBar.addView(text("Volume",12f))
-        val volume=SeekBar(this);volume.max=100;volume.progress=player.volume.coerceIn(0,100)
+        val volume=SeekBar(this);volume.max=100;volume.progress=player.volume.coerceIn(0,100);styleSlider(volume,Color.rgb(106,196,225))
         volume.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seekBar:SeekBar?){}
             override fun onStopTrackingTouch(seekBar:SeekBar?){}

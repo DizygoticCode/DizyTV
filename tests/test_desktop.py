@@ -221,6 +221,41 @@ class DesktopTests(unittest.TestCase):
             self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
             s.close();window.close()
 
+    def test_modern_streaming_skin_removes_slider_backgrounds_and_keeps_small_window(self):
+        from dizytv.desktop import desktop_style
+        for theme in ('Green','Dark','Light'):
+            css=desktop_style(80,'Compact',theme)
+            self.assertIn('QSlider#seekBar,QSlider#volumeBar {background:transparent',css)
+            self.assertIn('QTabBar::tab:selected',css)
+            self.assertIn('QWidget#appSidebar',css)
+            self.assertIn('QPushButton#globalSearch',css)
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            self.assertEqual('appSidebar',w.sidebar.objectName())
+            self.assertEqual('globalSearch',w.global_search_button.objectName())
+            self.assertEqual('playbackControlsRow',w.controls_scroll.widget().objectName())
+            self.assertEqual('seekBar',w.seek_slider.objectName())
+            self.assertEqual('volumeBar',w.volume_slider.objectName())
+            settings=Settings(w.state,w)
+            self.assertEqual('Auto',settings.vlc_decoder.currentText())
+            settings.vlc_decoder.setCurrentText('Software')
+            self.assertEqual('Software',settings.values()['vlc_decoder'])
+            settings.close()
+            w.resize(640,460)
+            w.show()
+            self.app.processEvents()
+            self.assertLessEqual(w.minimumWidth(),480)
+            w.close()
+
+    def test_audio_with_black_video_distinguishes_decoder_and_vlc_video_output(self):
+        from dizytv.desktop import diagnose_video_output
+        self.assertIsNone(diagnose_video_output(0,0,0,0))
+        self.assertIsNone(diagnose_video_output(24,32,28,1,(1920,1080)))
+        self.assertIn('no video track',diagnose_video_output(24,0,0,0))
+        self.assertIn('video are decoding',diagnose_video_output(24,45,0,1,(1920,1080)))
+        self.assertIn('not decoding',diagnose_video_output(24,0,0,1))
+        self.assertIn('surface',diagnose_video_output(24,45,32,1,(0,0)))
+
     def test_live_light_reports_green_amber_red_and_follows_rewind(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
@@ -238,12 +273,43 @@ class DesktopTests(unittest.TestCase):
             w.timeshift=Mock()
             self.assertEqual('buffering',w.playback_light_state())
             w.timeshift=None
+            from PySide6.QtWidgets import QLabel
+            w.popout_live_button=QPushButton('LIVE',w)
+            w.popout_live_light=QLabel('●',w)
             w.pulse_live_light()
             self.assertIn('3cdb80',w.live_button.styleSheet())
+            main_button=w.live_button.styleSheet()
+            popout_button=w.popout_live_button.styleSheet()
+            first_dot=w.live_light.styleSheet()
+            first_popout_dot=w.popout_live_light.styleSheet()
+            w.pulse_live_light()
+            # Neither LIVE button changes (or repaints), but each green dot pulses.
+            self.assertEqual(main_button,w.live_button.styleSheet())
+            self.assertEqual(popout_button,w.popout_live_button.styleSheet())
+            self.assertNotEqual(first_dot,w.live_light.styleSheet())
+            self.assertNotEqual(first_popout_dot,w.popout_live_light.styleSheet())
+            self.assertEqual(w.live_light.styleSheet(),w.popout_live_light.styleSheet())
             w.timeshift_lag=30
             self.assertEqual('buffering',w.playback_light_state())
+            w.pulse_live_light()
+            self.assertIn('#f2b450',w.live_button.styleSheet())
+            solid_amber=w.live_light.styleSheet()
+            solid_button=w.live_button.styleSheet()
+            w.pulse_live_light()
+            self.assertEqual(solid_amber,w.live_light.styleSheet())
+            self.assertEqual(solid_button,w.live_button.styleSheet())
+            self.assertEqual(solid_amber,w.popout_live_light.styleSheet())
             w.player.get_state.return_value='State.Error'
             self.assertEqual('stopped',w.playback_light_state())
+            w.pulse_live_light()
+            self.assertIn('#f26a60',w.live_button.styleSheet())
+            solid_red=w.live_light.styleSheet()
+            w.pulse_live_light()
+            self.assertEqual(solid_red,w.live_light.styleSheet())
+            self.assertEqual(solid_red,w.popout_live_light.styleSheet())
+            # No duplicated glowing dot inside pop-out's LIVE button.
+            self.assertEqual('LIVE',w.popout_live_button.text())
+            w.popout_live_light=None;w.popout_live_button=None
             w.player=None
             w.close()
 

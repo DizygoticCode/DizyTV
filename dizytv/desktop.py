@@ -51,14 +51,35 @@ QPushButton#tvPrimary { background:#397f51; border:1px solid #64b679; color:whit
 QPushButton#tvPrimary:hover { background:#4b9963; }
 QPushButton#tvDanger { background:#69352f; border:1px solid #b26354; }
 QPushButton#tvLive { background:#713b38; border:1px solid #cc7771; font-weight:700; color:#ffe2d4; }
-QSlider::groove:horizontal { height:8px; border:1px solid #355c48; background:#21392e; border-radius:4px; }
-QSlider::sub-page:horizontal { background:#61bd7c; border-radius:4px; }
-QSlider::handle:horizontal { width:16px; margin:-6px 0; border:2px solid #d9f6dd; background:#72df99; border-radius:8px; }
-QSlider:disabled::handle:horizontal { background:#6b746d; border-color:#99a69d; }
-QSlider#seekBar::groove:horizontal { height:10px; }
-QSlider#seekBar::handle:horizontal { width:20px; margin:-7px 0; border-radius:10px; }
-QSlider#volumeBar::sub-page:horizontal { background:#62adca; }
+/* Compact media-player rails: never paint the slider's full rectangular widget. */
+QSlider#seekBar, QSlider#volumeBar { background:transparent; border:0; padding:0; margin:0; }
+QSlider#seekBar::groove:horizontal, QSlider#volumeBar::groove:horizontal {
+    height:4px; border:0; border-radius:2px; background:#23352c;
+}
+QSlider#seekBar::add-page:horizontal, QSlider#volumeBar::add-page:horizontal {
+    background:#23352c; border:0; border-radius:2px;
+}
+QSlider#seekBar::sub-page:horizontal {
+    background:#63d89b; border:0; border-radius:2px;
+}
+QSlider#volumeBar::sub-page:horizontal {
+    background:#68bde0; border:0; border-radius:2px;
+}
+QSlider#seekBar::handle:horizontal, QSlider#volumeBar::handle:horizontal {
+    background:#dbffeb; border:2px solid #3b9364; border-radius:7px;
+    width:14px; margin:-7px 0;
+}
+QSlider#seekBar::handle:horizontal:hover, QSlider#volumeBar::handle:horizontal:hover {
+    background:#ffffff; border-color:#63d89b;
+}
+QSlider#seekBar:disabled::sub-page:horizontal, QSlider#volumeBar:disabled::sub-page:horizontal {
+    background:#53655b;
+}
+QSlider#seekBar:disabled::handle:horizontal, QSlider#volumeBar:disabled::handle:horizontal {
+    background:#9ca9a1; border-color:#637267;
+}
 QScrollArea#toolbarScroll, QScrollArea#playerControlScroll { border:0; background:transparent; }
+QWidget#playbackControlsRow { background:transparent; border:0; }
 '''
 
 
@@ -95,6 +116,14 @@ THEME_COLORS = {
         '#6b746d':'#747983',
         '#99a69d':'#a7afbc',
         '#62adca':'#759dbf',
+        '#23352c':'#323b4a',
+        '#63d89b':'#79aeff',
+        '#68bde0':'#85c7f5',
+        '#dbffeb':'#edf5ff',
+        '#3b9364':'#5e8dce',
+        '#53655b':'#687487',
+        '#9ca9a1':'#abb6c5',
+        '#637267':'#748299',
         '#a8c5ad':'#c1cada',
         '#15221a':'#151922',
         '#253b2b':'#283448',
@@ -138,6 +167,14 @@ THEME_COLORS = {
         '#6b746d':'#bcc4cf',
         '#99a69d':'#919cae',
         '#62adca':'#3480a3',
+        '#23352c':'#d7e2ef',
+        '#63d89b':'#2a76c7',
+        '#68bde0':'#3d93bf',
+        '#dbffeb':'#ffffff',
+        '#3b9364':'#2a76c7',
+        '#53655b':'#bac4d0',
+        '#9ca9a1':'#bcc8d5',
+        '#637267':'#9dacbe',
         '#a8c5ad':'#51657e',
         '#15221a':'#f1f5fb',
         '#253b2b':'#dde7f4',
@@ -195,7 +232,108 @@ def desktop_style(scale=100, button_size='Normal', theme='Green'):
                .replace('padding:9px 16px;',f'padding:{round(8*scale)}px {round(14*scale)}px;')
                .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
     colors=THEME_COLORS.get(theme, {})
-    return re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
+    converted=re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
+    return converted+'\n'+modern_desktop_style(theme)
+
+
+
+def modern_desktop_style(theme='Green'):
+    """Kodi/IPTV-style surfaces shared by desktop Windows and macOS."""
+    palettes={
+        'Green': ('#101712','#19251d','#26362b','#47654b','#f1f7f1','#a8c4ae','#65dca0','#327b50','#13221a'),
+        'Dark': ('#121821','#1b2531','#293544','#50627a','#f1f5fb','#a8bad0','#84b4fa','#456daa','#192231'),
+        'Light': ('#f4f7fb','#ffffff','#e9f0f9','#bdcad9','#23364b','#647b91','#2678cb','#225b9b','#eef3fa'),
+    }
+    bg,surface,raised,border,fg,muted,accent,primary,input_bg=palettes.get(theme,palettes['Green'])
+    return f"""
+QMainWindow, QDialog, QWidget#appShell {{ background:{bg}; }}
+QWidget#appHeader, QWidget#livePage, QWidget#playbackControlsRow {{ background:transparent; border:0; }}
+QWidget#appSidebar {{ background:{surface};border:1px solid {border};border-radius:12px; }}
+QLabel#brand {{ color:{fg};font-size:24px;font-weight:800; }}
+QLabel#channelHeading {{color:{fg};font-weight:700;font-size:16px;}}
+QLabel#filterTitle, QLabel#timezoneLabel, QLabel#playbackHint, QLabel#appStatus {{
+    color:{muted};font-size:12px;
+}}
+QPushButton {{ background:{raised};color:{fg};border:1px solid {border};
+    border-radius:9px;padding:8px 13px;font-weight:600; }}
+QPushButton:hover {{background:{border};border-color:{accent};}}
+QPushButton:pressed {{background:{primary};color:white;}}
+QPushButton:disabled {{color:{muted};border-color:{raised};}}
+QPushButton#tvPrimary {{background:{primary};border-color:{primary};color:white;font-weight:700;}}
+QPushButton#tvDanger {{background:{raised};border-color:{border};}}
+QPushButton#globalSearch {{background:{input_bg};color:{muted};border-radius:10px;
+    border:1px solid {border};text-align:left;padding:10px 14px;}}
+QPushButton#globalSearch:hover {{border-color:{accent};color:{fg};}}
+QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+    background:{input_bg};color:{fg};border:1px solid {border};border-radius:8px;
+    padding:7px 9px;selection-background-color:{primary};
+}}
+QLineEdit:focus,QPlainTextEdit:focus,QComboBox:focus {{border-color:{accent};}}
+QComboBox::drop-down {{border:0;width:24px;}}
+QTabWidget::pane {{background:{surface};border:1px solid {border};border-radius:11px;top:0;}}
+QTabBar::tab {{background:transparent;color:{muted};border:0;
+    border-bottom:2px solid transparent;border-radius:0;padding:11px 16px;margin-right:4px;}}
+QTabBar::tab:hover {{background:{raised};color:{fg};}}
+QTabBar::tab:selected {{background:{surface};color:{accent};
+    border-bottom:2px solid {accent};font-weight:700;}}
+QListWidget,QTreeWidget,QTableWidget {{background:{surface};color:{fg};
+    border:1px solid {border};border-radius:8px;alternate-background-color:{input_bg};}}
+QListWidget::item {{padding:10px 9px;border-bottom:1px solid {raised};}}
+QListWidget::item:selected,QTreeWidget::item:selected {{background:{raised};color:{accent};}}
+QListWidget::item:hover,QTreeWidget::item:hover {{background:{raised};}}
+QHeaderView::section {{background:{raised};color:{fg};padding:9px;border:0;border-bottom:1px solid {border};}}
+QScrollArea#toolbarScroll,QScrollArea#playerControlScroll {{background:transparent;border:0;}}
+QScrollArea#toolbarScroll > QWidget > QWidget,QScrollArea#playerControlScroll > QWidget > QWidget {{
+    background:transparent;border:0;
+}}
+QScrollBar:vertical {{width:9px;background:transparent;}}
+QScrollBar:horizontal {{height:9px;background:transparent;}}
+QScrollBar::handle {{background:{border};border-radius:4px;min-height:25px;min-width:25px;}}
+QScrollBar::handle:hover {{background:{muted};}}
+QScrollBar::add-line,QScrollBar::sub-line {{width:0;height:0;border:0;}}
+QScrollBar::add-page,QScrollBar::sub-page {{background:transparent;}}
+QSlider#seekBar,QSlider#volumeBar {{background:transparent;border:0;padding:0;margin:0;}}
+QSlider#seekBar::groove:horizontal,QSlider#volumeBar::groove:horizontal {{
+    background:{raised};border:0;border-radius:2px;height:4px;}}
+QSlider#seekBar::add-page:horizontal,QSlider#volumeBar::add-page:horizontal {{
+    background:{raised};border:0;border-radius:2px;}}
+QSlider#seekBar::sub-page:horizontal {{background:{accent};border:0;border-radius:2px;}}
+QSlider#volumeBar::sub-page:horizontal {{background:#69bbd6;border:0;border-radius:2px;}}
+QSlider#seekBar::handle:horizontal,QSlider#volumeBar::handle:horizontal {{
+    background:{fg};border:2px solid {accent};width:14px;border-radius:7px;margin:-7px 0;}}
+QSlider#seekBar:disabled::handle:horizontal {{background:{muted};border-color:{raised};}}
+"""
+
+
+
+def diagnose_video_output(decoded_audio, decoded_video, displayed_pictures,
+                          video_tracks=None, video_size=None):
+    """Classify a playing, audible stream without treating VLC Playing as video proof.
+
+    MediaStats counters are advisory, so these are diagnostic hints, not codec
+    promises. Inspect only after playback has had time to initialise.
+    """
+    if decoded_audio <= 0:
+        return None
+    if video_tracks == 0:
+        return ('Audio is playing but VLC reports no video track. '
+                'This channel source may be audio-only; try another feed.')
+    if displayed_pictures > 0:
+        if video_size == (0, 0):
+            return ('Video frames are being displayed according to VLC, but no '
+                    'video output dimensions are available. Check VLC video '
+                    'surface / Windows hardware acceleration.')
+        return None
+    if decoded_video > 0:
+        return ('Audio and video are decoding, but VLC is displaying no video '
+                'frames. Suspect libVLC video rendering / output / hardware '
+                'acceleration on this PC.')
+    if video_tracks is not None and video_tracks > 0:
+        return ('Audio is playing and a video track exists, but VLC is not '
+                'decoding video frames. Suspect the codec, damaged source, '
+                'or VLC decoder rather than the playback controls.')
+    return ('Audio is playing but VLC has not reported video frames. '
+            'Check source video tracks, libVLC decoding and Windows video output.')
 
 
 def detected_zone():
@@ -525,6 +663,11 @@ class Settings(QDialog):
         self.theme.addItems(['Green','Dark','Light'])
         self.theme.setCurrentText(self.original.get('theme','Green'))
         form.addRow('Appearance theme',self.theme)
+        self.vlc_decoder=QComboBox()
+        self.vlc_decoder.addItems(['Auto','Software'])
+        self.vlc_decoder.setCurrentText(self.original.get('vlc_decoder','Auto'))
+        self.vlc_decoder.setToolTip('If audio plays but video stays black, try Software. Restart DizyTV after changing this setting.')
+        form.addRow('VLC video decoding',self.vlc_decoder)
         self.guide_scale=QSpinBox()
         self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
         self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
@@ -673,7 +816,7 @@ class Settings(QDialog):
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
-                    theme=self.theme.currentText(),
+                    theme=self.theme.currentText(),vlc_decoder=self.vlc_decoder.currentText(),
                     subtitles_enabled=self.cc_enabled.isChecked(),subtitle_language=self.cc_language.currentText(),
                     subtitle_font=self.cc_font.currentText(),subtitle_size=self.cc_size.value(),
                     subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
@@ -704,6 +847,7 @@ class MainWindow(QMainWindow):
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
+        self._video_issue_notified=False
         self.detached_controls=None;self.detached_hide_timer=QTimer(self)
         self.detached_hide_timer.setSingleShot(True)
         self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
@@ -719,9 +863,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
-        root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
-        topbar=QWidget(); top=QHBoxLayout(topbar);top.setContentsMargins(3,3,3,3)
-        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
+        root=QWidget();root.setObjectName('appShell');self.setCentralWidget(root);layout=QVBoxLayout(root);layout.setContentsMargins(9,8,9,8);layout.setSpacing(8)
+        topbar=QWidget();topbar.setObjectName('appHeader');top=QHBoxLayout(topbar);top.setContentsMargins(4,4,4,4);top.setSpacing(8)
+        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(54,54,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand)
         theme_label=QLabel('Theme')
         theme_label.setObjectName('filterTitle')
@@ -734,7 +878,7 @@ class MainWindow(QMainWindow):
         self.theme_picker.currentTextChanged.connect(self.choose_theme)
         top.addWidget(self.theme_picker)
         top.addStretch()
-        self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
+        self.timezone_label=QLabel();self.timezone_label.setObjectName('timezoneLabel');top.addWidget(self.timezone_label)
         for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
         self.tools_button=QPushButton('Tools ▾')
@@ -742,6 +886,8 @@ class MainWindow(QMainWindow):
         tools_menu=QMenu(self.tools_button)
         tools_menu.addAction('Save local backup…',self.backup)
         tools_menu.addAction('Restore local backup…',self.restore)
+        tools_menu.addSeparator()
+        tools_menu.addAction('Set up Ace Stream engine…',self.open_ace_stream_setup)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
@@ -752,12 +898,12 @@ class MainWindow(QMainWindow):
         self.header_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
         topbar.adjustSize()
         self.header_scroll.setWidget(topbar)
-        self.header_scroll.setFixedHeight(topbar.sizeHint().height()+20)
+        self.header_scroll.setFixedHeight(topbar.sizeHint().height()+12)
         layout.addWidget(self.header_scroll)
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
-        sidebar=QWidget(); side=QVBoxLayout(sidebar); self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
+        sidebar=QWidget();sidebar.setObjectName('appSidebar');side=QVBoxLayout(sidebar);side.setContentsMargins(10,10,10,10);side.setSpacing(7);self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox()
         self.kind_filter=QComboBox(); self.source_filter=QComboBox()
         self.section_filter=QComboBox()
@@ -801,7 +947,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.ElideRight)
         split.addWidget(self.tabs);split.setSizes([270,880])
-        live=QWidget(); live_layout=QVBoxLayout(live); self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
+        live=QWidget();live.setObjectName('livePage');live_layout=QVBoxLayout(live);live_layout.setContentsMargins(8,8,8,8);live_layout.setSpacing(6);self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play');self.now.setObjectName('channelHeading'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
         self.channel_banner.setObjectName('channelBanner')
         self.channel_banner.setWordWrap(True)
@@ -814,6 +960,7 @@ class MainWindow(QMainWindow):
             self.video.setAttribute(Qt.WA_NativeWindow)
         self.video.setMouseTracking(True);self.video.installEventFilter(self); live_layout.addWidget(self.video,1)
         controls_widget=QWidget()
+        controls_widget.setObjectName('playbackControlsRow')
         controls=QHBoxLayout(controls_widget)
         controls.setContentsMargins(4,2,4,2)
         controls.setSpacing(6)
@@ -856,10 +1003,6 @@ class MainWindow(QMainWindow):
         self.popout_button.setToolTip('Open a separate resizable TV window while the guide stays available')
         self.popout_button.clicked.connect(self.open_popout)
         controls.addWidget(self.popout_button)
-        setup_engine=QPushButton('Set up Ace Stream engine')
-        setup_engine.setToolTip('Visit the official provider to install the optional P2P engine. Never needed for HTTP/HLS channels.')
-        setup_engine.clicked.connect(self.open_ace_stream_setup)
-        controls.addWidget(setup_engine)
         self.controls_scroll=QScrollArea()
         self.controls_scroll.setObjectName('playerControlScroll')
         self.controls_scroll.setWidgetResizable(False)
@@ -868,7 +1011,7 @@ class MainWindow(QMainWindow):
         self.controls_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
         controls_widget.adjustSize()
         self.controls_scroll.setWidget(controls_widget)
-        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+20)
+        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+14)
         live_layout.addWidget(self.controls_scroll)
         self.tv_controls=controls
         for item in range(controls.count()):
@@ -877,7 +1020,7 @@ class MainWindow(QMainWindow):
                 if widget in (self.live_button,):widget.setObjectName('tvLive')
                 elif widget in (self.pause_button,self.popout_button):widget.setObjectName('tvPrimary')
                 elif widget.text().startswith(('■','● Record')):widget.setObjectName('tvDanger')
-        self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window')
+        self.seek_notice=QLabel('Live pause / rewind: available only when this stream offers a seekable DVR window');self.seek_notice.setObjectName('playbackHint')
         self.seek_notice.setWordWrap(True)
         live_layout.addWidget(self.seek_notice)
         self.seek_slider=TimeSeekSlider(Qt.Horizontal)
@@ -911,13 +1054,13 @@ class MainWindow(QMainWindow):
         for label,handler in [('Stop / cancel',self.cancel_job),('Rearm restored timer',self.rearm_job),('Play file',self.play_file),('Delete file',self.delete_file)]:
             b=QPushButton(label); b.clicked.connect(handler); rec_buttons.addWidget(b)
         rec_layout.addLayout(rec_buttons); hint=QLabel('One recording at a time. Closing this window leaves the recorder running.\nAfter a reboot, open DizyTV to resume future timers. This alpha does not wake a sleeping computer.'); hint.setWordWrap(True); rec_layout.addWidget(hint); self.tabs.addTab(recordings,'Recordings')
-        self.global_search_button=QPushButton('⌕ Search all channels & programmes   Ctrl+K')
+        self.global_search_button=QPushButton('⌕  Search channels and programmes  •  Ctrl+K');self.global_search_button.setObjectName('globalSearch')
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
         layout.insertWidget(1,self.global_search_button)
         self.global_search_shortcut=QShortcut(QKeySequence('Ctrl+K'),self)
         self.global_search_shortcut.activated.connect(self.open_global_search)
-        self.status=QLabel('Native alpha • Configure your engine, XMLTV sources and recording storage in Settings'); layout.addWidget(self.status)
+        self.status=QLabel('Ready  •  Configure sources and recording storage in Settings');self.status.setObjectName('appStatus');layout.addWidget(self.status)
         self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
         self.light_timer.start()
@@ -1140,7 +1283,7 @@ class MainWindow(QMainWindow):
             widget=scroll.widget()
             if widget:
                 widget.adjustSize()
-                scroll.setFixedHeight(widget.sizeHint().height()+20)
+                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 14))
 
     def playback_light_state(self):
         if not self.player or not self.playback_started:
@@ -1159,29 +1302,56 @@ class MainWindow(QMainWindow):
         return 'buffering'
 
     def pulse_live_light(self):
+        """Pulse ONLY the small green dot; keep the LIVE button steady.
+
+        Amber means buffering, paused, or behind LIVE; red means stopped or
+        error. Unlike the old implementation neither warning state flashes.
+        Avoid reapplying unchanged button styles on every timer tick, which
+        causes distracting button-wide repainting on Windows.
+        """
         state=self.playback_light_state()
         self.light_phase=not self.light_phase
-        variants={'live':('#3cdb80','#247744'),
-                  'buffering':('#f2b450','#a47524'),
-                  'stopped':('#f26a60','#873930')}
-        bright,dim=variants[state]
-        color=bright if self.light_phase else dim
+        colours={'live':'#3cdb80','buffering':'#f2b450','stopped':'#f26a60'}
+        bright=colours[state]
+        dot_colour=('#247744' if not self.light_phase else bright) if state=='live' else bright
+        hint={'live':'Playing at LIVE',
+              'buffering':'Buffering, paused or watching behind LIVE',
+              'stopped':'Stopped / stream error'}[state]
         for label in (self.live_light,self.popout_live_light):
             if label is not None:
                 label.setText('●')
-                label.setStyleSheet('QLabel {background:transparent;color:'+color+
-                                    ';font-size:16px;font-weight:bold;}')
-                label.setToolTip({'live':'Stream playing near LIVE',
-                                  'buffering':'Buffering, paused or watching behind LIVE',
-                                  'stopped':'Stopped / stream error'}[state])
-        self.live_button.setStyleSheet(
-            'QPushButton {border:1px solid '+color+';'
-            'background:rgba(16,43,27,175);font-weight:700;'
-            'color:'+color+';}')
-        if self.popout_live_button is not None:
-            self.popout_live_button.setStyleSheet(
-                'QPushButton {background:rgba(8,30,20,120);'
-                'color:'+color+';border:1px solid '+color+';}')
+                style='QLabel {background:transparent;color:'+dot_colour+';font-size:16px;font-weight:bold;}'
+                if label.styleSheet()!=style:label.setStyleSheet(style)
+                if label.toolTip()!=hint:label.setToolTip(hint)
+        background={'live':'rgba(16,55,33,200)',
+                    'buffering':'rgba(63,43,14,200)',
+                    'stopped':'rgba(67,25,27,200)'}[state]
+        steady_style=('QPushButton {border:1px solid '+bright+';'
+                      'background:'+background+';font-weight:700;'
+                      'color:'+bright+';}')
+        for button in (self.live_button,self.popout_live_button):
+            if button is not None:
+                if button.styleSheet()!=steady_style:button.setStyleSheet(steady_style)
+                if button.toolTip()!=hint:button.setToolTip(hint)
+
+    def video_output_warning(self):
+        """Inspect actual video and audio counters without restarting playback."""
+        if not self.player or not self.playback_started:
+            return None
+        try:
+            import vlc
+            media=self.player.get_media()
+            if media is None:return None
+            stats=vlc.MediaStats()
+            if not media.get_stats(stats):return None
+            tracks=self.player.video_get_track_count()
+            size=self.player.video_get_size(0)
+            if not isinstance(size,tuple) or len(size)!=2:size=None
+            return diagnose_video_output(
+                int(stats.decoded_audio),int(stats.decoded_video),
+                int(stats.displayed_pictures),tracks if tracks>=0 else None,size)
+        except (AttributeError,TypeError,RuntimeError,OSError):
+            return None
 
     def media_activity(self):
         """VLC's decoded picture/audio counters catch freezes with State.Playing.
@@ -1275,11 +1445,21 @@ class MainWindow(QMainWindow):
                     self.seek_slider.setValue(max(0,1000-int(self.timeshift_lag/max(1,available)*1000)))
             else:
                 self.seek_notice.setText('DVR window available' if seekable else 'LIVE — no local time-shift enabled')
+        # VLC can be in State.Playing with audible audio and a black video
+        # surface. Inspect decoded/displayed frames separately after startup.
+        if (self.player and self.playback_started and not self._video_issue_notified
+                and time.monotonic()-self.playback_started>=15
+                and str(self.player.get_state()).endswith('.Playing')
+                and (not self.selected or channel_kind(self.selected)!='Radio')):
+            warning=self.video_output_warning()
+            if warning:
+                self._video_issue_notified=True
+                self.status.setText('Video diagnostic: '+warning)
         if self.player and self.playback_started and not self.playback_reported:
             state=str(self.player.get_state())
             if state.endswith('.Playing'):
                 self.playback_reported=True
-                self.status.setText('Now playing inside DizyTV')
+                if not self._video_issue_notified:self.status.setText('Now playing inside DizyTV')
             elif state.endswith('.Error') or state.endswith('.Ended'):
                 self.playback_reported=True
                 from .core import ace_id
@@ -1368,7 +1548,10 @@ class MainWindow(QMainWindow):
                 self.sync_subtitles()
                 self.render_guide()
                 self.tick()
-                if self._vlc_subtitle_profile is not None and tuple(vlc_subtitle_options(self.state['settings']))!=self._vlc_subtitle_profile:
+                if (self.player is not None and
+                        before.get('vlc_decoder','Auto')!=updated.get('vlc_decoder','Auto')):
+                    self.status.setText('VLC video decoding saved ('+updated['vlc_decoder']+'). Restart DizyTV to apply; active playback was not interrupted.')
+                elif self._vlc_subtitle_profile is not None and tuple(vlc_subtitle_options(self.state['settings']))!=self._vlc_subtitle_profile:
                     self.status.setText('Subtitle appearance saved; new font, size, colour and position apply after restarting DizyTV.')
 
             except ValueError as exc:self.error(str(exc))
@@ -1709,7 +1892,10 @@ class MainWindow(QMainWindow):
                     os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH',''); self.dll_dir=os.add_dll_directory(str(folder)); break
         import vlc
         self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
-        self.vlc_instance=vlc.Instance('--no-video-title-show',*self._vlc_subtitle_profile)
+        vlc_options=['--no-video-title-show',*self._vlc_subtitle_profile]
+        if self.state['settings'].get('vlc_decoder','Auto')=='Software':
+            vlc_options.append('--avcodec-hw=none')
+        self.vlc_instance=vlc.Instance(*vlc_options)
         self.player=self.vlc_instance.media_player_new()
         self.player.audio_set_volume(self.volume_slider.value())
         win=int(self.video.winId())
@@ -1734,6 +1920,7 @@ class MainWindow(QMainWindow):
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
             self.playback_started=time.monotonic(); self.playback_reported=False
             self._last_media_activity=None
+            self._video_issue_notified=False
             self.last_good_video=time.monotonic()
             self.source_check_serial+=1
             self.pause_button.setText('⏸ Pause')
@@ -2132,13 +2319,15 @@ class MainWindow(QMainWindow):
                 'font-size:'+str(max(9,round(11*ratio)))+'px;}',
             prefix+'QPushButton:hover {background:rgba(17,70,43,180);}',
             prefix+'QLabel {background:transparent;color:#effff0;}',
-            prefix+'QSlider {background:transparent;}',
-            prefix+'QSlider::groove:horizontal {height:5px;'
+            prefix+'QSlider {background:transparent;border:0;padding:0;margin:0;}',
+            prefix+'QSlider::groove:horizontal {height:4px;'
+                'background:rgba(14,40,29,120);border:0;border-radius:2px;}',
+            prefix+'QSlider::add-page:horizontal {'
                 'background:rgba(14,40,29,120);border:0;border-radius:2px;}',
             prefix+'QSlider::sub-page:horizontal {'
                 'background:rgba(86,205,128,190);border-radius:2px;}',
             prefix+'QSlider::handle:horizontal {width:13px;margin:-5px 0;'
-                'border:1px solid rgba(210,255,227,200);'
+                'border:2px solid rgba(210,255,227,200);'
                 'background:rgba(106,227,147,215);border-radius:7px;}',
         ))
         panel.setStyleSheet(overlay_theme_style(self._detached_base_style,
@@ -2156,7 +2345,7 @@ class MainWindow(QMainWindow):
         for title,callback in (('⏯ Play/Pause',self.toggle_pause),
                                ('↶ 30s',lambda:self.seek_relative(-30000)),
                                ('↷ 30s',lambda:self.seek_relative(30000)),
-                               ('● LIVE',self.jump_to_live),
+                               ('LIVE',self.jump_to_live),
                                ('☷ Guide',self.show_tv_guide),
                                ('Info',self.show_tv_info),
                                ('CC Subtitles',self.show_subtitle_menu),
@@ -2164,11 +2353,11 @@ class MainWindow(QMainWindow):
                                ('↩ Dock',self.exit_screen_fullscreen)):
             button=QPushButton(title,panel)
             button.clicked.connect(callback)
-            if title=='● LIVE':
+            if title=='LIVE':
                 button.setObjectName('tvLive')
                 self.popout_live_button=button
             bar.addWidget(button)
-            if title=='● LIVE':
+            if title=='LIVE':
                 self.popout_live_light=QLabel('●',button_row)
                 bar.addWidget(self.popout_live_light)
         button_scroll=QScrollArea(panel)
