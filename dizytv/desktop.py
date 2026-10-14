@@ -1511,9 +1511,12 @@ class MainWindow(QMainWindow):
         signature=tuple(tracks)
         if not self.state['settings'].get('subtitles_enabled',True):
             if not self._subtitle_auto_applied:
-                try:self.player.video_set_spu(-1)
+                try:
+                    # VLC may list a stream before its subtitle decoder is
+                    # ready. Retry until it actually accepts the Off request.
+                    if self.player.video_set_spu(-1)==0:
+                        self._subtitle_auto_applied=True
                 except (AttributeError,OSError,RuntimeError):pass
-                self._subtitle_auto_applied=True
             return
         if self._subtitle_manual_track is not None:
             return
@@ -1621,7 +1624,7 @@ class MainWindow(QMainWindow):
             media=self.vlc_instance.media_new(url)
             # Some free HLS origins reject libVLC's default User-Agent.
             # This is format compatibility, not bypassing geo/DRM restrictions.
-            if url.startswith('http'):
+            if url.lower().startswith(('http://','https://')):
                 media.add_option(':http-user-agent='+PLAYBACK_USER_AGENT)
             self.player.set_media(media); media.release()
             self._subtitle_auto_applied=False
