@@ -36,7 +36,7 @@ QPushButton:hover { background:#477552; } QPushButton:disabled { color:#8a938b; 
 QLineEdit,QPlainTextEdit,QComboBox,QSpinBox,QDoubleSpinBox { background:#202d24; padding:8px; border:1px solid #405246; border-radius:5px; }
 QListWidget { background:#1a261e; border:0; } QListWidget::item { padding:12px; border-bottom:1px solid #2f4033; }
 QListWidget::item:selected { background:#416248; }
-QTabWidget::pane { border:1px solid #405246; border-radius:10px; top:-1px; }
+QTabWidget::pane { border:1px solid #405246; border-radius:10px; top:0px; }
 QTabBar::tab { padding:9px 16px; margin:4px 4px 5px 0; background:#25362b; border:1px solid #405246; border-radius:9px; }
 QTabBar::tab:hover { background:#355b43; }
 QTabBar::tab:selected { background:#416248; border:1px solid #54785b; font-weight:700; }
@@ -453,10 +453,28 @@ class MainWindow(QMainWindow):
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root)
         topbar=QWidget(); top=QHBoxLayout(topbar);top.setContentsMargins(3,3,3,3)
         logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(75,75,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
-        brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand); top.addStretch()
+        brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand)
+        theme_label=QLabel('Theme')
+        theme_label.setObjectName('filterTitle')
+        top.addWidget(theme_label)
+        self.theme_picker=QComboBox()
+        self.theme_picker.setObjectName('themePicker')
+        self.theme_picker.setToolTip('Choose a DizyTV appearance; saved automatically')
+        self.theme_picker.addItems(['Green','Dark','Light'])
+        self.theme_picker.setCurrentText(self.state['settings'].get('theme','Green'))
+        self.theme_picker.currentTextChanged.connect(self.choose_theme)
+        top.addWidget(self.theme_picker)
+        top.addStretch()
         self.timezone_label=QLabel(); top.addWidget(self.timezone_label)
         for label,handler in [('Refresh channels',self.refresh_channels),('Source status',self.show_source_status),('Refresh guide',self.refresh_guide),('Settings',self.settings)]:
             b=QPushButton(label); b.clicked.connect(handler); top.addWidget(b)
+        self.tools_button=QPushButton('Tools ▾')
+        self.tools_button.setToolTip('Backup and restore your local DizyTV setup')
+        tools_menu=QMenu(self.tools_button)
+        tools_menu.addAction('Save local backup…',self.backup)
+        tools_menu.addAction('Restore local backup…',self.restore)
+        self.tools_button.setMenu(tools_menu)
+        top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
         self.header_scroll.setObjectName('toolbarScroll')
         self.header_scroll.setWidgetResizable(False)
@@ -483,7 +501,7 @@ class MainWindow(QMainWindow):
             (self.genre_filter,'EPG genre','All genres'),
             (self.kind_filter,'TV / Radio / stream','All stream types')):
             label=QLabel(title)
-            label.setStyleSheet('color:#a8c5ad')
+            label.setObjectName('filterTitle')
             filter_layout.addWidget(label)
             widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
             widget.setMinimumContentsLength(8)
@@ -508,10 +526,15 @@ class MainWindow(QMainWindow):
         sidebar.setMinimumWidth(0)
         sidebar.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
         split.addWidget(sidebar); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
+        self.tabs.setObjectName('mainTabs')
+        self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().setExpanding(False)
+        self.tabs.tabBar().setUsesScrollButtons(True)
+        self.tabs.tabBar().setElideMode(Qt.ElideRight)
         split.addWidget(self.tabs);split.setSizes([270,880])
         live=QWidget(); live_layout=QVBoxLayout(live); self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
-        self.channel_banner.setStyleSheet('background:#304d36; color:white; padding:8px;')
+        self.channel_banner.setObjectName('channelBanner')
         self.channel_banner.setWordWrap(True)
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
@@ -614,10 +637,6 @@ class MainWindow(QMainWindow):
         for label,handler in [('Stop / cancel',self.cancel_job),('Rearm restored timer',self.rearm_job),('Play file',self.play_file),('Delete file',self.delete_file)]:
             b=QPushButton(label); b.clicked.connect(handler); rec_buttons.addWidget(b)
         rec_layout.addLayout(rec_buttons); hint=QLabel('One recording at a time. Closing this window leaves the recorder running.\nAfter a reboot, open DizyTV to resume future timers. This alpha does not wake a sleeping computer.'); hint.setWordWrap(True); rec_layout.addWidget(hint); self.tabs.addTab(recordings,'Recordings')
-        backup=QWidget(); back_layout=QVBoxLayout(backup); message=QLabel('Keep your DizyTV setup on your own device\n\nBack up favourites, channel listings, guide mappings, preferences and timers.\nVideo files and device storage permissions are excluded. Restored timers stay paused until you choose storage and rearm them.'); message.setWordWrap(True); back_layout.addWidget(message)
-        for label,handler in [('Save local backup',self.backup),('Restore local backup',self.restore)]:
-            b=QPushButton(label); b.clicked.connect(handler); back_layout.addWidget(b)
-        back_layout.addStretch(); self.tabs.addTab(backup,'Backup & Restore')
         self.global_search_button=QPushButton('⌕ Search all channels & programmes   Ctrl+K')
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
@@ -824,8 +843,16 @@ class MainWindow(QMainWindow):
     def apply_interface_scale(self):
         settings=self.state['settings']
         app=QApplication.instance()
+        theme=settings.get('theme','Green')
         if app:app.setStyleSheet(desktop_style(settings.get('ui_scale',100),
-                                               settings.get('button_size','Normal')))
+                                               settings.get('button_size','Normal'),theme))
+        self.theme_picker.blockSignals(True)
+        self.theme_picker.setCurrentText(theme)
+        self.theme_picker.blockSignals(False)
+        self.grid.set_theme(theme)
+        self.channel_banner.setStyleSheet(
+            'background:'+theme_color('#304d36',theme)+';color:'+
+            ('#1e293b' if theme=='Light' else '#ffffff')+';padding:8px;')
         for scroll in (self.header_scroll,self.controls_scroll):
             widget=scroll.widget()
             if widget:
@@ -1017,6 +1044,12 @@ class MainWindow(QMainWindow):
             atomic_json(self.store.directory/'guide.json',guide); self.guide=guide; self.render_channels(); self.render_now()
             self.status.setText(f"Imported {len(guide['programmes'])} programmes"+(f" • {len(errors)} guide source(s) failed" if errors else '')+" • timers unchanged")
         self.async_task(fetch,done)
+    def choose_theme(self,theme):
+        if theme not in ('Green','Dark','Light'):return
+        if self.store.read()['settings'].get('theme','Green')!=theme:
+            self.state=self.store.update(lambda s:s['settings'].update(theme=theme))
+        self.apply_interface_scale()
+
     def settings(self):
         dialog=Settings(self.store.read(),self)
         if dialog.exec()==QDialog.Accepted:
@@ -1420,7 +1453,8 @@ class MainWindow(QMainWindow):
         screen.setMinimumSize(360,240)
         screen.resize(800,520)
         screen.setObjectName('tvWindow')
-        screen.setStyleSheet('QDialog#tvWindow { background:#101713; }')
+        screen.setStyleSheet('QDialog#tvWindow { background:'+
+                             theme_color('#101713',self.state['settings'].get('theme','Green'))+'; }')
         screen.setMouseTracking(True)
         screen.installEventFilter(self)
         vbox=QVBoxLayout(screen)
@@ -1753,7 +1787,7 @@ class MainWindow(QMainWindow):
             def change(s):
                 if any(j['status'] in ('starting','recording') for j in s['jobs']):raise ValueError('Stop the active recording before restoring a backup')
                 s.clear(); s.update(restored)
-            self.store.update(change); self.selected=None; self.guide={'names':{},'programmes':[]}; atomic_json(self.store.directory/'guide.json',self.guide); self.render_channels(); self.tick(); self.status.setText('Backup restored • choose storage and rearm timers explicitly')
+            self.store.update(change); self.selected=None; self.guide={'names':{},'programmes':[]}; atomic_json(self.store.directory/'guide.json',self.guide); self.state=self.store.read(); self.apply_interface_scale(); self.render_channels(); self.tick(); self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
         for timer in (self.light_timer,self.detached_hide_timer,
