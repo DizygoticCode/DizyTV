@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy, QAbstractItemView)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
@@ -302,6 +302,11 @@ QSlider#volumeBar::sub-page:horizontal {{background:#69bbd6;border:0;border-radi
 QSlider#seekBar::handle:horizontal,QSlider#volumeBar::handle:horizontal {{
     background:{fg};border:2px solid {accent};width:14px;border-radius:7px;margin:-7px 0;}}
 QSlider#seekBar:disabled::handle:horizontal {{background:{muted};border-color:{raised};}}
+QWidget#playerControlsStrip {{background:transparent;border:0;}}
+QToolButton#mediaScrollArrow {{color:{fg};background:{raised};border:1px solid {border};
+    border-radius:8px;padding:0;font-size:21px;font-weight:700;}}
+QToolButton#mediaScrollArrow:hover {{border-color:{accent};color:{accent};}}
+QToolButton#mediaScrollArrow:disabled {{color:{muted};background:transparent;border-color:{raised};}}
 """
 
 
@@ -1006,13 +1011,40 @@ class MainWindow(QMainWindow):
         self.controls_scroll=QScrollArea()
         self.controls_scroll.setObjectName('playerControlScroll')
         self.controls_scroll.setWidgetResizable(False)
-        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # The native horizontal scrollbar rendered as an ugly grey strip
+        # under the media buttons in a normal-width TV window. Keep scrolling
+        # functional with slim overflow chevrons but NEVER show that scrollbar.
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.controls_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
         controls_widget.adjustSize()
         self.controls_scroll.setWidget(controls_widget)
-        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+14)
-        live_layout.addWidget(self.controls_scroll)
+        self.controls_scroll.setFixedHeight(controls_widget.sizeHint().height()+6)
+        controls_strip=QWidget()
+        controls_strip.setObjectName('playerControlsStrip')
+        strip_layout=QHBoxLayout(controls_strip)
+        strip_layout.setContentsMargins(0,0,0,0)
+        strip_layout.setSpacing(3)
+        self.controls_prev=QToolButton()
+        self.controls_prev.setText('‹')
+        self.controls_prev.setObjectName('mediaScrollArrow')
+        self.controls_prev.setToolTip('Previous playback controls')
+        self.controls_prev.setFixedWidth(29)
+        self.controls_prev.clicked.connect(lambda:self.scroll_player_buttons(-240))
+        self.controls_next=QToolButton()
+        self.controls_next.setText('›')
+        self.controls_next.setObjectName('mediaScrollArrow')
+        self.controls_next.setToolTip('More playback controls')
+        self.controls_next.setFixedWidth(29)
+        self.controls_next.clicked.connect(lambda:self.scroll_player_buttons(240))
+        strip_layout.addWidget(self.controls_prev)
+        strip_layout.addWidget(self.controls_scroll,1)
+        strip_layout.addWidget(self.controls_next)
+        live_layout.addWidget(controls_strip)
+        bar=self.controls_scroll.horizontalScrollBar()
+        bar.rangeChanged.connect(self.sync_player_button_arrows)
+        bar.valueChanged.connect(lambda _value:self.sync_player_button_arrows())
+        QTimer.singleShot(0,self.sync_player_button_arrows)
         self.tv_controls=controls
         for item in range(controls.count()):
             widget=controls.itemAt(item).widget()
@@ -1283,7 +1315,22 @@ class MainWindow(QMainWindow):
             widget=scroll.widget()
             if widget:
                 widget.adjustSize()
-                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 14))
+                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
+        QTimer.singleShot(0,self.sync_player_button_arrows)
+
+    def scroll_player_buttons(self,step):
+        bar=self.controls_scroll.horizontalScrollBar()
+        bar.setValue(max(bar.minimum(),min(bar.maximum(),bar.value()+step)))
+        self.sync_player_button_arrows()
+
+    def sync_player_button_arrows(self,*_):
+        if not hasattr(self,'controls_scroll'):return
+        bar=self.controls_scroll.horizontalScrollBar()
+        has_overflow=bar.maximum()>bar.minimum()
+        for arrow in (self.controls_prev,self.controls_next):
+            arrow.setVisible(has_overflow)
+        self.controls_prev.setEnabled(bar.value()>bar.minimum())
+        self.controls_next.setEnabled(bar.value()<bar.maximum())
 
     def playback_light_state(self):
         if not self.player or not self.playback_started:
@@ -2363,14 +2410,41 @@ class MainWindow(QMainWindow):
         button_scroll=QScrollArea(panel)
         button_scroll.setFrameShape(QFrame.NoFrame)
         button_scroll.setWidgetResizable(False)
-        button_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        button_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         button_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         button_scroll.setStyleSheet('QScrollArea {background:transparent;border:0;}'
                                     'QWidget {background:transparent;}')
         button_row.adjustSize()
         button_scroll.setWidget(button_row)
-        button_scroll.setFixedHeight(button_row.sizeHint().height()+14)
-        panel_layout.addWidget(button_scroll)
+        button_scroll.setFixedHeight(button_row.sizeHint().height()+6)
+        pop_nav=QWidget(panel)
+        pop_nav_layout=QHBoxLayout(pop_nav)
+        pop_nav_layout.setContentsMargins(0,0,0,0)
+        pop_nav_layout.setSpacing(3)
+        left=QToolButton(pop_nav)
+        left.setObjectName('mediaScrollArrow')
+        left.setText('‹')
+        left.setFixedWidth(28)
+        right=QToolButton(pop_nav)
+        right.setObjectName('mediaScrollArrow')
+        right.setText('›')
+        right.setFixedWidth(28)
+        scroll_bar=button_scroll.horizontalScrollBar()
+        left.clicked.connect(lambda:scroll_bar.setValue(scroll_bar.value()-180))
+        right.clicked.connect(lambda:scroll_bar.setValue(scroll_bar.value()+180))
+        def sync_popout_arrows(*_):
+            overflow=scroll_bar.maximum()>scroll_bar.minimum()
+            left.setVisible(overflow)
+            right.setVisible(overflow)
+            left.setEnabled(scroll_bar.value()>scroll_bar.minimum())
+            right.setEnabled(scroll_bar.value()<scroll_bar.maximum())
+        scroll_bar.rangeChanged.connect(sync_popout_arrows)
+        scroll_bar.valueChanged.connect(sync_popout_arrows)
+        pop_nav_layout.addWidget(left)
+        pop_nav_layout.addWidget(button_scroll,1)
+        pop_nav_layout.addWidget(right)
+        panel_layout.addWidget(pop_nav)
+        QTimer.singleShot(0,sync_popout_arrows)
         self.screen_seek_slider=TimeSeekSlider(Qt.Horizontal,panel)
         self.screen_seek_slider.setObjectName('seekBar')
         self.screen_seek_slider.seek_requested.connect(self.seek_relative)
