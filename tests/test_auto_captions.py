@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dizytv.auto_captions import caption_text, ffmpeg_capture_args, verify_caption_engine
+from dizytv.auto_captions import caption_text, ffmpeg_capture_args, verify_caption_engine, PLAYBACK_USER_AGENT
 from dizytv.core import default_state, validate_state, export_backup, restore_backup
 
 
@@ -50,6 +50,13 @@ class OfflineCaptionTests(unittest.TestCase):
         self.assertEqual(a[a.index('-ar')+1],'16000')
         self.assertEqual(a[a.index('-f')+1],'s16le')
         self.assertEqual('-vn',a[a.index('-vn')])
+        self.assertEqual(PLAYBACK_USER_AGENT,a[a.index('-user_agent')+1])
+        self.assertLess(a.index('-user_agent'),a.index('-i'))
+        with tempfile.TemporaryDirectory() as directory:
+            local=Path(directory)/'saved.ts'
+            local.write_bytes(b'local')
+            local_args=ffmpeg_capture_args('ffmpeg',str(local))
+            self.assertNotIn('-user_agent',local_args)
         with self.assertRaises(ValueError):
             ffmpeg_capture_args('ffmpeg','--malicious')
         with self.assertRaises(ValueError):
