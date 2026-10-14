@@ -564,7 +564,7 @@ class Settings(QDialog):
         self.auto_model_path=QLineEdit(self.original.get('auto_caption_model_dir',''))
         self.auto_model_path.setObjectName('autoCaptionModelPath')
         self.auto_model_path.setReadOnly(True)
-        self.auto_model_path.setPlaceholderText('Extracted Vosk speech model folder (user provided)')
+        self.auto_model_path.setPlaceholderText('Bundled English Vosk model by default (optional override)')
         model_btn=QPushButton('Browse…')
         model_btn.clicked.connect(self.choose_auto_caption_model)
         model_row=QWidget(); model_layout=QHBoxLayout(model_row)
@@ -575,7 +575,7 @@ class Settings(QDialog):
         self.auto_ffmpeg_path=QLineEdit(self.original.get('auto_caption_ffmpeg_path',''))
         self.auto_ffmpeg_path.setObjectName('autoCaptionFFmpegPath')
         self.auto_ffmpeg_path.setReadOnly(True)
-        self.auto_ffmpeg_path.setPlaceholderText('FFmpeg on PATH (or choose installed executable)')
+        self.auto_ffmpeg_path.setPlaceholderText('Bundled FFmpeg by default (optional override)')
         ffmpeg_btn=QPushButton('Browse…')
         ffmpeg_btn.clicked.connect(self.choose_auto_caption_ffmpeg)
         ffmpeg_row=QWidget();ffmpeg_layout=QHBoxLayout(ffmpeg_row)
@@ -584,7 +584,7 @@ class Settings(QDialog):
         ffmpeg_layout.addWidget(ffmpeg_btn)
         form.addRow('FFmpeg for local speech captions',ffmpeg_row)
         generated=QLabel('Experimental: Start local speech captions separately from the CC menu while watching. '
-                         'Requires installed FFmpeg and an extracted Vosk model; makes a second connection '
+                         'Windows installer includes FFmpeg and the English model (other platforms may require setup); makes a second connection '
                          'to the playing stream, uses local CPU/RAM and may lag several seconds. '
                          'Off by default. No cloud speech service or microphone capture.')
         generated.setWordWrap(True);form.addRow(generated)
@@ -1563,7 +1563,7 @@ class MainWindow(QMainWindow):
                                                settings.get('auto_caption_ffmpeg_path',''))
         except (ValueError,OSError) as exc:
             self.status.setText('Local captions unavailable: '+str(exc)+
-                                ' Open Settings to choose the model/FFmpeg.')
+                                ' Open Settings to check optional model/FFmpeg overrides.')
             return
         self._auto_caption_seq+=1
         serial=self._auto_caption_seq

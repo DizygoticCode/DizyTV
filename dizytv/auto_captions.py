@@ -1,7 +1,8 @@
 """Explicitly opt-in, local live speech-to-text from an authorised TV stream.
 
 An external FFmpeg executable extracts mono 16k PCM from the *same source URL*
-as VLC. A bundled Vosk runtime and user-selected offline model transcribe it.
+as VLC. A bundled Vosk runtime and included English model transcribe it on Windows;
+user-selected model and FFmpeg paths remain optional overrides.
 No microphone is opened, no external speech API is used, and audio is never
 saved. FFmpeg may establish a second connection to the broadcaster, so this
 is deliberately off by default and stops when the channel changes.
@@ -13,15 +14,24 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 
 # Keep the caption audio client identical to VLC's working HTTP identity.
 PLAYBACK_USER_AGENT = 'Mozilla/5.0 (compatible; DizyTV/0.1)'
 
 
-def verify_caption_engine(model_dir,ffmpeg_path=''):
+def bundled_speech_directory():
+    """PyInstaller stores resources in _MEIPASS; the source checkout has none."""
+    return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent)) / 'speech'
+
+
+def verify_caption_engine(model_dir='',ffmpeg_path=''):
+    packaged = bundled_speech_directory()
+    if not model_dir and (packaged / 'vosk-model-small-en-us-0.15').is_dir():
+        model_dir = str(packaged / 'vosk-model-small-en-us-0.15')
     if not model_dir:
-        raise ValueError('Choose an extracted offline Vosk speech model in Settings')
+        raise ValueError('English speech model is missing; choose an extracted Vosk model in Settings')
     model=Path(model_dir)
     if not model.is_dir() or not (model/'am').is_dir() or not (model/'conf').is_dir():
         raise ValueError('Selected directory is not an extracted Vosk model (missing am/conf)')
@@ -31,9 +41,10 @@ def verify_caption_engine(model_dir,ffmpeg_path=''):
             raise ValueError('Select the installed FFmpeg executable')
         binary=str(ffmpeg.resolve())
     else:
-        binary=shutil.which('ffmpeg')
+        bundled = packaged / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+        binary = str(bundled.resolve()) if bundled.is_file() else shutil.which('ffmpeg')
         if not binary:
-            raise ValueError('FFmpeg is not installed or on PATH; choose its executable in Settings')
+            raise ValueError('FFmpeg is missing; choose an installed executable in Settings')
     try:
         import vosk
     except ImportError as exc:

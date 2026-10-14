@@ -1,4 +1,4 @@
-#define AppVersion "0.1.10-alpha"
+#define AppVersion "0.1.11-alpha"
 [Setup]
 AppId={{3F1997BD-12C5-4C17-B013-09C82DA8BAF6}
 AppName=DizyTV
@@ -9,8 +9,9 @@ DefaultDirName={localappdata}\Programs\DizyTV
 DefaultGroupName=DizyTV
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=DizyTV-Setup-0.1.10-alpha-windows-x64
+OutputBaseFilename=DizyTV-Setup-0.1.11-alpha-windows-x64
 SetupIconFile=..\assets\branding\dizytv.ico
+InfoBeforeFile=..\docs\WINDOWS-INCLUDED-COMPONENTS.txt
 UninstallDisplayIcon={app}\DizyTV.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

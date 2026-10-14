@@ -56,6 +56,11 @@ image.save('assets/branding/dizytv.icns')
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','DizyTV',
       '--paths',str(ROOT),'--add-data','assets'+os.pathsep+'assets',
       '--collect-data','tzdata','--collect-binaries','vosk','--hidden-import','vlc','--hidden-import','vosk']
+if os.name=='nt':
+    speech=ROOT/'vendor'/'speech'
+    if not (speech/'ffmpeg.exe').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir() or not (speech/'vosk-model-small-en-us-0.15'/'conf').is_dir():
+        raise RuntimeError('Missing staged Windows FFmpeg/Vosk model: refusing to build an incomplete installer')
+    args += ['--add-data',str(speech)+os.pathsep+'speech']
 if sys.platform=='darwin':
     args += ['--windowed','--icon','assets/branding/dizytv.icns','--osx-bundle-identifier','dev.dizygotic.dizytv']
 elif os.name=='nt':
@@ -67,14 +72,14 @@ if sys.platform=='darwin':
     import plistlib
     info=Path('dist/DizyTV.app/Contents/Info.plist')
     value=plistlib.loads(info.read_bytes())
-    value.update(CFBundleShortVersionString='0.1.10',CFBundleVersion='11',LSMinimumSystemVersion='13.0',
+    value.update(CFBundleShortVersionString='0.1.11',CFBundleVersion='12',LSMinimumSystemVersion='13.0',
                  NSLocalNetworkUsageDescription='Connect to your configured Ace Stream engine for live television and local recording.')
     info.write_bytes(plistlib.dumps(value))
     # Re-sign after Info.plist change. Ad-hoc identity is for development only.
     subprocess.run(['codesign','--force','--deep','--sign','-','dist/DizyTV.app'],check=True)
     subprocess.run(['pkgbuild','--component','dist/DizyTV.app','--install-location','/Applications',
-                    '--identifier','dev.dizygotic.dizytv','--version','0.1.10',
-                    f'dist/DizyTV-0.1.10-alpha-macos-{platform.machine()}.pkg'],check=True)
+                    '--identifier','dev.dizygotic.dizytv','--version','0.1.11',
+                    f'dist/DizyTV-0.1.11-alpha-macos-{platform.machine()}.pkg'],check=True)
 
 for file in Path('dist').glob('*'):
     if file.is_file() and file.suffix in ('.pkg','.exe'):

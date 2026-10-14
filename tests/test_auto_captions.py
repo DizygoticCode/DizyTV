@@ -42,6 +42,32 @@ class OfflineCaptionTests(unittest.TestCase):
             self.assertEqual(path,result[0])
             self.assertEqual(str(root.resolve()),result[1])
 
+    def test_bundled_windows_caption_defaults_and_explicit_overrides(self):
+        # This also runs on macOS CI: the packaged resource lookup must not
+        # depend on a machine-level FFmpeg installation or speech model.
+        from dizytv.auto_captions import bundled_speech_directory
+        import os
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            model=root/'vosk-model-small-en-us-0.15'
+            (model/'am').mkdir(parents=True)
+            (model/'conf').mkdir()
+            bundled_ffmpeg=root/('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+            bundled_ffmpeg.write_bytes(b'fixture')
+            with patch('dizytv.auto_captions.bundled_speech_directory',return_value=root):
+                result=verify_caption_engine()
+                self.assertEqual(str(bundled_ffmpeg.resolve()),result[0])
+                self.assertEqual(str(model.resolve()),result[1])
+                other=root/'custom'
+                (other/'am').mkdir(parents=True)
+                (other/'conf').mkdir()
+                # Explicit user selections override the bundled defaults.
+                selected=root/'ffmpeg.exe'
+                selected.write_bytes(b'fixture')
+                chosen=verify_caption_engine(str(other),str(selected))
+                self.assertEqual(str(selected.resolve()),chosen[0])
+                self.assertEqual(str(other.resolve()),chosen[1])
+
     def test_ffmpeg_argv_does_not_use_shell_and_handles_stream_audio_only(self):
         url='https://example.com/legal-live.m3u8'
         a=ffmpeg_capture_args('ffmpeg',url)

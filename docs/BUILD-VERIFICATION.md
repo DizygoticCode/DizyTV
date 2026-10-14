@@ -129,3 +129,7 @@ Android: Cinema and immersive full-screen modes (Back exits), quick guide and pr
 ## v0.1.10 native test requirements
 
 Android local timeshift uses short-lived, quota-bounded loopback HLS. CI now exercises deterministic clear HTTP MPEG-TS and HLS fixtures, a replay playlist, local file cleanup and encrypted-HLS fallback; actual libVLC playback on the Huawei device remains an independent human acceptance check. Verify pause/30-second rewind/scrub/return to live on real nonseekable streams, that switching channels and backgrounding erase the temporary fragments, and that programme recordings are undisturbed. Check protected/unavailable HLS sources fall back to ordinary live playback with a useful error. Do not treat successful CI as completed physical-device validation.
+
+## 0.1.11-alpha Windows bundled speech installer tests
+
+On Windows CI, `scripts/stage_windows_speech.py` downloads fixed versioned FFmpeg 8.1.2 and the Vosk Small English US 0.15 model, verifies immutable SHA-256 hashes, stages only the selected executable and expected model tree, then bundles both inside the native PyInstaller/Inno Setup output. The Windows packaged smoke job fails if the executable is missing or fails `-version`, or if the model lacks `am` and `conf` folders. A new unit test covers automatic model/binary discovery and explicit override; another checks safe archive staging. Verify real live-caption legibility and audio sync on a Windows device before a stable release. FFmpeg licensing/source fulfilment still requires review.
