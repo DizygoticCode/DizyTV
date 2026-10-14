@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QSizePolicy, QAbstractItemView)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
@@ -26,6 +26,7 @@ from .engine import ensure_ready, engine_diagnostics
 from .timeshift import RollingTimeshift
 from .stream_diagnostics import probe_stream
 from .global_search import GlobalSearch
+from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -346,6 +347,116 @@ class GuideGrid(QWidget):
         return super().mousePressEvent(event)
 
 
+class IPTVDirectoryDialog(QDialog):
+    """Entire official IPTV-org playlist index, not 1,000 simultaneous downloads."""
+
+    def __init__(self,existing_urls,parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('IPTV-org public playlist directory')
+        self.resize(820,610)
+        self.rows=list(DIRECTORY_ROWS)
+        self.existing=set(existing_urls)
+        self.added_urls=[]
+        self.refresh_task=None
+        root=QVBoxLayout(self)
+        note=QLabel('Browse the complete IPTV-org directory: countries, cities, regions, '
+                    'languages and categories. Pick feeds to import; the worldwide index '
+                    'covers the complete channel collection with one playlist. '
+                    'No new streams are downloaded until you save Settings and refresh channels.',self)
+        note.setWordWrap(True);root.addWidget(note)
+        top=QHBoxLayout()
+        self.kind_filter=QComboBox(self)
+        self.kind_filter.setObjectName('iptvDirectoryType')
+        self.kind_filter.addItems(DIRECTORY_TYPES)
+        self.kind_filter.currentTextChanged.connect(self.populate)
+        top.addWidget(self.kind_filter)
+        self.query=QLineEdit(self)
+        self.query.setObjectName('iptvDirectorySearch')
+        self.query.setPlaceholderText('Search country, region, city, language, genre or URL…')
+        self.query.textChanged.connect(self.populate)
+        top.addWidget(self.query,1)
+        root.addLayout(top)
+        self.results=QListWidget(self)
+        self.results.setObjectName('iptvDirectoryResults')
+        self.results.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.results.itemDoubleClicked.connect(lambda _:self.add_selected())
+        root.addWidget(self.results,1)
+        self.status_label=QLabel('',self)
+        self.status_label.setObjectName('iptvDirectoryStatus')
+        self.status_label.setWordWrap(True)
+        root.addWidget(self.status_label)
+        buttons=QHBoxLayout()
+        add=QPushButton('Add selected playlists',self)
+        add.setObjectName('iptvDirectoryAdd')
+        add.clicked.connect(self.add_selected)
+        buttons.addWidget(add)
+        worldwide=QPushButton('Add worldwide index',self)
+        worldwide.setObjectName('iptvDirectoryWorldwide')
+        worldwide.setToolTip('One playlist containing all channels; no mass per-country downloads')
+        worldwide.clicked.connect(self.add_worldwide)
+        buttons.addWidget(worldwide)
+        refresh=QPushButton('Refresh source directory',self)
+        refresh.setObjectName('iptvDirectoryRefresh')
+        refresh.clicked.connect(self.refresh_online)
+        buttons.addWidget(refresh)
+        cancel=QPushButton('Cancel',self)
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
+        self.populate()
+
+    def populate(self,*_):
+        visible=directory_search(self.rows,self.kind_filter.currentText(),self.query.text())
+        self.results.clear()
+        for kind,name,url,country in visible:
+            label=name+((' · '+country) if country else '')+'  —  '+kind
+            if url in self.existing:label+='  (already added)'
+            item=QListWidgetItem(label)
+            item.setData(Qt.UserRole,url)
+            item.setToolTip(url)
+            self.results.addItem(item)
+        self.status_label.setText(f'{len(visible):,} matching sources of {len(self.rows):,} published playlists '
+                                  '· select one or several; up to 24 active playlists in Settings')
+
+    def add_selected(self):
+        urls=[item.data(Qt.UserRole) for item in self.results.selectedItems()]
+        if not urls:
+            self.status_label.setText('Select at least one playlist, or choose the worldwide index.')
+            return
+        combined=list(dict.fromkeys([*self.existing,*urls]))
+        if len(combined)>24:
+            self.status_label.setText(f'Cannot activate {len(combined)} feeds at once (24 maximum). '
+                                      'Select fewer, or use the single worldwide index.')
+            return
+        self.added_urls=[url for url in urls if url not in self.existing]
+        self.accept()
+
+    def add_worldwide(self):
+        if WORLDWIDE_URL not in self.existing and len(self.existing)>=24:
+            self.status_label.setText('Remove an active feed in Settings before adding the worldwide index.')
+            return
+        self.added_urls=[WORLDWIDE_URL] if WORLDWIDE_URL not in self.existing else []
+        self.accept()
+
+    def refresh_online(self):
+        if self.refresh_task is not None:return
+        self.status_label.setText('Refreshing directory from IPTV-org …')
+        task=Task(lambda:parse_directory(download(DIRECTORY_URL)))
+        self.refresh_task=task
+        def done(rows):
+            self.refresh_task=None
+            self.rows=rows
+            self.populate()
+            self.status_label.setText(f'{len(rows):,} published sources loaded directly from IPTV-org.')
+        def failed(error):
+            self.refresh_task=None
+            self.status_label.setText('Online refresh unavailable ('+error+
+                                      '). Bundled directory retained.')
+        task.signals.success.connect(done)
+        task.signals.failure.connect(failed)
+        QThreadPool.globalInstance().start(task)
+
+
 class Settings(QDialog):
     def __init__(self,state,parent):
         super().__init__(parent); self.setWindowTitle('DizyTV settings'); self.resize(690,640)
@@ -360,6 +471,10 @@ class Settings(QDialog):
         add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
+        discover=QPushButton('Browse every IPTV-org country, category and language…',self)
+        discover.setObjectName('browseIPTVDirectory')
+        discover.clicked.connect(self.browse_iptv_directory)
+        form.addRow(discover)
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
         self.engine_path=QLineEdit(self.original.get('engine_executable',''))
         self.engine_path.setReadOnly(True)
@@ -429,6 +544,13 @@ class Settings(QDialog):
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
+
+    def browse_iptv_directory(self):
+        active=list(dict.fromkeys(u.strip() for u in self.playlists.toPlainText().splitlines()
+                                  if u.strip()))
+        dialog=IPTVDirectoryDialog(active,self)
+        if dialog.exec()==QDialog.Accepted and dialog.added_urls:
+            self.playlists.setPlainText('\\n'.join(dict.fromkeys([*active,*dialog.added_urls])))
 
     def pick_engine_path(self):
         path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
