@@ -1104,6 +1104,7 @@ class MainWindow(QMainWindow):
         self.theme_picker.setCurrentText(theme)
         self.theme_picker.blockSignals(False)
         self.grid.set_theme(theme)
+        self.style_auto_caption_overlay()
         if self.detached_controls is not None:
             self.detached_controls.setStyleSheet(
                 overlay_theme_style(self._detached_base_style,theme))
@@ -1228,6 +1229,8 @@ class MainWindow(QMainWindow):
         self.grid.update()
         self.check_live_timeshift()
         self.sync_subtitles()
+        if self._auto_caption_overlay is not None and time.monotonic()-self._auto_caption_updated>6:
+            self._auto_caption_overlay.hide()
         if self.player and self.playback_started:
             local_active=self.timeshift is not None and bool(self.timeshift.window.snapshot())
             seekable=bool(self.player.is_seekable()) or local_active
@@ -1358,6 +1361,131 @@ class MainWindow(QMainWindow):
         if ok:
             cid=self.selected['id']; target='' if value=='No mapping' else value.split(' — ')[0]
             self.store.update(lambda s:s['mappings'].update({cid:target})); self.state=self.store.read(); self.render_guide(); self.render_now()
+    def create_auto_caption_overlay(self):
+        if self._auto_caption_overlay is not None:return
+        native=(os.name=='nt' and os.environ.get('QT_QPA_PLATFORM')!='offscreen')
+        if native:
+            parent=self.screen_dialog or self
+            overlay=QDialog(parent,Qt.Tool|Qt.FramelessWindowHint|Qt.WindowTransparentForInput)
+            overlay.setAttribute(Qt.WA_TranslucentBackground,True)
+            overlay.setAttribute(Qt.WA_ShowWithoutActivating,True)
+            content=QVBoxLayout(overlay)
+            content.setContentsMargins(0,0,0,0)
+        else:
+            overlay=QFrame(self.video)
+            overlay.setAttribute(Qt.WA_TransparentForMouseEvents,True)
+            content=QVBoxLayout(overlay)
+            content.setContentsMargins(0,0,0,0)
+        overlay.setObjectName('autoCaptionOverlay')
+        caption=QLabel(overlay)
+        caption.setObjectName('autoCaptionText')
+        caption.setTextFormat(Qt.PlainText)
+        caption.setWordWrap(True)
+        caption.setAlignment(Qt.AlignCenter)
+        content.addWidget(caption)
+        self._auto_caption_overlay=overlay
+        self._auto_caption_label=caption
+        self.style_auto_caption_overlay()
+        self.position_auto_caption_overlay()
+
+    def style_auto_caption_overlay(self):
+        label=self._auto_caption_label
+        if label is None:return
+        settings=self.state['settings']
+        rgb=COLOURS.get(settings.get('subtitle_colour','White'),'0xFFFFFF')
+        colour='#'+rgb[2:]
+        font={'Sans':'Arial','Serif':'Georgia','Monospace':'Consolas'}.get(
+            settings.get('subtitle_font','Sans'),'Arial')
+        size=settings.get('subtitle_size',28)
+        label.setStyleSheet(
+            'QLabel#autoCaptionText {font-family:"'+font+'";font-size:'+str(size)+'px;'
+            'font-weight:700;color:'+colour+';background:rgba(0,0,0,190);'
+            'border-radius:10px;padding:10px 18px;}')
+        self.position_auto_caption_overlay()
+
+    def position_auto_caption_overlay(self):
+        overlay=self._auto_caption_overlay
+        if overlay is None or self.video.width()<1 or self.video.height()<1:return
+        size=self.state['settings'].get('subtitle_size',28)
+        width=max(100,int(self.video.width()*.86))
+        height=max(64,min(self.video.height()//2,size*3+26))
+        margin=POSITIONS.get(self.state['settings'].get('subtitle_position','Bottom'),16)
+        x=max(0,(self.video.width()-width)//2)
+        y=max(0,self.video.height()-height-margin)
+        overlay.resize(width,height)
+        if isinstance(overlay,QDialog):
+            overlay.move(self.video.mapToGlobal(QPoint(x,y)))
+        else:
+            overlay.move(x,y)
+
+    def destroy_auto_caption_overlay(self):
+        overlay=self._auto_caption_overlay
+        self._auto_caption_overlay=None
+        self._auto_caption_label=None
+        if overlay is not None:
+            overlay.hide()
+            overlay.close()
+            overlay.deleteLater()
+
+    def receive_auto_caption(self,serial,text):
+        if serial!=self._auto_caption_seq or self._auto_caption_worker is None:return
+        text=caption_text(text)
+        if not text:return
+        self._auto_caption_text=text
+        self._auto_caption_updated=time.monotonic()
+        self.create_auto_caption_overlay()
+        self._auto_caption_label.setText(text)
+        self.position_auto_caption_overlay()
+        self._auto_caption_overlay.show()
+        self._auto_caption_overlay.raise_()
+
+    def auto_caption_finished(self,serial,reason):
+        if serial!=self._auto_caption_seq:return
+        self._auto_caption_worker=None
+        self.destroy_auto_caption_overlay()
+        if reason:self.status.setText(reason)
+
+    def stop_auto_captions(self):
+        self._auto_caption_seq+=1
+        worker=self._auto_caption_worker
+        self._auto_caption_worker=None
+        if worker is not None:worker.stop()
+        self._auto_caption_text=''
+        self.destroy_auto_caption_overlay()
+
+    def toggle_auto_captions(self):
+        if self._auto_caption_worker is not None:
+            self.stop_auto_captions()
+            self.status.setText('Local speech-generated captions stopped.')
+            return
+        if not self.player or not self.playback_started or not self._playback_url:
+            self.status.setText('Play a live channel before starting local speech captions.')
+            return
+        if self.timeshift is not None:
+            self.status.setText('Return to direct live playback and disable rolling timeshift before generating captions.')
+            return
+        settings=self.state['settings']
+        try:
+            ffmpeg,model=verify_caption_engine(settings.get('auto_caption_model_dir',''),
+                                               settings.get('auto_caption_ffmpeg_path',''))
+        except (ValueError,OSError) as exc:
+            self.status.setText('Local captions unavailable: '+str(exc)+
+                                ' Open Settings to choose the model/FFmpeg.')
+            return
+        self._auto_caption_seq+=1
+        serial=self._auto_caption_seq
+        signals=CaptionSignals(self)
+        signals.caption.connect(self.receive_auto_caption)
+        signals.finished.connect(self.auto_caption_finished)
+        self._auto_caption_signals=signals
+        worker=LocalCaptionWorker(ffmpeg,self._playback_url,model,
+                                  lambda text:signals.caption.emit(serial,text),
+                                  lambda reason:signals.finished.emit(serial,reason))
+        self._auto_caption_worker=worker
+        self.status.setText('Starting optional offline captions; recognising live audio locally. '
+                            'A second connection to this stream is used; no microphone or cloud STT.')
+        worker.start()
+
     def sync_subtitles(self):
         """Use the embedded subtitle stream without another video connection.
 
@@ -1441,8 +1569,9 @@ class MainWindow(QMainWindow):
         appearance=menu.addAction('Subtitle size, font, colour, position…')
         appearance.triggered.connect(self.settings)
         menu.addSection('Speech-generated captions')
-        note=menu.addAction('Local auto captions — separate optional engine required')
-        note.setEnabled(False)
+        auto=menu.addAction('Stop local speech captions' if self._auto_caption_worker
+                            else 'Generate live subtitles (offline Vosk + FFmpeg)')
+        auto.triggered.connect(self.toggle_auto_captions)
         menu.exec(QCursor.pos())
 
     def init_player(self):
@@ -1462,6 +1591,8 @@ class MainWindow(QMainWindow):
         elif os.name=='nt':self.player.set_hwnd(win)
         else:self.player.set_xwindow(win)
     def play_url(self,url):
+        self.stop_auto_captions()
+        self._playback_url=url
         try:
             self.init_player()
             self.player.stop()
@@ -1672,6 +1803,10 @@ class MainWindow(QMainWindow):
             # Ordinary HTTP/HLS streams play without the Ace Stream engine.
             self.play_stream(url)
     def eventFilter(self,obj,event):
+        if obj is self.video and event.type() in (QEvent.Resize,QEvent.Move):
+            self.position_auto_caption_overlay()
+        if obj is self.screen_dialog and event.type() in (QEvent.Resize,QEvent.Move):
+            self.position_auto_caption_overlay()
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
             return True
@@ -1929,6 +2064,10 @@ class MainWindow(QMainWindow):
         else:screen.show()
         self.video.show()
         self._rebind_video()
+        if self._auto_caption_overlay is not None:
+            self.destroy_auto_caption_overlay()
+            if self._auto_caption_worker is not None and self._auto_caption_text:
+                self.receive_auto_caption(self._auto_caption_seq,self._auto_caption_text)
         self.detached_mouse_position=QCursor.pos()
         self.detached_mouse_timer.start()
         self.show_detached_controls()
@@ -2064,6 +2203,7 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def stop_playback(self):
+        self.stop_auto_captions()
         if self.player:self.player.stop()
         self.close_timeshift()
         self.playback_started=0
