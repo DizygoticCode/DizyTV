@@ -283,7 +283,7 @@ def _guide_compact(value):
     text = _guide_name(display_channel_name(value)).replace('&', ' and ')
     numbers = {'one':'1', 'two':'2', 'three':'3', 'four':'4', 'five':'5',
                'six':'6', 'seven':'7', 'eight':'8', 'nine':'9', 'ten':'10'}
-    text = re.sub(r'\\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\\b',
+    text = re.sub(r'\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b',
                   lambda m:numbers[m.group()], text)
     return ''.join(char for char in text if char.isalnum())
 
