@@ -59,7 +59,7 @@ def stage_archives(ffmpeg_archive: Path, model_archive: Path, destination: Path)
                 raise RuntimeError("Unexpected model archive path")
             if entry.is_dir():
                 continue
-            if any(part in (".", "..") for part in parts) or len(parts) < 3:
+            if any(part in (".", "..") for part in parts) or len(parts) < 2:
                 raise RuntimeError("Unsafe model archive path")
             if (entry.external_attr >> 16) & 0o170000 == 0o120000:
                 raise RuntimeError("Model archive symlink is not allowed")
