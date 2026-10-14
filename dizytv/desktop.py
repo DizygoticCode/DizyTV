@@ -2332,7 +2332,21 @@ class MainWindow(QMainWindow):
             def change(s):
                 if any(j['status'] in ('starting','recording') for j in s['jobs']):raise ValueError('Stop the active recording before restoring a backup')
                 s.clear(); s.update(restored)
-            self.store.update(change); self.selected=None; self.guide={'names':{},'programmes':[]}; atomic_json(self.store.directory/'guide.json',self.guide); self.state=self.store.read(); self.apply_interface_scale(); self.render_channels(); self.tick(); self.status.setText('Backup restored • choose storage and rearm timers explicitly')
+            self.store.update(change)
+            self.selected=None
+            self.guide={'names':{},'programmes':[]}
+            atomic_json(self.store.directory/'guide.json',self.guide)
+            self.state=self.store.read()
+            # Restoring a backup must apply its caption on/off preference to
+            # the current VLC player, not reuse the previous playback cache.
+            self._subtitle_manual_track=None
+            self._subtitle_auto_applied=False
+            self._subtitle_track_signature=()
+            self.apply_interface_scale()
+            self.render_channels()
+            self.sync_subtitles()
+            self.tick()
+            self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
         for timer in (self.light_timer,self.detached_hide_timer,
