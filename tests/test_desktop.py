@@ -221,6 +221,36 @@ class DesktopTests(unittest.TestCase):
             self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
             s.close();window.close()
 
+    def test_modern_streaming_skin_removes_slider_backgrounds_and_keeps_small_window(self):
+        from dizytv.desktop import desktop_style
+        for theme in ('Green','Dark','Light'):
+            css=desktop_style(80,'Compact',theme)
+            self.assertIn('QSlider#seekBar,QSlider#volumeBar {background:transparent',css)
+            self.assertIn('QTabBar::tab:selected',css)
+            self.assertIn('QWidget#appSidebar',css)
+            self.assertIn('QPushButton#globalSearch',css)
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            self.assertEqual('appSidebar',w.sidebar.objectName())
+            self.assertEqual('globalSearch',w.global_search_button.objectName())
+            self.assertEqual('playbackControlsRow',w.controls_scroll.widget().objectName())
+            self.assertEqual('seekBar',w.seek_slider.objectName())
+            self.assertEqual('volumeBar',w.volume_slider.objectName())
+            w.resize(640,460)
+            w.show()
+            self.app.processEvents()
+            self.assertLessEqual(w.minimumWidth(),480)
+            w.close()
+
+    def test_audio_with_black_video_distinguishes_decoder_and_vlc_video_output(self):
+        from dizytv.desktop import diagnose_video_output
+        self.assertIsNone(diagnose_video_output(0,0,0,0))
+        self.assertIsNone(diagnose_video_output(24,32,28,1,(1920,1080)))
+        self.assertIn('no video track',diagnose_video_output(24,0,0,0))
+        self.assertIn('decoding video',diagnose_video_output(24,45,0,1,(1920,1080)))
+        self.assertIn('not decoding',diagnose_video_output(24,0,0,1))
+        self.assertIn('surface',diagnose_video_output(24,45,32,1,(0,0)))
+
     def test_live_light_reports_green_amber_red_and_follows_rewind(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
