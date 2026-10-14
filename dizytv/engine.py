@@ -4,6 +4,7 @@ The video still renders in DizyTV's own libVLC player. This helper uses a
 background worker, so checking/installing an engine cannot freeze the Qt GUI.
 """
 from __future__ import annotations
+import json
 import os
 import socket
 import subprocess
@@ -11,6 +12,8 @@ import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
 
 
 def engine_endpoint(address):
@@ -61,12 +64,31 @@ def windows_engine_path(explicit=''):
         if root:roots.append(Path(root)/suffix)
     for root in roots:
         for location in (root,root/'engine'):
-            for name in ('ace_console.exe','ace_engine.exe'):
+            for name in ('ace_engine.exe','ace_console.exe'):
                 found=location/name
                 if found.is_file():
                     return found
     return None
 
+
+def engine_diagnostics(address,timeout=3):
+    """Distinguish reachable HTTP engine API from a mere open TCP port."""
+    host,port=engine_endpoint(address)
+    if host not in ('127.0.0.1','localhost','::1'):
+        return 'Configured engine is remote; cannot auto-start a Windows engine.'
+    api=address.rstrip('/')+'/webui/api/service?method=get_version'
+    try:
+        with urlopen(api,timeout=timeout) as response:
+            payload=response.read(4096)
+        data=json.loads(payload)
+        result=data.get('result')
+        if not isinstance(result,dict) or not result.get('version'):
+            return 'Port '+str(port)+' responded, but the Ace Engine API did not identify itself.'
+        return ('Ace Engine '+str(result['version'])+' is running on local port '+str(port)+
+                '. This verifies the engine, not the stream; its content ID may have no available peers.')
+    except (HTTPError,URLError,TimeoutError,OSError,ValueError,TypeError):
+        return ('Ace Engine API is not responding on localhost port '+str(port)+
+                '. Check the engine, its HTTP port and Windows firewall.')
 
 def ensure_ready(address, startup_seconds=25, executable_path=''):
     """Called off the UI thread. Never launch for a remote/custom engine URL."""
