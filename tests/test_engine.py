@@ -4,6 +4,17 @@ from dizytv import engine
 
 
 class EngineTests(unittest.TestCase):
+    def test_running_engine_api_version_is_reported_distinct_from_stream_peers(self):
+        from unittest.mock import Mock
+        import io
+        context=Mock()
+        context.__enter__=Mock(return_value=io.BytesIO(b'{"result":{"version":"3.2.1"},"error":null}'))
+        context.__exit__=Mock(return_value=None)
+        with patch.object(engine,'urlopen',return_value=context):
+            report=engine.engine_diagnostics('http://127.0.0.1:6878')
+            self.assertIn('3.2.1',report)
+            self.assertIn('not the stream',report)
+
     def test_parse_engine_endpoint(self):
         self.assertEqual(('127.0.0.1',6878),engine.engine_endpoint('http://127.0.0.1:6878'))
         with self.assertRaises(ValueError):
