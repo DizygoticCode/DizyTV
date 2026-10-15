@@ -15,6 +15,24 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from .core import ace_request_params, http_url
 
+CONCLUSIVE_MISSING = frozenset({'missing'})
+
+
+def confirmed_missing_ids(results):
+    """Require *two consecutive* explicit HTTP 404/410 observations per ID.
+
+    A timeout, 403, transient provider fault or a newly restored manifest
+    resets the streak; the status is endpoint-missing rather than conclusive
+    information about a broadcaster or another feed with the same name.
+    """
+    consecutive = {}
+    for entry in results:
+        cid = entry.get('id', '')
+        if not cid:continue
+        consecutive[cid] = consecutive.get(cid,0)+1 if entry.get('status') in CONCLUSIVE_MISSING else 0
+    return {cid for cid,misses in consecutive.items() if misses>=2}
+
+
 BATCH_SIZE = 40
 MAX_WORKERS = 4
 TIMEOUT = 4
