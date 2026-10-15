@@ -1527,14 +1527,24 @@ class MainWindow(QMainWindow):
         self.render_channels()
 
     def filter_24_7(self):
-        self.country_filter.blockSignals(True)
-        self.country_filter.setCurrentIndex(0)
-        self.country_filter.blockSignals(False)
+        # This is a global directory shortcut, not a refinement of the last
+        # unrelated country, playlist, favourites or genre filters.
+        for widget in (self.country_filter,self.genre_filter,
+                       self.kind_filter,self.source_filter):
+            widget.blockSignals(True)
+            widget.setCurrentIndex(0)
+            widget.blockSignals(False)
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self.favourites_only.blockSignals(True)
+        self.favourites_only.setChecked(False)
+        self.favourites_only.blockSignals(False)
         self.section_filter.blockSignals(True)
         self.section_filter.setCurrentIndex(max(0,self.section_filter.findData('24/7 Shows & Loops')))
         self.section_filter.blockSignals(False)
         self.render_channels()
-        self.status.setText(f'24/7 Shows & Loops: {self.channels.count()} channels in the current catalogue.')
+        self.status.setText(f'24/7 Shows & Loops: {self.channels.count()} channels across all playlists.')
 
     def refresh_disabled_channels(self,*_):
         self._tree_dirty=True
