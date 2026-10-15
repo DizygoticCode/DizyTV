@@ -168,7 +168,16 @@ class DesktopTests(unittest.TestCase):
             window=MainWindow(store,start_worker=False)
             self.assertIsNotNone(window.sort_picker)
             self.assertIsNotNone(window.show_disabled)
+            # A global shortcut must clear unrelated old filters rather than
+            # falsely reporting that there are zero loop channels.
+            window.source_filter.setCurrentIndex(window.source_filter.findData('<ace>'))
+            window.favourites_only.setChecked(True)
+            window.search.setText('not present')
+            self.assertEqual(0,window.channels.count())
             window.loop_filter_button.click()
+            self.assertEqual('',window.source_filter.currentData())
+            self.assertFalse(window.favourites_only.isChecked())
+            self.assertEqual('',window.search.text())
             self.assertEqual('24/7 Shows & Loops',window.section_filter.currentData())
             self.assertEqual(1,window.channels.count())
             self.assertEqual('South Park',window.grid.rows[0]['name'])
