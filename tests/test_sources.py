@@ -35,6 +35,21 @@ class FreeSourceTests(unittest.TestCase):
         self.assertEqual(DEFAULT_PLAYLIST_URLS,state['settings']['playlist_urls'])
         self.assertEqual(19,len(configured_playlists(state['settings'])))
 
+    def test_uk_fast_playlist_guides_use_matching_opaque_tvg_ids(self):
+        from dizytv.sources import (FAST_GUIDE_BY_PLAYLIST,UK_FAST_GUIDES,
+                                   FREE_PLAYLISTS)
+        self.assertEqual(3,len(FAST_GUIDE_BY_PLAYLIST))
+        self.assertEqual(5,len(DEFAULT_GUIDE_URLS))
+        known={row[1] for row in FREE_PLAYLISTS}
+        for url,guide in FAST_GUIDE_BY_PLAYLIST.items():
+            self.assertIn(url,known)
+            self.assertTrue(guide.startswith('https://i.mjh.nz/'))
+            self.assertTrue(guide.endswith('/gb.xml.gz'))
+            self.assertIn(guide,DEFAULT_GUIDE_URLS)
+        state=default_state()
+        self.assertEqual(DEFAULT_GUIDE_URLS,state['settings']['xmltv_urls'])
+        validate_state(state)
+
     def test_same_stream_is_searchable_under_region_and_series_feeds(self):
         from dizytv.sources import FREE_PLAYLISTS
         presets={label:url for label,url,_ in FREE_PLAYLISTS}
