@@ -2,7 +2,7 @@
 
 ## Native alpha — implemented
 
-- Native Qt apps for Windows/macOS and Kotlin Android app with embedded libVLC.
+- Native Qt apps for Windows/macOS and experimental Ubuntu/Debian x64 Linux, plus a separate Kotlin Android app with libVLC.
 - Playlist import/cache, stable IDs, search, favourites and country/genre/type filters.
 - Saved category edits preserved through refresh and portable backup/restore.
 - XMLTV sources, now/next, programme grid and manual channel mappings.
@@ -11,13 +11,14 @@
 - Selected local folders, persistent jobs, preserved partial segments and recording playback/deletion.
 - Detached desktop recorder; Android exact alarms, foreground notification and reboot recovery.
 - Local JSON backup/restore with destination reset and explicit timer rearming.
-- Windows EXE, Apple Silicon/Intel Mac PKGs and universal Android debug APK built in CI, with checksums and licence notices.
+- Windows EXE, Apple Silicon/Intel Mac PKGs, Ubuntu Linux x64 DEB, and universal Android debug APK built in CI, with checksums and licence notices.
+- 0.1.16-alpha desktop adds adjustable HTTP/HLS network buffering, more resilient Ace playback lifecycle, local system usage, progressive health scanning, conservative duplicate management, and UK FAST playlist/guide pairing.
 
 See [build verification](docs/BUILD-VERIFICATION.md) for actual evidence. Successful builds do not establish physical-device acceptance.
 
 ## Next — device acceptance
 
-- Fresh install and upgrade on Windows x64, Intel Mac, Apple Silicon Mac and Android; include Huawei P30/Android 10.
+- Fresh install and upgrade on Windows x64, Intel Mac, Apple Silicon Mac, Ubuntu Linux x64 (including X11 versus Wayland behaviour) and Android; include Huawei P30/Android 10.
 - Live playback through separately installed engines; Mac connects to a reachable Windows/Linux engine.
 - Record/replay permitted live streams, including scheduled recording with the main UI closed.
 - Measure XMLTV coverage and mapping across representative countries and genres.
@@ -26,12 +27,12 @@ See [build verification](docs/BUILD-VERIFICATION.md) for actual evidence. Succes
 
 Desktop sleep/wake and automatic recorder startup after reboot are not implemented. Android background behaviour needs device evidence before reliability claims.
 
-## Next — public distribution
+## Public alpha distribution and remaining trust work
 
-- Source repository made public — verified 11 October 2026. About text/topics still need the owner's repository controls.
+- Source repository made public — verified 11 October 2026; owner maintains the GitHub About description and repository settings.
 - Select the DizyTV source licence and finish third-party source/relinking requirements.
 - Configure Windows signing, a retained Android release key, and Apple Developer ID signing/notarization.
-- Publish durable versioned downloads and release notes after device acceptance. Current CI artifacts expire after 30 days and require GitHub access.
+- Versioned GitHub Releases provide direct alpha installers and checksum manifests after gated five-platform CI. GitHub Actions artifacts are temporary; real-device acceptance and code-signing remain requirements before a trusted stable release.
 
 ## Later — DizyServer integration
 
