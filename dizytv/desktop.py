@@ -33,7 +33,8 @@ from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORL
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
 from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
-                            LANGUAGE_MODELS, installed_language_model, install_language_model, remove_language_model)
+                            LANGUAGE_MODELS, installed_language_model, install_language_model, remove_language_model,
+                            managed_language_model)
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
 from .health_history import HealthHistory
 from .duplicates import duplicate_groups
@@ -871,6 +872,8 @@ class Settings(QDialog):
         model_layout.addWidget(self.auto_model_path,1)
         model_layout.addWidget(model_btn)
         form.addRow('Offline auto-caption model',model_row)
+        self.auto_model_path.textChanged.connect(self.refresh_caption_language)
+        self.refresh_caption_language()
         self.auto_ffmpeg_path=QLineEdit(self.original.get('auto_caption_ffmpeg_path',''))
         self.auto_ffmpeg_path.setObjectName('autoCaptionFFmpegPath')
         self.auto_ffmpeg_path.setReadOnly(True)
@@ -1007,16 +1010,22 @@ class Settings(QDialog):
         language=self.caption_language.currentText()
         installed=installed_language_model(language)
         busy=getattr(self,'download_task',None) is not None
+        selected=(self.auto_model_path.text() if hasattr(self,'auto_model_path')
+                  else self.original.get('auto_caption_model_dir',''))
+        managed=managed_language_model(language, protected_path=selected)
         self.caption_language.setEnabled(not busy)
         self.model_download.setEnabled(not busy and installed is None)
         self.model_cancel.setEnabled(busy and
-                                     not getattr(self,'model_cancel_event',None) is None and
+                                     getattr(self,'model_cancel_event',None) is not None and
                                      not self.model_cancel_event.is_set())
-        self.model_remove.setEnabled(not busy and language!='English (bundled)' and installed is not None)
+        self.model_remove.setEnabled(not busy and managed is not None)
         if busy:
             return
-        if installed is not None:
-            self.model_state.setText('Installed • '+language+' (saved on this device).')
+        if managed is not None:
+            self.model_state.setText('Installed • '+language+' (DizyTV-managed download).')
+        elif installed is not None:
+            self.model_state.setText('Installed • '+language+
+                                     ' (not eligible for removal: custom/external or bundled model).')
         else:
             self.model_state.setText('Not installed • select Download to add '+language+
                                      ' in DizyTV Settings. No speech data is sent to a cloud service.')
@@ -1049,7 +1058,7 @@ class Settings(QDialog):
                 'Other downloaded languages and external model folders will not be touched.') != QMessageBox.Yes:
             return
         try:
-            removed=remove_language_model(language)
+            removed=remove_language_model(language, protected_path=self.auto_model_path.text())
         except (OSError,ValueError) as exc:
             self.model_state.setText('Could not remove model: '+str(exc)[:140])
             return
