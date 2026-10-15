@@ -90,6 +90,22 @@ class FreeSourceTests(unittest.TestCase):
             self.assertIn('US',label)
             self.assertNotIn(url,DEFAULT_PLAYLIST_URLS)
 
+    def test_plex_24_7_signed_url_refresh_retains_channel_identity(self):
+        from dizytv.core import parse_playlist
+        key='a4e559a3bb742634aaee33bf-67b7a02a72bb63eb7738c982'
+        path='https://epg.provider.plex.tv/library/parts/'+key+'/'
+        def feed(token):
+            return '#EXTM3U\n#EXTINF:-1 tvg-id="'+key+'",24/7 Comedy\n'+path+'?X-Plex-Token='+token+'\n'
+        first=parse_playlist(feed('first-token'))[0]
+        second=parse_playlist(feed('second-token'))[0]
+        self.assertEqual(first['id'],second['id'])
+        self.assertNotEqual(first['stream'],second['stream'])
+        self.assertIn('second-token',second['stream'])
+        # Do not change the identity rules for generic feeds where query
+        # parameters might be the entire live station identity.
+        generic=lambda token:parse_playlist('#EXTM3U\n#EXTINF:-1,Other\nhttps://example.com/stream?id='+token+'\n')[0]
+        self.assertNotEqual(generic('a')['id'],generic('b')['id'])
+
     def test_default_presets_include_uk_us_and_epg(self):
         state=default_state()
         self.assertTrue(any('countries/us.m3u' in u for u in state['settings']['playlist_urls']))
