@@ -43,6 +43,7 @@ LANGUAGE_MODELS = {
 }
 MAX_MODEL_ZIP_BYTES = 100 * 1024 * 1024
 MAX_MODEL_EXPANDED_BYTES = 400 * 1024 * 1024
+MANAGED_MODEL_MARKER = '.dizytv-vosk-install.json'
 
 
 def user_models_directory():
@@ -66,8 +67,34 @@ def installed_language_model(language, root=None):
     return model if (model/'am').is_dir() and (model/'conf').is_dir() else None
 
 
-def remove_language_model(language, root=None):
-    """Remove only a managed, downloaded language model, never an external path."""
+
+def managed_language_model(language, root=None, protected_path=''):
+    """Return a model only when this app installed it and no custom path uses it."""
+    if language not in LANGUAGE_MODELS or language == 'English (bundled)':
+        return None
+    folder = (Path(root) if root else user_models_directory()).resolve()
+    target = folder / LANGUAGE_MODELS[language]
+    if target.is_symlink() or not target.is_dir() or target.resolve().parent != folder:
+        return None
+    if protected_path:
+        selected = Path(protected_path).expanduser().resolve()
+        if selected == target or target in selected.parents:
+            return None
+    marker = target / MANAGED_MODEL_MARKER
+    if marker.is_symlink() or not marker.is_file():
+        return None
+    try:
+        metadata = json.loads(marker.read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if metadata != {'installer': 'DizyTV', 'version': 1,
+                    'language': language, 'model': LANGUAGE_MODELS[language]}:
+        return None
+    return target
+
+
+def remove_language_model(language, root=None, protected_path=''):
+    """Remove only a proven DizyTV download; unpublish it before recursive cleanup."""
     if language not in LANGUAGE_MODELS or language == 'English (bundled)':
         raise ValueError('The default English model cannot be removed here')
     folder = (Path(root) if root else user_models_directory()).resolve()
@@ -76,13 +103,22 @@ def remove_language_model(language, root=None):
         raise ValueError('Refusing to remove a model outside DizyTV user storage')
     if not target.exists():
         return False
-    if not target.is_dir():
-        raise ValueError('Language model path is not a directory')
+    if managed_language_model(language, folder, protected_path) is None:
+        raise ValueError('Not a managed download, or selected as an external caption model')
     if any(item.is_symlink() for item in target.rglob('*')):
         raise ValueError('Refusing to remove a language model containing links')
-    shutil.rmtree(target)
-    return True
 
+    # A failed rename leaves the original model complete. A subsequent cleanup
+    # error may leave a private trash folder, but never a half-installed model
+    # at the public, selected language path.
+    trash = Path(tempfile.mkdtemp(prefix='.vosk-trash-', dir=folder))
+    try:
+        os.replace(target, trash / target.name)
+    except OSError:
+        trash.rmdir()
+        raise
+    shutil.rmtree(trash)
+    return True
 
 def install_language_model(language, root=None, opener=urlopen, progress=None, cancel=None):
     """Download exactly one official small model, with bounded safe extraction.
@@ -159,6 +195,10 @@ def install_language_model(language, root=None, opener=urlopen, progress=None, c
         candidate=extraction/model_name
         if not (candidate/'am').is_dir() or not (candidate/'conf').is_dir():
             raise ValueError('Downloaded Vosk model is missing acoustic/configuration files')
+        (candidate/MANAGED_MODEL_MARKER).write_text(json.dumps({
+            'installer': 'DizyTV', 'version': 1,
+            'language': language, 'model': model_name,
+        }), encoding='utf-8')
         target=folder/model_name
         if target.exists():
             if installed_language_model(language,folder) is not None:return str(target)
