@@ -124,6 +124,91 @@ class DesktopTests(unittest.TestCase):
         self.assertLess(grid.minimumWidth(),default)
         self.assertLess(grid.geometry_units()[0],58)
 
+    def test_settings_pair_only_imported_uk_fast_guides_without_duplicates(self):
+        from dizytv.sources import (FREE_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
+                                   DEFAULT_GUIDE_URLS)
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            window=MainWindow(store,start_worker=False)
+            dialog=Settings(store.read(),window)
+            links=[url for name,url,_ in FREE_PLAYLISTS
+                   if name in ('Plex FAST UK · series/24-7',
+                               'Samsung TV Plus FAST UK','Pluto TV FAST UK')]
+            # User who imported only Plex should get only Plex's guide, not
+            # every FAST EPG (which would waste bandwidth).
+            dialog.playlists.setPlainText('\n'.join(links[:1]))
+            dialog.feeds.setPlainText(DEFAULT_GUIDE_URLS[0])
+            dialog.add_uk_fast_guides()
+            self.assertEqual([DEFAULT_GUIDE_URLS[0],FAST_GUIDE_BY_PLAYLIST[links[0]]],
+                             dialog.values()['xmltv_urls'])
+            dialog.add_uk_fast_guides()
+            self.assertEqual(2,len(dialog.values()['xmltv_urls']))
+            dialog.playlists.setPlainText('\n'.join(links))
+            dialog.add_uk_fast_guides()
+            self.assertEqual(4,len(dialog.values()['xmltv_urls']))
+            self.assertEqual(3,len(set(dialog.values()['xmltv_urls']) & set(FAST_GUIDE_BY_PLAYLIST.values())))
+            dialog.close()
+            window.close()
+
+    def test_24_7_filter_and_hidden_restore_apply_to_guide_and_search(self):
+        from dizytv.core import parse_playlist
+        from dizytv.global_search import GlobalSearch
+        playlist=('#EXTM3U\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Comedy",South Park\n'
+                  'https://example.com/southpark.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="News",BBC News 24/7\n'
+                  'https://example.com/news.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Entertainment",E4\n'
+                  'https://example.com/e4.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Entertainment",E4 +1\n'
+                  'https://example.com/e4plus.m3u8\n')
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda st:st.update(channels=parse_playlist(playlist)))
+            window=MainWindow(store,start_worker=False)
+            self.assertIsNotNone(window.sort_picker)
+            self.assertIsNotNone(window.show_disabled)
+            # A global shortcut must clear unrelated old filters rather than
+            # falsely reporting that there are zero loop channels.
+            window.source_filter.setCurrentIndex(window.source_filter.findData('<ace>'))
+            window.favourites_only.setChecked(True)
+            window.search.setText('not present')
+            self.assertEqual(0,window.channels.count())
+            window.loop_filter_button.click()
+            self.assertEqual('',window.source_filter.currentData())
+            self.assertFalse(window.favourites_only.isChecked())
+            self.assertEqual('',window.search.text())
+            self.assertEqual('24/7 Shows & Loops',window.section_filter.currentData())
+            self.assertEqual(1,window.channels.count())
+            self.assertEqual('South Park',window.grid.rows[0]['name'])
+            window.section_filter.setCurrentIndex(0)
+            window.sort_picker.setCurrentText('Similar names / +1')
+            names=[window.channels.item(i).data(Qt.UserRole)['name']
+                   for i in range(window.channels.count())]
+            self.assertEqual(names.index('E4')+1,names.index('E4 +1'))
+            e4=next(ch for ch in store.read()['channels'] if ch['name']=='E4')
+            target=next(window.channels.item(i) for i in range(window.channels.count())
+                        if window.channels.item(i).data(Qt.UserRole)['id']==e4['id'])
+            window.channels.setCurrentItem(target)
+            window.toggle_channel_visibility()
+            self.assertIn(e4['id'],store.read()['disabled_channels'])
+            self.assertNotIn(e4['id'],[ch['id'] for ch in window.grid.rows])
+            self.assertNotIn(e4['id'],[window.channels.item(i).data(Qt.UserRole)['id']
+                                      for i in range(window.channels.count())])
+            search=GlobalSearch(window)
+            search.query.setText('e4')
+            search.search()
+            self.assertNotIn(e4['id'],[ch['id'] for _,ch,_ in search.entries])
+            search.close()
+            window.show_disabled.setChecked(True)
+            target=next(window.channels.item(i) for i in range(window.channels.count())
+                        if window.channels.item(i).data(Qt.UserRole)['id']==e4['id'])
+            self.assertIn('⛔',target.text())
+            window.channels.setCurrentItem(target)
+            window.toggle_channel_visibility()
+            self.assertNotIn(e4['id'],store.read()['disabled_channels'])
+            window.close()
+
     def test_complete_iptv_directory_picker_filters_cities_and_imports_only_selected(self):
         from dizytv.desktop import IPTVDirectoryDialog
         with tempfile.TemporaryDirectory() as folder:

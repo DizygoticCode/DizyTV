@@ -18,7 +18,7 @@
 </p>
 
 > [!IMPORTANT]
-> **0.1.14 alpha is a development build.** The features below are implemented. Package checks run on native Windows/Mac hosts and Android CI; individual channel availability, video decode/render failures, unattended recording and installer upgrades still need device testing. Desktop packages are unsigned for public distribution; Android uses a debug key. See [verification and known limits](docs/BUILD-VERIFICATION.md).
+> **0.1.15 alpha is a development build.** The features below are implemented. Package checks run on native Windows/Mac hosts and Android CI; individual channel availability, video decode/render failures, unattended recording and installer upgrades still need device testing. Desktop packages are unsigned for public distribution; Android uses a debug key. See [verification and known limits](docs/BUILD-VERIFICATION.md).
 
 ## Features
 
@@ -41,23 +41,23 @@ One recording runs at a time per device. The recorder saves the available live M
 
 ## Downloads
 
-**Direct native installers:** these links download the actual executable/package, **not a ZIP**. The `0.1.14-alpha` pre-release is for early device testing; installation, live playback and unattended recording still need real-world validation.
+**Direct native installers:** these links download the actual executable/package, **not a ZIP**. The `0.1.15-alpha` pre-release is for early device testing; installation, live playback and unattended recording still need real-world validation.
 
 | Platform | Direct download | Target |
 | --- | --- | --- |
-| **Windows** | [DizyTV Windows installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-Setup-0.1.14-alpha-windows-x64.exe) | x64 |
-| **Android** | [DizyTV Android installer (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-0.1.14-alpha-android-universal-debug.apk) | Android 8+ / API 26+ |
-| **MacBook / Apple Silicon** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-0.1.14-alpha-macos-arm64.pkg) | macOS 13+ / arm64 |
-| **MacBook / Intel** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-0.1.14-alpha-macos-x86_64.pkg) | macOS 13+ / x86_64 |
+| **Windows** | [DizyTV Windows installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-Setup-0.1.15-alpha-windows-x64.exe) | x64 |
+| **Android** | [DizyTV Android installer (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-android-universal-debug.apk) | Android 8+ / API 26+ |
+| **MacBook / Apple Silicon** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-arm64.pkg) | macOS 13+ / arm64 |
+| **MacBook / Intel** | [DizyTV Mac installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-x86_64.pkg) | macOS 13+ / x86_64 |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-Setup-0.1.14-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-0.1.14-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-0.1.14-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/DizyTV-0.1.14-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-Setup-0.1.15-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
 </p>
 
-[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.14-alpha/SHA256SUMS.txt) · [Native CI evidence](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Build checks](docs/BUILD-VERIFICATION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/SHA256SUMS.txt) · [Native CI evidence](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) · [Build checks](docs/BUILD-VERIFICATION.md)
 
 **Windows upgrade protection (0.1.3):** The installer now embeds the missing preflight script and detects the detached DizyTV recording worker that can remain active after its window closes. It stops only a verified idle DizyTV worker, never an active recording or a job due within two minutes; in those cases it explains why the upgrade must wait. Existing playlists, favourites and recordings remain in the separate user data folder. The installer may still ask to close a genuinely open DizyTV window. This is a targeted fix for Windows file-in-use/write-denied errors, not a fix for system-wide file permissions.
 
@@ -148,6 +148,26 @@ For compatible **clear MPEG-TS over HTTP** and **unencrypted HLS playlists conta
 - Live scheduled recordings remain independent of the timeshift cache. Do not use the cache as a substitute for saving a programme.
 
 The previous 0.1.6 release remains available. See [the timeshift development issue](https://github.com/DizygoticCode/DizyTV/issues/9) for remaining playback edge cases.
+
+## 24/7 named-show channels and Freeview-style browsing (0.1.15)
+
+- A **24/7 Shows & Loops** category and one-click filter show series marathons, named programme channels, and themed comedy/movie loops already present in your imported playlists. Examples of automatically recognised names include *South Park, Futurama, Rick and Morty, Family Guy, The Simpsons, Friends, Brooklyn Nine-Nine, The Goldbergs, The Big Bang Theory* and *Young Sheldon* **when an actual stream with that title exists**. This feature categorises catalogue entries; it does not invent streams or imply playback.
+- Optional source pack in **Settings → Add 24/7 show / sitcom channels** includes Pluto/Plex/Samsung US FAST lists and a separate worldwide Pluto TV show-collection list (including South Park character collections and Brazilian *Os Simpsons*). These are additional candidate sources, not guaranteed UK-available stations. **Settings → Add UK retransmission / +1 candidates** makes E4 and STV+1 candidates available for testing. Import limits increase to 32 playlists.
+- **Channel sort** supports alphabetical, UK Freeview-like (approximate England channel positions if not supplied by feed), same-name/+1 grouping, country/category grouping, and original playlist order. It preserves playlist channel numbers when present. Your 24/7 category also appears in the country/category browser.
+- **Tools → Check channel health** can recheck a previous batch. A URL returning HTTP 404/410 **twice consecutively** is eligible for **Hide confirmed missing**. Optional automatic hiding requires an explicit checkbox; other failures (403/geo restrictions, timeouts, throttling, expired authorisations, Ace peers, codec failures) are *never* treated as definitely dead. **Show disabled** in the left sidebar reveals hidden entries and **Hide / restore selected** restores them. No streams or programme mappings are deleted; global search, quick guide and EPG hide disabled channels by default.
+- Health checks run from the PC and cannot prove an actual clear/DRM-compatible, decoded picture. Real playback and correct operating-region permissions still matter.
+
+## DizyTV 0.1.15-alpha — 24/7 FAST sources, channel-health diagnostics, Vosk languages
+
+- New built-in UK FAST playlist presets: Plex, Samsung TV Plus and Pluto TV, based on public generated playlists from [app-m3u-generator](https://github.com/BuddyChewChew/app-m3u-generator). New installs include **matching UK XMLTV** guides for all three services plus the existing seven-day UK Freeview guide. Existing installations can open **Settings → Add built-in free playlists** (which also pairs the applicable FAST guides), or **Settings → Add matching UK FAST programme guides** if those channel feeds are already configured. Save, **Refresh channels**, then **Refresh guide**. Existing custom playlist/EPG URLs are preserved; feeds are deduplicated and the 32 playlist / 20 guide source limits are enforced. US Roku and Tubi have a separate opt-in button; region/provider rules may restrict playback.
+- **Tools → Check channel health:** on-demand, device-local probes: one selected channel or successive **40-channel batches**, with no more than four simultaneous HTTP connections and short timeouts. The report distinguishes unreachable/expired streams, HTTP access denied (possible region, credentials or token issue), provider errors, HLS manifest responses and Ace streams which require an actual engine/peer session. **A successful check does not prove media segments, DRM status, VLC decoding or visual playback.** No automatic removal, no continuous background network scans, no automatic VPN switching. The result comes from **the computer running DizyTV**, not DizyServer, and can vary when NordVPN is active.
+- **CC Subtitles → Generate live subtitles** uses bundled Windows FFmpeg, Vosk DLL/runtime and English model by default; **no extra English download required**. Settings now offers optional official small Vosk models for French, German, Spanish, Italian, Dutch, Portuguese, Russian, Polish, Japanese and Hindi, downloaded only when requested. Captions use local processing and can lag. Audio must be accessible to FFmpeg: some encrypted, token-limited, audio-less or player-specific streams remain unsupported.
+- Local captions are now permitted while the opt-in timeshift buffer is active; the separate speech reader connects to the **original** source rather than the local time-shift segment URL. The app reports a clearer FFmpeg audio failure instead of silently treating a stream with no captured audio as working.
+
+
+**UK +1 channels:** The public Free-TV playlist omits +1 variants, so there is an additional **opt-in** UK retransmission candidate pack including E4 and STV+1 listings. Third-party stream availability, quality, regional permissions and expiry cannot be inferred from a station's name or an HTTP response; only actual playback can confirm picture and sound. STV+1's official player also has regional restrictions. DizyTV doesn't auto-change VPN servers or treat HTTP 403 as evidence of a dead stream.
+
+**Important:** The user's roughly 15,000 imported channels are on their Windows device, not hosted in this repository. The repository audit confirms source playlist files and selected channel listings only. This release does **not** claim to have tested all individual channel streams or restored unavailable E4 streams. Network health results and real-device caption rendering should be verified locally.
 
 ## DizyTV 0.1.14-alpha — no grey player rails or hidden buttons
 

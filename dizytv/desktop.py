@@ -19,7 +19,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
 from .network import download
-from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
+from .sources import (configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS,
+                      DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
+                      OPTIONAL_UK_RETRANSMISSIONS, OPTIONAL_SHOW_LOOP_PLAYLISTS, source_label)
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
@@ -29,7 +31,9 @@ from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
-from .auto_captions import verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT
+from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
+                            LANGUAGE_MODELS, installed_language_model, install_language_model)
+from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -674,7 +678,7 @@ class IPTVDirectoryDialog(QDialog):
             item.setToolTip(url)
             self.results.addItem(item)
         self.status_label.setText(f'{len(visible):,} matching sources of {len(self.rows):,} published playlists '
-                                  '· select one or several; up to 24 active playlists in Settings')
+                                  '· select one or several; up to 32 active playlists in Settings')
 
     def add_selected(self):
         urls=[item.data(Qt.UserRole) for item in self.results.selectedItems()]
@@ -682,7 +686,7 @@ class IPTVDirectoryDialog(QDialog):
             self.status_label.setText('Select at least one playlist, or choose the worldwide index.')
             return
         combined=list(dict.fromkeys([*self.existing,*urls]))
-        if len(combined)>24:
+        if len(combined)>32:
             self.status_label.setText(f'Cannot activate {len(combined)} feeds at once (24 maximum). '
                                       'Select fewer, or use the single worldwide index.')
             return
@@ -729,6 +733,18 @@ class Settings(QDialog):
         add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
+        add_shows=QPushButton('Add 24/7 show / sitcom channels (US FAST sources)',self)
+        add_shows.setToolTip('Opt-in public Pluto/Plex/Samsung US feeds; find their series channels under 24/7 Shows & Loops.')
+        add_shows.clicked.connect(self.add_show_loop_playlists)
+        form.addRow(add_shows)
+        add_us=QPushButton('Add optional US FAST channels (Roku and Tubi)',self)
+        add_us.setToolTip('US-origin FAST listings may be unavailable outside supported regions; use only where permitted.')
+        add_us.clicked.connect(self.add_optional_fast_playlists)
+        form.addRow(add_us)
+        uk_candidates=QPushButton('Add UK retransmission / +1 candidates (unverified)',self)
+        uk_candidates.setToolTip('Optional independent UK sources including E4 and STV+1 candidates. Availability and access vary.')
+        uk_candidates.clicked.connect(self.add_uk_retransmissions)
+        form.addRow(uk_candidates)
         discover=QPushButton('Browse every IPTV-org country, category and language…',self)
         discover.setObjectName('browseIPTVDirectory')
         discover.clicked.connect(self.browse_iptv_directory)
@@ -796,6 +812,23 @@ class Settings(QDialog):
                     'Picture-based broadcast captions may ignore these settings. '
                     'Automatic speech-generated subtitles require a separate opt-in recognition engine.')
         hint.setWordWrap(True);form.addRow(hint)
+        self.caption_language=QComboBox()
+        self.caption_language.setObjectName('captionLanguage')
+        self.caption_language.addItems(list(LANGUAGE_MODELS))
+        self.caption_language.setCurrentText(self.original.get('auto_caption_language','English (bundled)'))
+        form.addRow('Speech transcription language',self.caption_language)
+        model_actions=QWidget()
+        model_actions_layout=QHBoxLayout(model_actions)
+        model_actions_layout.setContentsMargins(0,0,0,0)
+        self.model_download=QPushButton('Download selected language model')
+        self.model_download.clicked.connect(self.download_caption_language)
+        self.model_state=QLabel('')
+        self.model_state.setWordWrap(True)
+        model_actions_layout.addWidget(self.model_download)
+        model_actions_layout.addWidget(self.model_state,1)
+        form.addRow('Optional Vosk languages',model_actions)
+        self.caption_language.currentTextChanged.connect(self.refresh_caption_language)
+        self.refresh_caption_language()
         self.auto_model_path=QLineEdit(self.original.get('auto_caption_model_dir',''))
         self.auto_model_path.setObjectName('autoCaptionModelPath')
         self.auto_model_path.setReadOnly(True)
@@ -818,12 +851,16 @@ class Settings(QDialog):
         ffmpeg_layout.addWidget(self.auto_ffmpeg_path,1)
         ffmpeg_layout.addWidget(ffmpeg_btn)
         form.addRow('FFmpeg for local speech captions',ffmpeg_row)
-        generated=QLabel('Experimental: Start local speech captions separately from the CC menu while watching. '
-                         'Windows installer includes FFmpeg and the English model (other platforms may require setup); makes a second connection '
-                         'to the playing stream, uses local CPU/RAM and may lag several seconds. '
-                         'Off by default. No cloud speech service or microphone capture.')
+        generated=QLabel('Windows includes FFmpeg, Vosk runtime/DLLs and the English speech model. '
+                         'Use CC → Generate live subtitles, including for streams without built-in captions. '
+                         'Other languages are optional downloads. Uses local CPU/RAM and a second stream connection; '
+                         'off by default, no cloud speech service or microphone.')
         generated.setWordWrap(True);form.addRow(generated)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
+        fast_epg=QPushButton('Add matching UK FAST programme guides')
+        fast_epg.setToolTip('Add only the Plex/Samsung/Pluto UK XMLTV sources for playlists currently selected above.')
+        fast_epg.clicked.connect(self.add_uk_fast_guides)
+        form.addRow(fast_epg)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
         self.zone.setCurrentIndex(max(0,self.zone.findData(self.original['timezone']))); form.addRow('Timezone',self.zone)
@@ -865,7 +902,53 @@ class Settings(QDialog):
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
-        self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
+        combined=list(dict.fromkeys(existing+DEFAULT_PLAYLIST_URLS))
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 32 active playlists. '
+                                'Remove unused sources first to make room for the UK FAST feeds.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+        self.add_uk_fast_guides(silent=True)
+
+    def add_uk_fast_guides(self,silent=False):
+        active={u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()}
+        matched=[url for playlist,url in FAST_GUIDE_BY_PLAYLIST.items() if playlist in active]
+        if not matched:
+            if not silent:QMessageBox.information(self,'DizyTV','Add a UK FAST playlist (Plex, Samsung TV Plus or Pluto TV) first.')
+            return
+        existing=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys([*existing,*matched]))
+        if len(combined)>20:
+            QMessageBox.warning(self,'DizyTV','You already have 20 XMLTV guide URLs. '
+                                'Remove unused guide sources to add the matching UK FAST guides.')
+            return
+        self.feeds.setPlainText('\n'.join(combined))
+
+    def add_show_loop_playlists(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys(existing+[url for _,url,_ in OPTIONAL_SHOW_LOOP_PLAYLISTS]))
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 32 active playlist sources. Remove unused ones first.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+
+    def add_uk_retransmissions(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys(existing+[url for _,url,_ in OPTIONAL_UK_RETRANSMISSIONS]))
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','At most 32 playlist URLs are supported. '
+                                'Remove unused sources before adding UK retransmissions.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+
+    def add_optional_fast_playlists(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys(existing + [url for _,url,_ in OPTIONAL_FAST_PLAYLISTS]))
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 32 active playlist URLs. '
+                                'Remove duplicate/unused sources before adding the optional US FAST feeds.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
 
     def browse_iptv_directory(self):
         active=list(dict.fromkeys(u.strip() for u in self.playlists.toPlainText().splitlines()
@@ -873,6 +956,37 @@ class Settings(QDialog):
         dialog=IPTVDirectoryDialog(active,self)
         if dialog.exec()==QDialog.Accepted and dialog.added_urls:
             self.playlists.setPlainText('\n'.join(dict.fromkeys([*active,*dialog.added_urls])))
+
+    def refresh_caption_language(self,*_):
+        language=self.caption_language.currentText()
+        installed=installed_language_model(language)
+        if language=='English (bundled)':
+            self.model_download.setEnabled(False)
+            self.model_state.setText('English uses the bundled Windows model; no download needed.')
+        elif installed is not None:
+            self.model_download.setEnabled(False)
+            self.model_state.setText('Installed • '+language)
+        else:
+            self.model_download.setEnabled(True)
+            self.model_state.setText('Not installed • download once to your user data folder.')
+
+    def download_caption_language(self):
+        language=self.caption_language.currentText()
+        if language=='English (bundled)' or getattr(self,'download_task',None) is not None:return
+        self.model_download.setEnabled(False)
+        self.model_state.setText('Downloading '+language+' from official Vosk…')
+        task=Task(lambda:install_language_model(language))
+        self.download_task=task
+        def done(path):
+            self.download_task=None
+            self.refresh_caption_language()
+        def failed(message):
+            self.download_task=None
+            self.model_state.setText('Download failed: '+message[:140])
+            self.model_download.setEnabled(True)
+        task.signals.success.connect(done)
+        task.signals.failure.connect(failed)
+        QThreadPool.globalInstance().start(task)
 
     def choose_auto_caption_model(self):
         folder=QFileDialog.getExistingDirectory(
@@ -914,8 +1028,194 @@ class Settings(QDialog):
                     subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
                     auto_caption_model_dir=self.auto_model_path.text(),
                     auto_caption_ffmpeg_path=self.auto_ffmpeg_path.text(),
+                    auto_caption_language=self.caption_language.currentText(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
+
+class ChannelHealthDialog(QDialog):
+    """Explicit per-device channel checks in manually requested 40-item batches."""
+
+    def __init__(self,store,selected,pool,on_change=None,parent=None):
+        super().__init__(parent)
+        from .sources import configured_playlists, source_label
+        state=store.read()
+        self.store=store
+        self.on_change=on_change
+        self.last_batch_start=None
+        self.setWindowTitle('Channel health — this computer')
+        self.resize(725,540)
+        self.pool=pool
+        self.rows=list(state['channels'])
+        self.selected=selected
+        self.offset=0
+        self.running=False
+        self.results=[]
+        layout=QVBoxLayout(self)
+        description=QLabel('Checks run from THIS PC (with its current VPN/network). '
+                           'A responding URL does not prove video playback. '
+                           'Ace streams require real engine/peer playback. '
+                           'Failed HTTP probes are not playback tests. Channels are never deleted; '
+                           'you can hide confirmed missing streams and restore them later.')
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        self.source=QComboBox()
+        self.source.addItem('All imported channels','')
+        for url in configured_playlists(state['settings']):
+            self.source.addItem(source_label(url),url)
+        self.source.currentIndexChanged.connect(self.reset_filter)
+        layout.addWidget(self.source)
+        self.summary=QLabel('Ready • Test one channel or a manually requested batch of 40.')
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self.output=QListWidget()
+        layout.addWidget(self.output,1)
+        self.auto_hide=QCheckBox('Automatically hide after two consecutive 404/410 checks (opt-in)')
+        self.auto_hide.setToolTip('Only HTTP 404/410 twice for this exact channel ID. Never auto-hide 403, timeouts, Ace or HLS responses.')
+        layout.addWidget(self.auto_hide)
+        actions=QHBoxLayout()
+        extras=QHBoxLayout()
+        self.selected_button=QPushButton('Check selected channel')
+        self.selected_button.setEnabled(True)
+        self.selected_button.clicked.connect(self.check_selected)
+        actions.addWidget(self.selected_button)
+        self.batch_button=QPushButton('Check next 40')
+        self.batch_button.clicked.connect(self.check_next)
+        actions.addWidget(self.batch_button)
+        self.recheck_button=QPushButton('Recheck last 40')
+        self.recheck_button.setEnabled(False)
+        self.recheck_button.clicked.connect(self.recheck_last)
+        actions.addWidget(self.recheck_button)
+        self.hide_confirmed=QPushButton('Hide confirmed missing')
+        self.hide_confirmed.setEnabled(False)
+        self.hide_confirmed.clicked.connect(self.hide_confirmed_missing)
+        extras.addWidget(self.hide_confirmed)
+        copy=QPushButton('Copy results')
+        copy.clicked.connect(self.copy_results)
+        extras.addWidget(copy)
+        close=QPushButton('Close')
+        close.clicked.connect(self.close)
+        extras.addWidget(close)
+        layout.addLayout(actions)
+        layout.addLayout(extras)
+        self.reset_filter()
+
+    def filtered(self):
+        source=self.source.currentData()
+        return [row for row in self.rows
+                if not source or source in (row.get('sources') or [row.get('source')])]
+
+    def reset_filter(self,*_):
+        self.offset=0
+        self.results.clear()
+        self.output.clear()
+        self.summary.setText(f'{len(self.filtered()):,} channels in this selection. '
+                             'Each click probes at most 40 using four network connections.')
+        self.batch_button.setEnabled(not self.running and bool(self.filtered()))
+        self.batch_button.setText('Check first 40')
+        self.last_batch_start=None
+        self.recheck_button.setEnabled(False)
+        self.hide_confirmed.setEnabled(False)
+
+    def check_selected(self):
+        # This dialog is modeless: the main window's selection can change.
+        current=getattr(self.parent(),'selected',self.selected)
+        if current is None:
+            self.summary.setText('Select a channel in the main window to check.')
+            return
+        self.run_batch([current],0,one=True)
+
+    def check_next(self):
+        rows=self.filtered()
+        if self.offset>=len(rows):
+            self.summary.setText('All channels in this selection have been checked.')
+            return
+        self.run_batch(rows,self.offset)
+
+    def recheck_last(self):
+        if self.last_batch_start is not None:
+            self.run_batch(self.filtered(),self.last_batch_start)
+
+    def set_hidden(self,ids):
+        requested=set(ids)
+        known={ch['id'] for ch in self.rows}
+        permitted=requested & known
+        if not permitted:return 0
+        def update(state):
+            state.setdefault('disabled_channels',[])
+            state['disabled_channels']=sorted(set(state['disabled_channels'])|permitted)
+        self.store.update(update)
+        if self.on_change:self.on_change()
+        return len(permitted)
+
+    def hide_confirmed_missing(self):
+        from .channel_health import confirmed_missing_ids
+        candidate=confirmed_missing_ids(self.results)
+        count=self.set_hidden(candidate)
+        if count:
+            self.summary.setText(f'{count} confirmed-missing channel(s) hidden from browsing. '
+                                 'Enable Show disabled in the sidebar to restore any of them.')
+        self.hide_confirmed.setEnabled(False)
+
+    def run_batch(self,rows,start,one=False):
+        if self.running:return
+        from .channel_health import check_batch, BATCH_SIZE
+        self.running=True
+        # Do not let source changes invalidate an in-flight batch offset.
+        self.source.setEnabled(False)
+        self.batch_button.setEnabled(False)
+        self.recheck_button.setEnabled(False)
+        self.selected_button.setEnabled(False)
+        if not one:self.last_batch_start=start
+        count=min(BATCH_SIZE,len(rows)-start)
+        self.summary.setText(f'Checking {count} streams from this computer… '
+                             'A region/DRM-dependent stream may still fail in VLC.')
+        task=Task(lambda:check_batch(rows,start,1 if one else BATCH_SIZE))
+        self.health_task=task
+        def success(payload):
+            entries,end=payload
+            self.running=False
+            self.source.setEnabled(True)
+            if not one:self.offset=end
+            self.results.extend(entries)
+            for entry in entries:
+                item=QListWidgetItem(entry['name'][:90]+'  •  '+
+                                     entry['status'].replace('-',' ')+
+                                     ' — '+entry['detail'])
+                item.setData(Qt.UserRole,entry['id'])
+                self.output.addItem(item)
+            from .channel_health import confirmed_missing_ids
+            confirmed=confirmed_missing_ids(self.results)
+            if confirmed and self.auto_hide.isChecked():
+                self.set_hidden(confirmed)
+            self.hide_confirmed.setEnabled(bool(confirmed) and not self.auto_hide.isChecked())
+            self.recheck_button.setEnabled(self.last_batch_start is not None)
+            counts={}
+            for entry in self.results:
+                counts[entry['status']]=counts.get(entry['status'],0)+1
+            self.summary.setText(f'{len(self.results)} checks this session · '+
+                                 ', '.join(f'{k}: {n}' for k,n in sorted(counts.items()))+
+                                 f' · batch position {self.offset}/{len(self.filtered())}. '
+                                 'Results are network reachability hints, not playback proof.')
+            self.batch_button.setEnabled(self.offset<len(self.filtered()))
+            self.batch_button.setText('Check next 40')
+            self.selected_button.setEnabled(True)
+            self.health_task=None
+        def failure(message):
+            self.running=False
+            self.source.setEnabled(True)
+            self.summary.setText('Health check failed; retry the batch. '+message[:120])
+            self.batch_button.setEnabled(True)
+            self.recheck_button.setEnabled(self.last_batch_start is not None)
+            self.selected_button.setEnabled(True)
+            self.health_task=None
+        task.signals.success.connect(success)
+        task.signals.failure.connect(failure)
+        self.pool.start(task)
+
+    def copy_results(self):
+        import json
+        # Never put URLs, access tokens, full headers or IPs in the clipboard.
+        QApplication.clipboard().setText(json.dumps(self.results,indent=2))
 
 class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
@@ -936,6 +1236,7 @@ class MainWindow(QMainWindow):
         self._auto_caption_label=None
         self._auto_caption_text=''
         self._auto_caption_updated=0
+        self._auto_caption_started_at=0
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
@@ -980,6 +1281,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction('Restore local backup…',self.restore)
         tools_menu.addSeparator()
         tools_menu.addAction('Set up Ace Stream engine…',self.open_ace_stream_setup)
+        tools_menu.addAction('Check channel health…',self.open_channel_health)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
@@ -1018,6 +1320,21 @@ class MainWindow(QMainWindow):
             widget.currentIndexChanged.connect(self.render_channels)
             filter_layout.addWidget(widget)
         side.addWidget(filters)
+        order=QWidget()
+        order_row=QHBoxLayout(order)
+        order_row.setContentsMargins(0,0,0,0)
+        order_row.addWidget(QLabel('Sort'))
+        self.sort_picker=QComboBox()
+        self.sort_picker.setObjectName('channelSort')
+        self.sort_picker.addItems(CHANNEL_SORT_MODES)
+        self.sort_picker.setCurrentText(self.state['settings'].get('channel_sort','Name A–Z'))
+        self.sort_picker.currentTextChanged.connect(self.change_channel_sort)
+        order_row.addWidget(self.sort_picker,1)
+        side.addWidget(order)
+        self.loop_filter_button=QPushButton('24/7 Shows & Loops')
+        self.loop_filter_button.setToolTip('Show dedicated TV-series marathons and 24/7 themed channels')
+        self.loop_filter_button.clicked.connect(self.filter_24_7)
+        side.addWidget(self.loop_filter_button)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
         self.country_tree.setMaximumHeight(240)
@@ -1025,9 +1342,21 @@ class MainWindow(QMainWindow):
         self.country_tree.itemDoubleClicked.connect(self.country_tree_double_clicked)
         side.addWidget(self.country_tree)
         self._tree_dirty=True
-        self.favourites_only=QCheckBox('★ Favourites only'); self.favourites_only.toggled.connect(self.render_channels); side.addWidget(self.favourites_only)
+        selectors=QWidget()
+        selector_row=QHBoxLayout(selectors)
+        selector_row.setContentsMargins(0,0,0,0)
+        self.favourites_only=QCheckBox('★ Favourites only')
+        self.favourites_only.toggled.connect(self.render_channels)
+        selector_row.addWidget(self.favourites_only)
+        self.show_disabled=QCheckBox('Show disabled')
+        self.show_disabled.setToolTip('Include hidden channels so they can be restored')
+        self.show_disabled.toggled.connect(self.refresh_disabled_channels)
+        selector_row.addWidget(self.show_disabled)
+        side.addWidget(selectors)
         self.channels=QListWidget(); self.channels.currentItemChanged.connect(self.choose_channel); self.channels.itemDoubleClicked.connect(lambda:self.play()); side.addWidget(self.channels,1)
-        for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
+        for label,handler in [('★ Add / remove favourite',self.favourite),
+                              ('Hide / restore selected',self.toggle_channel_visibility),
+                              ('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
             b=QPushButton(label); b.clicked.connect(handler); side.addWidget(b)
         self.sidebar=sidebar
         sidebar.setMinimumWidth(0)
@@ -1199,6 +1528,67 @@ class MainWindow(QMainWindow):
             if path.exists() and path.stat().st_size<=100*1024**2:
                 self.guide=json.loads(path.read_text(encoding='utf-8'))
         except (OSError,ValueError):pass
+    def change_channel_sort(self,mode):
+        if mode not in CHANNEL_SORT_MODES:return
+        if self.store.read()['settings'].get('channel_sort')!=mode:
+            self.state=self.store.update(lambda state:state['settings'].update(channel_sort=mode))
+        self._tree_dirty=True
+        self.render_channels()
+
+    def filter_24_7(self):
+        # This is a global directory shortcut, not a refinement of the last
+        # unrelated country, playlist, favourites or genre filters.
+        for widget in (self.country_filter,self.genre_filter,
+                       self.kind_filter,self.source_filter):
+            widget.blockSignals(True)
+            widget.setCurrentIndex(0)
+            widget.blockSignals(False)
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self.favourites_only.blockSignals(True)
+        self.favourites_only.setChecked(False)
+        self.favourites_only.blockSignals(False)
+        self.section_filter.blockSignals(True)
+        self.section_filter.setCurrentIndex(max(0,self.section_filter.findData('24/7 Shows & Loops')))
+        self.section_filter.blockSignals(False)
+        self.render_channels()
+        self.status.setText(f'24/7 Shows & Loops: {self.channels.count()} channels across all playlists.')
+
+    def refresh_disabled_channels(self,*_):
+        self._tree_dirty=True
+        self.render_channels()
+        dlg=getattr(self,'global_search_dialog',None)
+        if dlg is not None and dlg.isVisible():
+            dlg.refresh_catalogue()
+
+    def toggle_channel_visibility(self):
+        if not self.selected:
+            self.status.setText('Select a channel to hide or restore.')
+            return
+        cid=self.selected['id']
+        current=cid in set(self.store.read().get('disabled_channels',()))
+        label=display_channel_name(self.selected['name'])
+        def change(state):
+            hidden=set(state.get('disabled_channels',()))
+            if cid in hidden:hidden.remove(cid)
+            else:hidden.add(cid)
+            state['disabled_channels']=sorted(hidden)
+        self.store.update(change)
+        self.refresh_disabled_channels()
+        self.status.setText(('Restored ' if current else 'Hidden ')+label+
+                            ' — use Show disabled to restore it later.')
+
+    def open_channel_health(self):
+        dialog=getattr(self,'health_dialog',None)
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog=ChannelHealthDialog(self.store,self.selected,self.pool,self.refresh_disabled_channels,self)
+        self.health_dialog=dialog
+        dialog.show()
+
     def show_source_status(self):
         state=self.store.read(); counts={}
         for ch in state['channels']:
@@ -1291,9 +1681,15 @@ class MainWindow(QMainWindow):
             self.play()
 
     def render_channels(self,*_):
-        previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
-        # Give free HTTP/HLS channels prominence, without removing Ace streams.
-        source.sort(key=lambda ch:(ch.get('transport')=='Ace Stream',ch.get('country')!='United Kingdom',display_channel_name(ch['name']).casefold()))
+        previous=self.selected['id'] if self.selected else None
+        self.state=self.store.read()
+        source=catalogue(self.state,include_disabled=self.show_disabled.isChecked())
+        disabled=set(self.state.get('disabled_channels',()))
+        self.channels.blockSignals(True)
+        self.channels.clear()
+        sort_mode=self.sort_picker.currentText()
+        source=[ch for _,ch in sorted(enumerate(source),
+                    key=lambda entry:channel_sort_key(entry[1],sort_mode,entry[0]))]
         self.build_country_tree(source)
         selected_source=self.source_filter.currentData()
         urls=configured_playlists(self.state['settings'])
@@ -1342,7 +1738,12 @@ class MainWindow(QMainWindow):
             if kind and kind not in (channel_kind(ch),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
             key=self.matched_guide(ch)
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
-            item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+display_channel_name(ch['name'])); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
+            prefix='⛔ ' if ch['id'] in disabled else ('★ ' if ch['id'] in favs else '')
+            item=QListWidgetItem(prefix+display_channel_name(ch['name']))
+            item.setData(Qt.UserRole,ch)
+            if ch['id'] in disabled:
+                item.setToolTip('Hidden from the normal directory. Select and click Hide / restore selected.')
+            self.channels.addItem(item)
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
         self.channels.blockSignals(False); self.render_guide()
     def choose_channel(self,item,*_):
@@ -1888,12 +2289,21 @@ class MainWindow(QMainWindow):
         if not self.player or not self.playback_started or not self._playback_url:
             self.status.setText('Play a live channel before starting local speech captions.')
             return
-        if self.timeshift is not None:
-            self.status.setText('Return to direct live playback and disable rolling timeshift before generating captions.')
-            return
         settings=self.state['settings']
+        language=settings.get('auto_caption_language','English (bundled)')
+        model_override=settings.get('auto_caption_model_dir','') if language=='English (bundled)' else ''
+        if language!='English (bundled)':
+            installed=installed_language_model(language)
+            if installed is None:
+                self.status.setText('Offline '+language+' model not installed. '
+                                    'Open Settings → Optional Vosk languages and download it first.')
+                return
+            model_override=str(installed)
+        # When timeshift is playing a local loopback URL, the external FFmpeg
+        # audio reader needs the original source, not a short buffer segment.
+        caption_source=(self.timeshift.source if self.timeshift is not None else self._playback_url)
         try:
-            ffmpeg,model=verify_caption_engine(settings.get('auto_caption_model_dir',''),
+            ffmpeg,model=verify_caption_engine(model_override,
                                                settings.get('auto_caption_ffmpeg_path',''))
         except (ValueError,OSError) as exc:
             self.status.setText('Local captions unavailable: '+str(exc)+
@@ -1911,13 +2321,35 @@ class MainWindow(QMainWindow):
         def safe_finished(reason):
             try:signals.finished.emit(serial,reason)
             except RuntimeError:pass
-        worker=LocalCaptionWorker(ffmpeg,self._playback_url,model,safe_caption,safe_finished)
+        worker=LocalCaptionWorker(ffmpeg,caption_source,model,safe_caption,safe_finished)
         self._auto_caption_worker=worker
         self._auto_caption_worker_serial=serial
         self._auto_caption_stopping=False
-        self.status.setText('Starting optional offline captions; recognising live audio locally. '
-                            'A second connection to this stream is used; no microphone or cloud STT.')
+        self.status.setText('Starting '+language+' offline captions (local FFmpeg + Vosk). '
+                            'Listening for speech; captions may take several seconds. '
+                            'Second source connection; no microphone or cloud speech.')
+        self._auto_caption_started_at=time.monotonic()
+        # Show a visible acknowledgment that auto CC was selected. Only actual
+        # recognition results replace this text; it is not fabricated dialogue.
+        self.create_auto_caption_overlay()
+        self._auto_caption_label.setText('Preparing offline subtitles…')
+        self._auto_caption_updated=time.monotonic()
+        self.position_auto_caption_overlay()
+        self._auto_caption_overlay.show()
+        self._auto_caption_overlay.raise_()
         worker.start()
+        QTimer.singleShot(12000,lambda:self.caption_waiting_status(serial))
+
+    def caption_waiting_status(self,serial):
+        if (serial==self._auto_caption_seq and self._auto_caption_worker is not None
+                and not self._auto_caption_text and not self._auto_caption_stopping):
+            self.status.setText('Offline captions are running but no speech has been recognised '
+                                'yet. Check audible dialogue and that FFmpeg can access this '
+                                'stream; music or audio-only restrictions may prevent text.')
+            if self._auto_caption_label is not None:
+                self._auto_caption_label.setText('Listening for dialogue…')
+                self._auto_caption_updated=time.monotonic()
+                self._auto_caption_overlay.show()
 
     def sync_subtitles(self):
         """Use the embedded subtitle stream without another video connection.
@@ -2671,7 +3103,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(counter)
         more=QPushButton('Show next 150 channels',dialog)
         layout.addWidget(more)
-        channels=catalogue(self.store.read())
+        channels=catalogue(self.store.read(),include_disabled=self.show_disabled.isChecked())
         page_size=150
         matching=[]
         shown=0

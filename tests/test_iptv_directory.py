@@ -81,11 +81,15 @@ class IPTVDirectoryTests(unittest.TestCase):
         self.assertEqual(1,len(errors))
         self.assertEqual([au,comedy],new[0]['sources'])
         self.assertEqual(1,len(new))
-        self.assertEqual(24,len([au,comedy]+['https://example.com/'+str(i)+'.m3u'
-                                  for i in range(22)]))
+        # The optional UK and 24/7 US source packs expanded the explicit
+        # bound from 24 to 32 while keeping the safety limit finite.
+        at_limit=default_state()
+        at_limit['settings']['playlist_urls']=[
+            'https://example.com/'+str(i)+'.m3u' for i in range(32)]
+        validate_state(at_limit)
         too_many=default_state()
         too_many['settings']['playlist_urls']=[
-            'https://example.com/'+str(i)+'.m3u' for i in range(25)]
+            'https://example.com/'+str(i)+'.m3u' for i in range(33)]
         with self.assertRaises(ValueError):
             validate_state(too_many)
 

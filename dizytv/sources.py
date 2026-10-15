@@ -27,14 +27,55 @@ FREE_PLAYLISTS = (
     ("Free comedy / sitcom channels", "https://iptv-org.github.io/iptv/categories/comedy.m3u", ""),
     ("Free public sports channels", "https://iptv-org.github.io/iptv/categories/sports.m3u", ""),
     ("Free-TV curated international", "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8", ""),
+    # UK FAST services: published generated channel lists, not guarantees of playback.
+    # 24/7 programme-themed stations typically originate from FAST providers.
+    ("Plex FAST UK · series/24-7", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plex_gb.m3u", "United Kingdom"),
+    ("Samsung TV Plus FAST UK", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/samsungtvplus_gb.m3u", "United Kingdom"),
+    ("Pluto TV FAST UK", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plutotv_gb.m3u", "United Kingdom"),
     ("IPTV-org worldwide", "https://iptv-org.github.io/iptv/index.m3u", ""),
 )
-# These guide URLs are opt-in download links; their contents are never redistributed.
+# These optional US FAST feeds may be region-restricted and are never
+# enabled automatically on British devices.
+OPTIONAL_FAST_PLAYLISTS = (
+    ("Roku FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/roku_all.m3u", "United States"),
+    ("Tubi FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/tubi_all.m3u", "United States"),
+)
+# Additional show-themed US FAST sources. Explicit opt-in: rights, geo
+# restrictions and the current household/IP location determine playability.
+# Listings are checked independently by DizyTV; no VPN changes are attempted.
+OPTIONAL_SHOW_LOOP_PLAYLISTS = (
+    ("Pluto TV US sitcoms and series", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plutotv_us.m3u", "United States"),
+    ("Plex US TV marathons", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plex_us.m3u", "United States"),
+    ("Samsung TV Plus US sitcoms", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/samsungtvplus_us.m3u", "United States"),
+    ("Pluto global show collections (third-party)", "https://raw.githubusercontent.com/iprtl/m3u/live/Pluto.m3u", ""),
+)
+# Third-party UK retransmission candidates requested by users. These are
+# separate, opt-in sources because they may include short-lived/session-bound
+# links, unsupported DRM or streams requiring regional broadcast rights.
+# A matching channel name / EPG ID is NOT proof of playable video.
+OPTIONAL_UK_RETRANSMISSIONS = (
+    ("UK retransmissions (+1 / STV+1 candidate)", "https://raw.githubusercontent.com/ExperiencersInternational/tvsetup/main/config.m3u", "United Kingdom"),
+    ("UK alternatives (E4 candidate)", "https://raw.githubusercontent.com/dp247/IPTV/master/playlists/playlist_uk.m3u8", "United Kingdom"),
+)
+# Matching FAST XMLTV listings use the same opaque channel IDs in their M3U
+# tvg-id attributes. Guide files are opt-in URLs; contents are not redistributed.
+# UK Freeview listings and FAST listings are different catalogues.
+UK_FAST_GUIDES = (
+    ("Plex UK FAST EPG", "https://i.mjh.nz/Plex/gb.xml.gz"),
+    ("Samsung TV Plus UK FAST EPG", "https://i.mjh.nz/SamsungTVPlus/gb.xml.gz"),
+    ("Pluto TV UK FAST EPG", "https://i.mjh.nz/PlutoTV/gb.xml.gz"),
+)
 FREE_GUIDES = (
     ("UK Freeview (seven days)", "https://raw.githubusercontent.com/dp247/Freeview-EPG/master/epg.xml"),
     ("US lightweight XMLTV", "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_lite.xml.gz"),
+    *UK_FAST_GUIDES,
 )
-# Sixteen bounded free HTTP/Ace/category sources; the worldwide mega-index stays opt-in.
+FAST_GUIDE_BY_PLAYLIST = dict(zip(
+    (row[1] for row in FREE_PLAYLISTS if row[0] in (
+        "Plex FAST UK · series/24-7", "Samsung TV Plus FAST UK", "Pluto TV FAST UK")),
+    (url for _,url in UK_FAST_GUIDES),
+))
+# Keep source count bounded; the worldwide mega-index stays opt-in.
 DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
@@ -56,7 +97,7 @@ CATEGORY_HINTS = {
 
 def source_label(url):
     """Human-readable source name without exposing playlist credentials or query tokens."""
-    for label, preset, _ in FREE_PLAYLISTS:
+    for label, preset, _ in (*FREE_PLAYLISTS, *OPTIONAL_FAST_PLAYLISTS, *OPTIONAL_UK_RETRANSMISSIONS, *OPTIONAL_SHOW_LOOP_PLAYLISTS):
         if preset == url:
             return label
     if url in DIRECTORY_META:
@@ -86,8 +127,8 @@ def refresh_catalogue(settings, old_channels, fetch):
     urls = configured_playlists(settings)
     if not urls:
         raise ValueError("Add at least one channel playlist in Settings")
-    if len(urls) > 24:
-        raise ValueError("Use at most 24 channel playlists")
+    if len(urls) > 32:
+        raise ValueError("Use at most 32 channel playlists")
     existing = {}
     for ch in old_channels:
         # A stream found in two directories must remain cached independently

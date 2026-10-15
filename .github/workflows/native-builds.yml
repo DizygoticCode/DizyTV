@@ -8,6 +8,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Multiple small PR commits used to queue dozens of redundant native macOS
+# builds. Keep only the newest pull-request build; never cancel a main release.
+concurrency:
+  group: native-alpha-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   android:
     name: Android / universal APK
@@ -27,12 +32,12 @@ jobs:
       - name: Verify APK signature and checksum
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.14-alpha-android-universal-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.15-alpha-android-universal-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/*.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.14-alpha-android
+          name: DizyTV-0.1.15-alpha-android
           path: dist/
           if-no-files-found: error
           retention-days: 30
@@ -122,7 +127,7 @@ jobs:
             Start-Sleep -Seconds 3
             $old.Refresh()
             if ($old.HasExited) { throw 'Old worker did not start' }
-            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.14-alpha-windows-x64.exe').Path
+            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.15-alpha-windows-x64.exe').Path
             $install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $target + '"')) -PassThru -Wait
             if ($install.ExitCode -ne 0) { throw "Upgrade failed with running idle worker: exit $($install.ExitCode)" }
             $old.Refresh()
@@ -152,12 +157,12 @@ jobs:
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
           # Validate the exact release filename in each native build, not only
           # in publish-alpha after waiting for every other platform to finish.
-          test -s "dist/DizyTV-0.1.14-alpha-${{ matrix.target }}.pkg"
-          pkgutil --payload-files "dist/DizyTV-0.1.14-alpha-${{ matrix.target }}.pkg"
+          test -s "dist/DizyTV-0.1.15-alpha-${{ matrix.target }}.pkg"
+          pkgutil --payload-files "dist/DizyTV-0.1.15-alpha-${{ matrix.target }}.pkg"
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.14-alpha-${{ matrix.target }}
+          name: DizyTV-0.1.15-alpha-${{ matrix.target }}
           path: |
             dist/*.exe
             dist/*.pkg
@@ -176,7 +181,7 @@ jobs:
       - name: Download verified installers
         uses: actions/download-artifact@v4
         with:
-          pattern: DizyTV-0.1.14-alpha-*
+          pattern: DizyTV-0.1.15-alpha-*
           path: native-artifacts
       - name: Collect native files and generate release checksums
         shell: bash
@@ -185,10 +190,10 @@ jobs:
           mkdir -p release
           find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' \) -exec cp -- '{}' release/ \;
           for asset in \
-            DizyTV-Setup-0.1.14-alpha-windows-x64.exe \
-            DizyTV-0.1.14-alpha-android-universal-debug.apk \
-            DizyTV-0.1.14-alpha-macos-arm64.pkg \
-            DizyTV-0.1.14-alpha-macos-x86_64.pkg; do
+            DizyTV-Setup-0.1.15-alpha-windows-x64.exe \
+            DizyTV-0.1.15-alpha-android-universal-debug.apk \
+            DizyTV-0.1.15-alpha-macos-arm64.pkg \
+            DizyTV-0.1.15-alpha-macos-x86_64.pkg; do
             test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
           done
           test "$(find release -type f | wc -l)" -eq 4
@@ -200,13 +205,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.1.14-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'v0.1.14-alpha already exists; refusing to silently replace published binaries.'
+          if gh release view v0.1.15-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.15-alpha already exists; refusing to silently replace published binaries.'
             exit 0
           fi
-          gh release create v0.1.14-alpha release/* \
+          gh release create v0.1.15-alpha release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DizyTV 0.1.14 alpha — proper media rails and responsive buttons' \
+            --title 'DizyTV 0.1.15 alpha — 24/7 channels, sorting and health checks' \
             --prerelease \
-          --notes 'DizyTV 0.1.14 alpha fixes visible grey control strips that remained despite 0.1.13 stylesheet tweaks. The main and pop-out playback toolbars now hide the native horizontal scrollbar and provide compact previous/next overflow chevrons in narrow windows; every playback action remains accessible. Seek and volume on Windows and macOS use a custom four-pixel native-painted rail with consistent dark/light backgrounds and a small thumb instead of Windows default full-height grey plates. Click/drag, keyboard and timeshift seeking are preserved. The native build tests inspect rendered slider pixels and prove narrow toolbar access. Prior Ace Stream playback, VLC decoding troubleshooting, guide search, timeshift, subtitles, and Windows FFmpeg/Vosk remain. Android has separate existing matching native styles. Four native direct packages (EXE, Android debug APK, Mac arm64 and Intel PKGs) and SHA256SUMS.txt; unsigned/not notarized. Physical GUI validation is still recommended.'
+          --notes 'DizyTV 0.1.15 alpha adds a dedicated 24/7 Shows & Loops category, global shortcut, UK +1 and Freeview-style sorting, reversible disabled-channel visibility in browser/guide/search, and UK public 24/7 FAST playlist presets (Plex, Samsung TV Plus, Pluto TV) with optional US Roku/Tubi sources, plus an opt-in 40-channel batch checker (max four concurrent public HTTP checks). Results distinguish reachable HLS manifests, dead URLs, access-denied/possible geo limits, rate limiting, and Ace streams requiring playback; HTTP availability is never claimed to prove VLC/video decoding. The Windows offline captions feature uses bundled FFmpeg and Vosk English assets as before; other official Vosk small languages can now be downloaded on demand and selected in Settings. Caption attempts report more specific FFmpeg audio failure; timeshift captioning reads original source without disabling timeshift. No background 15,000-channel polling or VPN switching. All previous Ace Stream session playback, timeshift, live controls and app features remain. Direct native Windows EXE, Android debug APK and Mac Intel/Apple Silicon PKGs. See README for known limitations and QA checks.'

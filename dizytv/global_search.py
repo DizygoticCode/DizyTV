@@ -54,7 +54,7 @@ class GlobalSearch(QDialog):
         layout.addLayout(row)
         self.entries=[]
         self.shown=0
-        self.channels=catalogue(main.store.read())
+        self.channels=catalogue(main.store.read(),include_disabled=main.show_disabled.isChecked())
         self.by_id,_=main.guide_index()
         self.epg_ids={ch['id']:main.matched_guide(ch) for ch in self.channels}
         self.timer=QTimer(self)
@@ -70,6 +70,12 @@ class GlobalSearch(QDialog):
         self.results.currentItemChanged.connect(lambda *_:self.refresh_buttons())
         self.refresh_buttons()
         self.query.setFocus()
+    def refresh_catalogue(self):
+        self.channels=catalogue(self.main.store.read(),
+                                include_disabled=self.main.show_disabled.isChecked())
+        self.epg_ids={ch['id']:self.main.matched_guide(ch) for ch in self.channels}
+        self.search()
+
     def search(self):
         self.entries=find_global(self.channels,self.by_id,self.epg_ids,self.query.text())
         self.shown=0

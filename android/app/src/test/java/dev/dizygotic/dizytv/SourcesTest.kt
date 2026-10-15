@@ -15,6 +15,21 @@ class SourcesTest {
         assertTrue(Sources.urls(legacy).size>1)
     }
 
+    @Test fun ukFastAndShowLoopPresetGroupings() {
+        assertEquals(8,Sources.presets.size)
+        assertEquals(4,Sources.optionalShowLoops.size)
+        assertEquals(2,Sources.optionalUkPlusOne.size)
+        assertTrue(Sources.guides.any { it.contains("PlutoTV/gb.xml.gz") })
+        fun channel(name:String,group:String="Comedy")=JSONObject()
+            .put("name",name).put("group",group).put("genre","Comedy").put("kind","TV")
+        for(name in listOf("247 South Park","Rick and Morty","Family Guy",
+                           "Futurama","Friends","The Simpsons","Big Bang Theory")) {
+            assertEquals("24/7 Shows & Loops",Domain.section(channel(name)))
+        }
+        assertNotEquals("24/7 Shows & Loops",Domain.section(channel("BBC News 24/7","News")))
+        assertNotEquals("24/7 Shows & Loops",Domain.section(channel("Garfield and Friends","Kids")))
+    }
+
     @Test fun perSourceOutageRetainsPreviouslySavedChannels() {
         val a="https://example.com/a.m3u"; val b="https://example.com/b.m3u"
         val old=Domain.playlist("#EXTM3U\n#EXTINF:-1,Archived\nhttps://example.com/archived.ts")

@@ -35,8 +35,29 @@ object Domain {
         return value.replace(Regex("\\s+")," ").ifEmpty { "Unnamed channel" }
     }
 
+    fun isShowLoop(ch:JSONObject):Boolean {
+        if(ch.optString("kind")=="Radio") return false
+        val name=displayName(ch.optString("name")).lowercase()
+        val group=ch.optString("group").lowercase()
+        if(Regex("""\b(?:news|sport|sports|football|cricket|radio|music|weather|racing)\b""",RegexOption.IGNORE_CASE).containsMatchIn(name+" "+group)) return false
+        val shows=listOf("south park","rick and morty","family guy","simpsons","futurama",
+            "brooklyn 99","brooklyn nine nine","goldbergs","big bang theory",
+            "young sheldon","frasier","cheers","mr bean","friends","midsomer murders",
+            "only fools and horses","pluto tv sitcoms","comedy movies","comedy series",
+            "drama series","classic tv comedy")
+        val normal=name.replace(Regex("""[^a-z0-9 ]""")," ").replace(Regex("""\s+""")," ").trim()
+        val named=shows.any { show ->
+            if(show=="friends") normal=="friends" || normal.contains("247 friends") || normal.contains("24 7 friends")
+            else Regex("""(?<!\w)"""+Regex.escape(show)+"""(?!\w)""").containsMatchIn(normal)
+        }
+        val tagged=Regex("""(?i)\b(?:24\s*/\s*7|247|24[- ]hour|marathon|non[- ]stop|binge[- ]?watch|loops?)\b""")
+            .containsMatchIn(name+" "+group)
+        return named || tagged
+    }
+
     fun section(ch:JSONObject):String {
         if(ch.optString("kind")=="Radio") return "Radio"
+        if(isShowLoop(ch)) return "24/7 Shows & Loops"
         val genre=normaliseGenre(ch.optString("genre"))
         if(genre in setOf("Sport","News","Movies","Kids","Music","Documentary","Entertainment","Education")) return genre
         val label=displayName(ch.optString("name"))+" "+ch.optString("group")

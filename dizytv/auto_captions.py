@@ -15,10 +15,112 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import zipfile
+from urllib.request import Request, urlopen
 
 # Keep the caption audio client identical to VLC's working HTTP identity.
 PLAYBACK_USER_AGENT = 'Mozilla/5.0 (compatible; DizyTV/0.1)'
+
+
+# Optional models are fetched only after the viewer explicitly asks. These are
+# the official Vosk/Alpha Cephei small models (Apache-2.0), NOT redistributed.
+# Third-party or arbitrary archive URLs are never accepted by this installer.
+LANGUAGE_MODELS = {
+    'English (bundled)': 'vosk-model-small-en-us-0.15',
+    'French': 'vosk-model-small-fr-0.22',
+    'German': 'vosk-model-small-de-0.15',
+    'Spanish': 'vosk-model-small-es-0.42',
+    'Italian': 'vosk-model-small-it-0.22',
+    'Dutch': 'vosk-model-small-nl-0.22',
+    'Portuguese': 'vosk-model-small-pt-0.3',
+    'Russian': 'vosk-model-small-ru-0.22',
+    'Polish': 'vosk-model-small-pl-0.22',
+    'Japanese': 'vosk-model-small-ja-0.22',
+    'Hindi': 'vosk-model-small-hi-0.22',
+}
+MAX_MODEL_ZIP_BYTES = 100 * 1024 * 1024
+MAX_MODEL_EXPANDED_BYTES = 400 * 1024 * 1024
+
+
+def user_models_directory():
+    # Use device app-data rather than Program Files: normal Windows users
+    # cannot write additional model downloads into the installed app.
+    base = (Path(os.environ.get('LOCALAPPDATA', Path.home()/'AppData'/'Local'))
+            if os.name == 'nt' else
+            Path.home()/'Library'/'Application Support' if sys.platform == 'darwin'
+            else Path.home()/'.local'/'share')
+    return base/'DizyTV'/'speech-models'
+
+
+def installed_language_model(language, root=None):
+    if language not in LANGUAGE_MODELS:
+        raise ValueError('Unsupported speech-model language')
+    if language == 'English (bundled)':
+        model = bundled_speech_directory()/LANGUAGE_MODELS[language]
+    else:
+        model = Path(root) if root else user_models_directory()
+        model = model/LANGUAGE_MODELS[language]
+    return model if (model/'am').is_dir() and (model/'conf').is_dir() else None
+
+
+def install_language_model(language, root=None, opener=urlopen):
+    """Download exactly one official small model, with bounded safe extraction.
+
+    No user-supplied URL, archive traversal, links, ZIP bombs or partially
+    installed model. Caller runs this away from the GUI thread.
+    """
+    if language not in LANGUAGE_MODELS or language == 'English (bundled)':
+        raise ValueError('Choose an optional Vosk language to install')
+    folder=Path(root) if root else user_models_directory()
+    model_name=LANGUAGE_MODELS[language]
+    existing=installed_language_model(language,folder)
+    if existing is not None:return str(existing)
+    folder.mkdir(parents=True,exist_ok=True)
+    url='https://alphacephei.com/vosk/models/'+model_name+'.zip'
+    with tempfile.TemporaryDirectory(prefix='.vosk-download-',dir=folder) as temporary:
+        staging=Path(temporary)
+        archive=staging/'model.zip'
+        request=Request(url,headers={'User-Agent':'DizyTV/0.1'})
+        with opener(request,timeout=35) as response, archive.open('wb') as output:
+            # Reject unexpected cross-host or insecure redirects.
+            final=response.geturl()
+            if not final.startswith('https://alphacephei.com/vosk/models/'):
+                raise ValueError('Model download redirected away from the official Vosk host')
+            total=0
+            while True:
+                chunk=response.read(128*1024)
+                if not chunk:break
+                total+=len(chunk)
+                if total>MAX_MODEL_ZIP_BYTES:
+                    raise ValueError('Speech model download exceeds the size limit')
+                output.write(chunk)
+        with zipfile.ZipFile(archive) as zipped:
+            infos=zipped.infolist()
+            if len(infos)>5000 or sum(i.file_size for i in infos)>MAX_MODEL_EXPANDED_BYTES:
+                raise ValueError('Speech model archive exceeds the extraction limit')
+            for info in infos:
+                name=info.filename.replace('\\','/')
+                parts=name.rstrip('/').split('/')
+                if (parts[0]!=model_name
+                        or (len(parts)==1 and not info.is_dir())
+                        or any(part in ('','.','..') for part in parts)
+                        or info.flag_bits & 0x1
+                        or (info.external_attr>>16)&0o170000==0o120000):
+                    raise ValueError('Speech model contains an unsafe archive entry')
+            extraction=staging/'extracted'
+            zipped.extractall(extraction)
+        candidate=extraction/model_name
+        if not (candidate/'am').is_dir() or not (candidate/'conf').is_dir():
+            raise ValueError('Downloaded Vosk model is missing acoustic/configuration files')
+        target=folder/model_name
+        if target.exists():
+            if installed_language_model(language,folder) is not None:return str(target)
+            raise ValueError('An incomplete model folder already exists; remove it before retrying')
+        os.replace(candidate,target)
+        return str(target)
+
 
 
 def bundled_speech_directory():
@@ -122,7 +224,12 @@ class LocalCaptionWorker:
                     self.on_caption(result)
                     last=result
             if not self._stop.is_set():
-                reason='Local transcription ended; stream may not provide readable audio.'
+                exit_code=process.poll()
+                if exit_code is not None and exit_code!=0:
+                    reason=('FFmpeg could not decode the selected stream audio '
+                            '(unsupported audio, missing track, expired source or denied access).')
+                else:
+                    reason='Local transcription stopped: audio stream ended or no readable speech.'
         except Exception as exc:
             if not self._stop.is_set():
                 reason='Offline caption engine stopped: '+type(exc).__name__

@@ -105,6 +105,9 @@ def channel_section(channel):
     """Country/category navigator: keep original group-title and IDs intact."""
     if channel_kind(channel)=='Radio':
         return 'Radio'
+    from .channel_browser import is_show_loop_channel
+    if is_show_loop_channel(channel):
+        return '24/7 Shows & Loops'
     genre=normalise_genre(str(channel.get('genre') or ''))
     sections={'Sport','News','Movies','Classic','Series','Comedy','Kids','Music','Documentary','Entertainment','Education'}
     if genre in sections:
@@ -129,9 +132,15 @@ def channel_section(channel):
     return 'General TV'
 
 
-def catalogue(state):
-    overrides = state.get('category_overrides', {})
-    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']]
+def catalogue(state, include_disabled=True):
+    overrides=state.get('category_overrides', {})
+    disabled=set(state.get('disabled_channels',[]))
+    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']
+            if include_disabled or ch['id'] not in disabled]
+
+
+def visible_channels(state,include_disabled=False):
+    return catalogue(state,include_disabled=include_disabled)
 
 
 def default_state():
@@ -149,8 +158,10 @@ def default_state():
                          'subtitles_enabled': True, 'subtitle_size': 28,
                          'subtitle_colour': 'White', 'subtitle_position': 'Bottom',
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
-                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': ''},
-            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
+                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': '',
+                         'auto_caption_language': 'English (bundled)',
+                         'channel_sort': 'Name A–Z'},
+            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': [], 'disabled_channels': []}
 
 
 def http_url(value):
@@ -222,12 +233,14 @@ def parse_playlist(text):
                 except ValueError:
                     attrs, name = {}, ''
                     continue
-            cid = aid or hashlib.sha256(line.encode()).hexdigest()[:40]
+            from .channel_browser import stable_channel_key
+            cid = aid or hashlib.sha256(stable_channel_key(line).encode()).hexdigest()[:40]
             if cid not in seen:
                 seen.add(cid)
                 channels.append({'id': cid, 'name': (name or attrs.get('tvg-name') or cid)[:512],
                                  'group': attrs.get('group-title', '')[:512],
                                  'tvg_id': attrs.get('tvg-id', '')[:512],
+                                 'chno': attrs.get('tvg-chno','')[:12],
                                  'stream': ('acestream://' + aid if urlparse(line).scheme == 'acestream' else line),
                                  **channel_categories(attrs,line,name)})
             attrs, name = {}, ''
@@ -408,12 +421,12 @@ def _integer(value, low, high, label):
 
 
 def validate_state(state):
-    if not isinstance(state, dict) or set(default_state()) - set(state):
+    if not isinstance(state, dict) or set(default_state()) - {'disabled_channels'} - set(state):
         raise ValueError('Backup is missing required data')
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language','channel_sort'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -422,8 +435,8 @@ def validate_state(state):
     for url in settings['xmltv_urls']:
         http_url(url)
     if 'playlist_urls' in settings:
-        if not isinstance(settings['playlist_urls'], list) or not 1 <= len(settings['playlist_urls']) <= 24:
-            raise ValueError('Use 1 to 24 playlist URLs')
+        if not isinstance(settings['playlist_urls'], list) or not 1 <= len(settings['playlist_urls']) <= 32:
+            raise ValueError('Use 1 to 32 playlist URLs')
         for url in settings['playlist_urls']:
             http_url(url)
     try:
@@ -443,6 +456,12 @@ def validate_state(state):
         raise ValueError('Invalid appearance theme')
     from .subtitles import validate_caption_settings
     validate_caption_settings(settings)
+    from .auto_captions import LANGUAGE_MODELS
+    from .channel_browser import CHANNEL_SORT_MODES
+    if settings.get('auto_caption_language','English (bundled)') not in LANGUAGE_MODELS:
+        raise ValueError('Invalid offline caption language')
+    if settings.get('channel_sort','Name A–Z') not in CHANNEL_SORT_MODES:
+        raise ValueError('Invalid channel sorting mode')
     for key in ('auto_caption_model_dir','auto_caption_ffmpeg_path'):
         value=settings.get(key,'')
         if not isinstance(value,str) or len(value)>4096:
@@ -478,11 +497,13 @@ def validate_state(state):
         if 'source' in ch:
             http_url(ch['source'])
         if 'sources' in ch:
-            if (not isinstance(ch['sources'],list) or len(ch['sources'])>24 or
+            if (not isinstance(ch['sources'],list) or len(ch['sources'])>32 or
                     len(ch['sources'])!=len(set(str(s) for s in ch['sources']))):
                 raise ValueError('Invalid channel source membership')
             for origin in ch['sources']:
                 http_url(origin)
+        if 'chno' in ch and (not isinstance(ch['chno'],str) or len(ch['chno'])>12):
+            raise ValueError('Invalid channel number')
         for key in ('country','genre','kind','transport'):
             if key in ch and (not isinstance(ch[key],str) or len(ch[key])>512):
                 raise ValueError('Invalid channel category')
@@ -490,6 +511,11 @@ def validate_state(state):
             http_url(ch['stream'])
     if any(not isinstance(f, str) or not re.fullmatch('[a-f0-9]{40}', f) for f in state['favourites']):
         raise ValueError('Invalid favourites')
+    hidden=state.get('disabled_channels',[])
+    if (not isinstance(hidden,list) or len(hidden)>100000 or
+            any(not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid) for cid in hidden) or
+            len(set(hidden))!=len(hidden)):
+        raise ValueError('Invalid disabled channels')
     if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
         raise ValueError('Invalid guide mappings')
     overrides = state.get('category_overrides', {})

@@ -29,11 +29,26 @@ class FreeSourceTests(unittest.TestCase):
             url='https://iptv-org.github.io/iptv/categories/'+category+'.m3u'
             self.assertIn(url,DEFAULT_PLAYLIST_URLS)
             self.assertIn('Free ',source_label(url))
-        self.assertEqual(16,len(DEFAULT_PLAYLIST_URLS))
-        self.assertEqual(17,len(FREE_PLAYLISTS))
+        self.assertEqual(19,len(DEFAULT_PLAYLIST_URLS))
+        self.assertEqual(20,len(FREE_PLAYLISTS))
         state=default_state()
         self.assertEqual(DEFAULT_PLAYLIST_URLS,state['settings']['playlist_urls'])
-        self.assertEqual(16,len(configured_playlists(state['settings'])))
+        self.assertEqual(19,len(configured_playlists(state['settings'])))
+
+    def test_uk_fast_playlist_guides_use_matching_opaque_tvg_ids(self):
+        from dizytv.sources import (FAST_GUIDE_BY_PLAYLIST,UK_FAST_GUIDES,
+                                   FREE_PLAYLISTS)
+        self.assertEqual(3,len(FAST_GUIDE_BY_PLAYLIST))
+        self.assertEqual(5,len(DEFAULT_GUIDE_URLS))
+        known={row[1] for row in FREE_PLAYLISTS}
+        for url,guide in FAST_GUIDE_BY_PLAYLIST.items():
+            self.assertIn(url,known)
+            self.assertTrue(guide.startswith('https://i.mjh.nz/'))
+            self.assertTrue(guide.endswith('/gb.xml.gz'))
+            self.assertIn(guide,DEFAULT_GUIDE_URLS)
+        state=default_state()
+        self.assertEqual(DEFAULT_GUIDE_URLS,state['settings']['xmltv_urls'])
+        validate_state(state)
 
     def test_same_stream_is_searchable_under_region_and_series_feeds(self):
         from dizytv.sources import FREE_PLAYLISTS
@@ -78,6 +93,33 @@ class FreeSourceTests(unittest.TestCase):
         rows,_,_=refresh_catalogue({'playlist_url':series,'playlist_urls':[series]},[],metadata)
         self.assertEqual('Sport',rows[0]['genre'])
         self.assertEqual('Australia',rows[0]['country'])
+
+    def test_free_uk_fast_presets_exist_and_us_fast_is_explicit_opt_in(self):
+        from dizytv.sources import FREE_PLAYLISTS, OPTIONAL_FAST_PLAYLISTS
+        fast={label:url for label,url,_ in FREE_PLAYLISTS}
+        for name in ('Plex FAST UK · series/24-7',
+                     'Samsung TV Plus FAST UK','Pluto TV FAST UK'):
+            self.assertIn(name,fast)
+            self.assertIn(fast[name],DEFAULT_PLAYLIST_URLS)
+        for label,url,_ in OPTIONAL_FAST_PLAYLISTS:
+            self.assertIn('US',label)
+            self.assertNotIn(url,DEFAULT_PLAYLIST_URLS)
+
+    def test_plex_24_7_signed_url_refresh_retains_channel_identity(self):
+        from dizytv.core import parse_playlist
+        key='a4e559a3bb742634aaee33bf-67b7a02a72bb63eb7738c982'
+        path='https://epg.provider.plex.tv/library/parts/'+key+'/'
+        def feed(token):
+            return '#EXTM3U\n#EXTINF:-1 tvg-id="'+key+'",24/7 Comedy\n'+path+'?X-Plex-Token='+token+'\n'
+        first=parse_playlist(feed('first-token'))[0]
+        second=parse_playlist(feed('second-token'))[0]
+        self.assertEqual(first['id'],second['id'])
+        self.assertNotEqual(first['stream'],second['stream'])
+        self.assertIn('second-token',second['stream'])
+        # Do not change the identity rules for generic feeds where query
+        # parameters might be the entire live station identity.
+        generic=lambda token:parse_playlist('#EXTM3U\n#EXTINF:-1,Other\nhttps://example.com/stream?id='+token+'\n')[0]
+        self.assertNotEqual(generic('a')['id'],generic('b')['id'])
 
     def test_default_presets_include_uk_us_and_epg(self):
         state=default_state()
