@@ -1119,6 +1119,7 @@ class MainWindow(QMainWindow):
         self._auto_caption_label=None
         self._auto_caption_text=''
         self._auto_caption_updated=0
+        self._auto_caption_started_at=0
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
@@ -2121,7 +2122,28 @@ class MainWindow(QMainWindow):
         self.status.setText('Starting '+language+' offline captions (local FFmpeg + Vosk). '
                             'Listening for speech; captions may take several seconds. '
                             'Second source connection; no microphone or cloud speech.')
+        self._auto_caption_started_at=time.monotonic()
+        # Show a visible acknowledgment that auto CC was selected. Only actual
+        # recognition results replace this text; it is not fabricated dialogue.
+        self.create_auto_caption_overlay()
+        self._auto_caption_label.setText('Preparing offline subtitles…')
+        self._auto_caption_updated=time.monotonic()
+        self.position_auto_caption_overlay()
+        self._auto_caption_overlay.show()
+        self._auto_caption_overlay.raise_()
         worker.start()
+        QTimer.singleShot(12000,lambda:self.caption_waiting_status(serial))
+
+    def caption_waiting_status(self,serial):
+        if (serial==self._auto_caption_seq and self._auto_caption_worker is not None
+                and not self._auto_caption_text and not self._auto_caption_stopping):
+            self.status.setText('Offline captions are running but no speech has been recognised '
+                                'yet. Check audible dialogue and that FFmpeg can access this '
+                                'stream; music or audio-only restrictions may prevent text.')
+            if self._auto_caption_label is not None:
+                self._auto_caption_label.setText('Listening for dialogue…')
+                self._auto_caption_updated=time.monotonic()
+                self._auto_caption_overlay.show()
 
     def sync_subtitles(self):
         """Use the embedded subtitle stream without another video connection.
