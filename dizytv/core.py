@@ -206,6 +206,20 @@ def stream_url(stream, engine):
     return http_url(stream)
 
 
+def stable_channel_key(url):
+    """Avoid rotating public FAST session tokens breaking Plex favourites.
+
+    Only known Plex provider *content identity* paths have this exception.
+    The original full URL (including its token) is always retained for actual
+    playback. Do not strip query strings from generic streams or Ace content.
+    """
+    parsed=urlparse(url)
+    if (parsed.scheme=='https' and parsed.hostname=='epg.provider.plex.tv'
+            and re.fullmatch(r'/library/parts/[0-9a-f-]{8,}/?',parsed.path,re.I)):
+        return parsed._replace(query='',fragment='').geturl()
+    return url
+
+
 def parse_playlist(text):
     if len(text.encode('utf-8')) > MAX_FEED:
         raise ValueError('Playlist is too large')
@@ -223,7 +237,7 @@ def parse_playlist(text):
                 except ValueError:
                     attrs, name = {}, ''
                     continue
-            cid = aid or hashlib.sha256(line.encode()).hexdigest()[:40]
+            cid = aid or hashlib.sha256(stable_channel_key(line).encode()).hexdigest()[:40]
             if cid not in seen:
                 seen.add(cid)
                 channels.append({'id': cid, 'name': (name or attrs.get('tvg-name') or cid)[:512],
