@@ -1648,9 +1648,15 @@ class MainWindow(QMainWindow):
             self.play()
 
     def render_channels(self,*_):
-        previous=self.selected['id'] if self.selected else None; self.state=self.store.read(); source=catalogue(self.state); self.channels.blockSignals(True); self.channels.clear()
-        # Give free HTTP/HLS channels prominence, without removing Ace streams.
-        source.sort(key=lambda ch:(ch.get('transport')=='Ace Stream',ch.get('country')!='United Kingdom',display_channel_name(ch['name']).casefold()))
+        previous=self.selected['id'] if self.selected else None
+        self.state=self.store.read()
+        source=catalogue(self.state,include_disabled=self.show_disabled.isChecked())
+        disabled=set(self.state.get('disabled_channels',()))
+        self.channels.blockSignals(True)
+        self.channels.clear()
+        sort_mode=self.sort_picker.currentText()
+        source=[ch for _,ch in sorted(enumerate(source),
+                    key=lambda entry:channel_sort_key(entry[1],sort_mode,entry[0]))]
         self.build_country_tree(source)
         selected_source=self.source_filter.currentData()
         urls=configured_playlists(self.state['settings'])
@@ -1699,7 +1705,12 @@ class MainWindow(QMainWindow):
             if kind and kind not in (channel_kind(ch),ch.get('transport','Ace Stream' if ch['stream'].startswith('acestream:') else 'HTTP')):continue
             key=self.matched_guide(ch)
             if genre and ch.get('genre','Unspecified')!=genre and genre not in genre_by_id.get(key,set()):continue
-            item=QListWidgetItem(('★ ' if ch['id'] in favs else '')+display_channel_name(ch['name'])); item.setData(Qt.UserRole,ch); self.channels.addItem(item)
+            prefix='⛔ ' if ch['id'] in disabled else ('★ ' if ch['id'] in favs else '')
+            item=QListWidgetItem(prefix+display_channel_name(ch['name']))
+            item.setData(Qt.UserRole,ch)
+            if ch['id'] in disabled:
+                item.setToolTip('Hidden from the normal directory. Select and click Hide / restore selected.')
+            self.channels.addItem(item)
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
         self.channels.blockSignals(False); self.render_guide()
     def choose_channel(self,item,*_):
@@ -3059,7 +3070,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(counter)
         more=QPushButton('Show next 150 channels',dialog)
         layout.addWidget(more)
-        channels=catalogue(self.store.read())
+        channels=catalogue(self.store.read(),include_disabled=self.show_disabled.isChecked())
         page_size=150
         matching=[]
         shown=0
