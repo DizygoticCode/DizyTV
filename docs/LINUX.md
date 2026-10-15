@@ -17,14 +17,14 @@ proof of a live video frame.
 ## Install the DizyTV .deb
 
 On a desktop Ubuntu/Debian-compatible host with a supported libVLC package:
-\`\`\`sh
-sudo apt install ./DizyTV-0.1.15-alpha-linux-amd64.deb
+```sh
+sudo apt install ./DizyTV-0.1.16-alpha-linux-amd64.deb
 dizytv
-\`\`\`
+```
 
 The package uses the system's libvlc5, vlc-plugin-base, vlc-plugin-video-output,
 libgl1, libxcb-cursor0 and libxkbcommon-x11-0. The application saves private
-data in \`~/.local/share/DizyTV\` (or \`$XDG_DATA_HOME/DizyTV\`).
+data in `~/.local/share/DizyTV` (or `$XDG_DATA_HOME/DizyTV`).
 The package deliberately does not install/enable an Ace server.
 
 ## Install an Ace Stream engine independently
@@ -35,24 +35,24 @@ still apply to your distribution. Select your installed **start-engine**
 executable under Settings → Installed Ace engine. DizyTV probes the configured
 endpoint before attempting to start the wrapper. It can search:
 
-- \`start-engine\` in PATH
-- \`/opt/acestream/start-engine\`
-- \`/usr/local/bin/start-engine\`
-- \`~/acestream/start-engine\`
-- \`~/.local/opt/acestream/start-engine\`
+- `start-engine` in PATH
+- `/opt/acestream/start-engine`
+- `/usr/local/bin/start-engine`
+- `~/acestream/start-engine`
+- `~/.local/opt/acestream/start-engine`
 
 If an installed engine is running on the configured localhost URL
-(default \`http://127.0.0.1:6878\`), DizyTV connects without spawning a second
+(default `http://127.0.0.1:6878`), DizyTV connects without spawning a second
 engine. A remote custom address is **connect-only** and is never auto-started;
 remote engines should be restricted to a trusted/private network. Startup uses
-\`start-engine --client-console\` from its installed directory. The engine is
+`start-engine --client-console` from its installed directory. The engine is
 still responsible for finding peers and preparing content; an open port alone
 does not establish successful playback.
 
 ## Subtitles, Vosk and FFmpeg
 
 Broadcast subtitles use the embedded libVLC track. For offline transcription,
-install the distro's \`ffmpeg\` package and download the small English Vosk
+install the distro's `ffmpeg` package and download the small English Vosk
 model through DizyTV Settings (or choose a previously extracted local model).
 The Vosk Python runtime comes with the packaged DizyTV application, but the
 speech model is not bundled on Linux. Transcription is opt-in and requires
@@ -78,13 +78,13 @@ need native engine/peer playback, and are not scanned as plain HTTP endpoints.
 
 Install Python 3.12 and system VLC/libVLC development runtime libraries, then:
 
-\`\`\`sh
+```sh
 python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 QT_QPA_PLATFORM=offscreen python -m dizytv --smoke-test
 python scripts/build_desktop.py
 python scripts/package_linux.py
-\`\`\`
+```
 
 The Linux GitHub Actions job verifies Python tests, source and packaged
 startup, and Debian package metadata. Native video output, Bluetooth/audio,
