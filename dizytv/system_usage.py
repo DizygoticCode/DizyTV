@@ -9,7 +9,6 @@ import ctypes
 import os
 from pathlib import Path
 import platform
-import resource
 import shutil
 import sys
 import time
@@ -53,6 +52,7 @@ def process_resident_bytes():
             pass
     # On macOS ru_maxrss is bytes; elsewhere the value is in KiB.
     try:
+        import resource
         peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         return int(peak if sys.platform == 'darwin' else peak * 1024), True
     except (OSError, ValueError):
