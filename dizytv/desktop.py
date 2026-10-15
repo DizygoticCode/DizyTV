@@ -33,6 +33,7 @@ from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
 from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
                             LANGUAGE_MODELS, installed_language_model, install_language_model)
+from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -1296,6 +1297,21 @@ class MainWindow(QMainWindow):
             widget.currentIndexChanged.connect(self.render_channels)
             filter_layout.addWidget(widget)
         side.addWidget(filters)
+        order=QWidget()
+        order_row=QHBoxLayout(order)
+        order_row.setContentsMargins(0,0,0,0)
+        order_row.addWidget(QLabel('Sort'))
+        self.sort_picker=QComboBox()
+        self.sort_picker.setObjectName('channelSort')
+        self.sort_picker.addItems(CHANNEL_SORT_MODES)
+        self.sort_picker.setCurrentText(self.state['settings'].get('channel_sort','Name A–Z'))
+        self.sort_picker.currentTextChanged.connect(self.change_channel_sort)
+        order_row.addWidget(self.sort_picker,1)
+        side.addWidget(order)
+        self.loop_filter_button=QPushButton('24/7 Shows & Loops')
+        self.loop_filter_button.setToolTip('Show dedicated TV-series marathons and 24/7 themed channels')
+        self.loop_filter_button.clicked.connect(self.filter_24_7)
+        side.addWidget(self.loop_filter_button)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
         self.country_tree.setMaximumHeight(240)
@@ -1303,9 +1319,21 @@ class MainWindow(QMainWindow):
         self.country_tree.itemDoubleClicked.connect(self.country_tree_double_clicked)
         side.addWidget(self.country_tree)
         self._tree_dirty=True
-        self.favourites_only=QCheckBox('★ Favourites only'); self.favourites_only.toggled.connect(self.render_channels); side.addWidget(self.favourites_only)
+        selectors=QWidget()
+        selector_row=QHBoxLayout(selectors)
+        selector_row.setContentsMargins(0,0,0,0)
+        self.favourites_only=QCheckBox('★ Favourites only')
+        self.favourites_only.toggled.connect(self.render_channels)
+        selector_row.addWidget(self.favourites_only)
+        self.show_disabled=QCheckBox('Show disabled')
+        self.show_disabled.setToolTip('Include hidden channels so they can be restored')
+        self.show_disabled.toggled.connect(self.refresh_disabled_channels)
+        selector_row.addWidget(self.show_disabled)
+        side.addWidget(selectors)
         self.channels=QListWidget(); self.channels.currentItemChanged.connect(self.choose_channel); self.channels.itemDoubleClicked.connect(lambda:self.play()); side.addWidget(self.channels,1)
-        for label,handler in [('★ Add / remove favourite',self.favourite),('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
+        for label,handler in [('★ Add / remove favourite',self.favourite),
+                              ('Hide / restore selected',self.toggle_channel_visibility),
+                              ('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
             b=QPushButton(label); b.clicked.connect(handler); side.addWidget(b)
         self.sidebar=sidebar
         sidebar.setMinimumWidth(0)
@@ -1477,6 +1505,47 @@ class MainWindow(QMainWindow):
             if path.exists() and path.stat().st_size<=100*1024**2:
                 self.guide=json.loads(path.read_text(encoding='utf-8'))
         except (OSError,ValueError):pass
+    def change_channel_sort(self,mode):
+        if mode not in CHANNEL_SORT_MODES:return
+        if self.store.read()['settings'].get('channel_sort')!=mode:
+            self.state=self.store.update(lambda state:state['settings'].update(channel_sort=mode))
+        self._tree_dirty=True
+        self.render_channels()
+
+    def filter_24_7(self):
+        self.country_filter.blockSignals(True)
+        self.country_filter.setCurrentIndex(0)
+        self.country_filter.blockSignals(False)
+        self.section_filter.blockSignals(True)
+        self.section_filter.setCurrentIndex(max(0,self.section_filter.findData('24/7 Shows & Loops')))
+        self.section_filter.blockSignals(False)
+        self.render_channels()
+        self.status.setText(f'24/7 Shows & Loops: {self.channels.count()} channels in the current catalogue.')
+
+    def refresh_disabled_channels(self,*_):
+        self._tree_dirty=True
+        self.render_channels()
+        dlg=getattr(self,'global_search_dialog',None)
+        if dlg is not None and dlg.isVisible():
+            dlg.refresh_catalogue()
+
+    def toggle_channel_visibility(self):
+        if not self.selected:
+            self.status.setText('Select a channel to hide or restore.')
+            return
+        cid=self.selected['id']
+        current=cid in set(self.store.read().get('disabled_channels',()))
+        label=display_channel_name(self.selected['name'])
+        def change(state):
+            hidden=set(state.get('disabled_channels',()))
+            if cid in hidden:hidden.remove(cid)
+            else:hidden.add(cid)
+            state['disabled_channels']=sorted(hidden)
+        self.store.update(change)
+        self.refresh_disabled_channels()
+        self.status.setText(('Restored ' if current else 'Hidden ')+label+
+                            ' — use Show disabled to restore it later.')
+
     def open_channel_health(self):
         dialog=getattr(self,'health_dialog',None)
         if dialog is not None and dialog.isVisible():
