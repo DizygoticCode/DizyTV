@@ -7,7 +7,8 @@ from io import BytesIO
 import zipfile
 
 from dizytv.auto_captions import (caption_text, ffmpeg_capture_args, verify_caption_engine, PLAYBACK_USER_AGENT,
-                                   LANGUAGE_MODELS, installed_language_model, install_language_model, remove_language_model)
+                                   LANGUAGE_MODELS, installed_language_model, install_language_model, remove_language_model,
+                                   managed_language_model, MANAGED_MODEL_MARKER)
 from dizytv.core import default_state, validate_state, export_backup, restore_backup
 
 
@@ -133,9 +134,32 @@ class OfflineCaptionTests(unittest.TestCase):
                                                progress=lambda done,total:progress.append((done,total)))
             self.assertEqual((len(data),len(data)),progress[-1])
             self.assertEqual(Path(destination),installed_language_model(language,root))
+            self.assertEqual(Path(destination),managed_language_model(language,root))
+            self.assertTrue((Path(destination)/MANAGED_MODEL_MARKER).is_file())
+            # A selected custom model must remain untouched even if its path
+            # happens to match the DizyTV-managed language directory.
+            self.assertIsNone(managed_language_model(language,root,protected_path=destination))
+            with self.assertRaisesRegex(ValueError,'managed download'):
+                remove_language_model(language,root,protected_path=destination)
+            self.assertEqual(Path(destination),installed_language_model(language,root))
+            with patch('dizytv.auto_captions.os.replace',side_effect=OSError('Windows lock')):
+                with self.assertRaisesRegex(OSError,'Windows lock'):
+                    remove_language_model(language,root)
+            # Failed rename: the entire installed model is still published.
+            self.assertEqual(Path(destination),managed_language_model(language,root))
+            self.assertTrue((Path(destination)/'am'/'final.mdl').exists())
             self.assertTrue(remove_language_model(language,root))
             self.assertFalse(remove_language_model(language,root))
             self.assertIsNone(installed_language_model(language,root))
+            self.assertEqual([],list(Path(root).glob('.vosk-trash-*')))
+            # If recursive deletion fails, the original model is still
+            # unpublished atomically; only a private trash folder remains.
+            install_language_model(language,root,opener=lambda *a,**k:Fake(data))
+            with patch('dizytv.auto_captions.shutil.rmtree',side_effect=OSError('locked trash')):
+                with self.assertRaisesRegex(OSError,'locked trash'):
+                    remove_language_model(language,root)
+            self.assertIsNone(installed_language_model(language,root))
+            self.assertTrue(list(Path(root).glob('.vosk-trash-*')))
             with self.assertRaisesRegex(ValueError,'default English'):
                 remove_language_model('English (bundled)',root)
 
@@ -147,6 +171,25 @@ class OfflineCaptionTests(unittest.TestCase):
                                        cancel=cancel,progress=stop_after_first_progress)
             self.assertIsNone(installed_language_model(language,root))
             self.assertEqual([],list(Path(root).glob('.vosk-download-*')))
+
+    def test_manually_installed_model_is_never_removed_without_provenance(self):
+        language='French'
+        with tempfile.TemporaryDirectory() as root:
+            folder=Path(root)/LANGUAGE_MODELS[language]
+            (folder/'am').mkdir(parents=True)
+            (folder/'conf').mkdir()
+            (folder/'am'/'final.mdl').write_bytes(b'user supplied model')
+            self.assertEqual(folder,installed_language_model(language,root))
+            self.assertIsNone(managed_language_model(language,root))
+            with self.assertRaisesRegex(ValueError,'managed download'):
+                remove_language_model(language,root)
+            self.assertEqual(b'user supplied model',(folder/'am'/'final.mdl').read_bytes())
+            # A marker with the wrong metadata is not accepted either.
+            (folder/MANAGED_MODEL_MARKER).write_text('{"installer":"someone else"}')
+            self.assertIsNone(managed_language_model(language,root))
+            with self.assertRaisesRegex(ValueError,'managed download'):
+                remove_language_model(language,root)
+            self.assertTrue((folder/'am'/'final.mdl').exists())
 
     def test_language_download_refuses_unverified_redirect_and_incomplete_body(self):
         name=LANGUAGE_MODELS['French']
