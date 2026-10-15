@@ -18,6 +18,13 @@ def channel(name, group='Series', country='United Kingdom', chno=''):
 
 
 class BrowserTests(unittest.TestCase):
+
+    def test_international_channel_names_keep_distinct_sort_keys(self):
+        names = ['Русское ТВ', '中国电视', 'Énergie TV', 'Ελληνικά', '日本テレビ']
+        keys = [channel_sort_key(channel(name), 'Name A–Z') for name in names]
+        self.assertEqual(len(names), len(set(keys)))
+        self.assertTrue(any('中国' in key[0] for key in keys))
+
     def test_24_7_classifies_specific_shows_and_marathons(self):
         for name in ('South Park','Rick and Morty','Family Guy','The Simpsons',
                      'Brooklyn 99','The Goldbergs','The Big Bang Theory',
