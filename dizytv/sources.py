@@ -136,21 +136,31 @@ def refresh_catalogue(settings, old_channels, fetch):
         for source in ch.get("sources") or [ch.get("source", LEGACY_URL)]:
             existing.setdefault(source, []).append(ch)
     seen = {}
+    fresh_ids = set()
     combined, errors, success = [], [], 0
 
-    def append(items,origin):
+    def append(items,origin,fresh=False):
         for channel in items:
             ch={**channel,'source':origin,'sources':[origin]}
             if ch["id"] in seen:
                 saved=combined[seen[ch["id"]]]
                 sources=saved.setdefault('sources',[saved.get('source',LEGACY_URL)])
                 if origin not in sources:sources.append(origin)
+                if fresh and ch['id'] not in fresh_ids:
+                    # A failed feed's cached signed URL must not win over a
+                    # successful refresh. Keep membership and useful hints.
+                    for key in ('country','genre'):
+                        if ch.get(key,'Unspecified')=='Unspecified' and saved.get(key,'Unspecified')!='Unspecified':
+                            ch[key]=saved[key]
+                    saved.update(ch)
+                    saved['sources']=sources
                 for key in ('country','genre'):
-                    if saved.get(key,'Unspecified')=='Unspecified' and ch.get(key)!='Unspecified':
+                    if saved.get(key,'Unspecified')=='Unspecified' and ch.get(key,'Unspecified')!='Unspecified':
                         saved[key]=ch[key]
             else:
                 seen[ch["id"]]=len(combined)
                 combined.append(ch)
+            if fresh:fresh_ids.add(ch['id'])
 
     for url in urls:
         try:
@@ -164,7 +174,7 @@ def refresh_catalogue(settings, old_channels, fetch):
                     hint=CATEGORY_HINTS.get(url) or DIRECTORY_CATEGORIES.get(url)
                     if hint:ch["genre"]=hint
             success += 1
-            append(channels,url)
+            append(channels,url,fresh=True)
         except Exception as exc:
             errors.append(source_label(url) + ": " + type(exc).__name__)
             append(existing.get(url, []),url)

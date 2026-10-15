@@ -121,6 +121,65 @@ class FreeSourceTests(unittest.TestCase):
         generic=lambda token:parse_playlist('#EXTM3U\n#EXTINF:-1,Other\nhttps://example.com/stream?id='+token+'\n')[0]
         self.assertNotEqual(generic('a')['id'],generic('b')['id'])
 
+    def test_fresh_duplicate_replaces_expired_failed_source_cache(self):
+        from dizytv.core import parse_playlist
+        urls=['https://example.com/failed.m3u','https://example.com/fresh.m3u']
+        path='https://epg.provider.plex.tv/library/parts/01234567-89ab/'
+        expired=path+'?X-Plex-Token=expired'
+        fresh=path+'?X-Plex-Token=fresh'
+        cached=parse_playlist(feed(expired,'Cached channel','old-guide'))[0]
+        cached.update(source=urls[0],sources=urls,country='Canada',genre='News')
+        original=dict(cached)
+        def fetch(url):
+            if url==urls[0]:raise OSError('offline')
+            return feed(fresh,'Fresh channel','new-guide')
+        rows,success,errors=refresh_catalogue({'playlist_urls':urls},[cached],fetch)
+        self.assertEqual((1,1,1),(success,len(errors),len(rows)))
+        self.assertEqual(cached['id'],rows[0]['id'])
+        self.assertEqual(fresh,rows[0]['stream'])
+        self.assertEqual(('Fresh channel','new-guide',urls[1]),
+                         (rows[0]['name'],rows[0]['tvg_id'],rows[0]['source']))
+        self.assertEqual(urls,rows[0]['sources'])
+        self.assertEqual(('Canada','News'),(rows[0]['country'],rows[0]['genre']))
+        self.assertEqual(original,cached)
+
+    def test_first_successful_source_wins_duplicates_regardless_of_failure_order(self):
+        from dizytv.core import parse_playlist
+        urls=['https://example.com/a.m3u','https://example.com/b.m3u','https://example.com/c.m3u']
+        path='https://epg.provider.plex.tv/library/parts/01234567-89ab/'
+        cached=parse_playlist(feed(path+'?token=expired','Cached','old-guide'))[0]
+        cached.update(source=urls[0],sources=urls)
+        for failed in urls:
+            with self.subTest(failed=failed):
+                first=next(url for url in urls if url!=failed)
+                def fetch(url):
+                    if url==failed:raise OSError('offline')
+                    return feed(path+'?token='+str(urls.index(url)),
+                                'Fresh '+str(urls.index(url)),url)
+                rows,success,errors=refresh_catalogue({'playlist_urls':urls},[cached],fetch)
+                self.assertEqual((2,1,1),(success,len(errors),len(rows)))
+                self.assertEqual(path+'?token='+str(urls.index(first)),rows[0]['stream'])
+                self.assertEqual(first,rows[0]['source'])
+                self.assertEqual('Fresh '+str(urls.index(first)),rows[0]['name'])
+                self.assertEqual(urls,rows[0]['sources'])
+
+    def test_fresh_duplicate_accepts_legacy_cache_without_category_fields(self):
+        from dizytv.core import parse_playlist
+        urls=['https://example.com/a.m3u','https://example.com/b.m3u']
+        path='https://epg.provider.plex.tv/library/parts/01234567-89ab/'
+        cached=parse_playlist(feed(path+'?token=expired'))[0]
+        for key in ('country','genre'):cached.pop(key)
+        cached.update(source=urls[0],sources=urls)
+        for failed in urls:
+            with self.subTest(failed=failed):
+                def fetch(url):
+                    if url==failed:raise OSError('offline')
+                    return feed(path+'?token=fresh')
+                rows,success,errors=refresh_catalogue({'playlist_urls':urls},[cached],fetch)
+                self.assertEqual((1,1,1),(success,len(errors),len(rows)))
+                self.assertEqual(path+'?token=fresh',rows[0]['stream'])
+                self.assertEqual(urls,rows[0]['sources'])
+
     def test_default_presets_include_uk_us_and_epg(self):
         state=default_state()
         self.assertTrue(any('countries/us.m3u' in u for u in state['settings']['playlist_urls']))

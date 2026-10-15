@@ -150,6 +150,59 @@ class DesktopTests(unittest.TestCase):
             dialog.close()
             window.close()
 
+
+    def test_uk_fast_one_click_adds_matching_playlist_and_guides_without_duplicates(self):
+        from dizytv.sources import FAST_GUIDE_BY_PLAYLIST
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            dialog=Settings(window.state,window)
+            self.assertIsNotNone(dialog.findChild(QPushButton,'addUKFastPlaylists'))
+            custom='https://example.com/my-channels.m3u'
+            first_guide='https://example.com/guide.xml'
+            dialog.playlists.setPlainText(custom)
+            dialog.feeds.setPlainText(first_guide)
+            dialog.add_uk_fast_playlists()
+            self.assertEqual([custom,*FAST_GUIDE_BY_PLAYLIST.keys()],
+                             dialog.values()['playlist_urls'])
+            self.assertEqual([first_guide,*FAST_GUIDE_BY_PLAYLIST.values()],
+                             dialog.values()['xmltv_urls'])
+            dialog.add_uk_fast_playlists()
+            self.assertEqual(4,len(dialog.values()['playlist_urls']))
+            self.assertEqual(4,len(dialog.values()['xmltv_urls']))
+            dialog.close();window.close()
+
+    def test_duplicate_tool_hides_and_restores_selected_only_with_last_result(self):
+        from dizytv.core import parse_playlist
+        from dizytv.health_history import HealthHistory
+        playlist=('#EXTM3U\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Entertainment",E4\nhttps://one.example/live.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Entertainment",E4\nhttps://two.example/live.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB",E4 +1\nhttps://three.example/live.m3u8\n')
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            channels=parse_playlist(playlist)
+            store.update(lambda state:state.update(channels=channels))
+            HealthHistory(store).record([{'id':channels[1]['id'],'status':'missing',
+                                          'name':'E4','detail':'URL=secret'}])
+            window=MainWindow(store,start_worker=False)
+            window.open_duplicate_channels()
+            dialog=window.duplicate_dialog
+            self.assertEqual(1,len(dialog.groups))
+            self.assertEqual(1,dialog.tree.topLevelItemCount())
+            group=dialog.tree.topLevelItem(0)
+            self.assertEqual(2,group.childCount())
+            second=group.child(1)
+            self.assertIn('missing',second.text(2))
+            dialog.tree.setCurrentItem(second)
+            dialog.update_visibility(True)
+            self.assertIn(channels[1]['id'],store.read()['disabled_channels'])
+            self.assertNotIn(channels[0]['id'],store.read()['disabled_channels'])
+            self.assertEqual(2,len(window.grid.rows))  # E4 and E4 +1 stay
+            dialog.update_visibility(False)
+            self.assertEqual([],store.read()['disabled_channels'])
+            self.assertEqual(3,len(window.grid.rows))
+            dialog.close();window.close()
+
     def test_24_7_filter_and_hidden_restore_apply_to_guide_and_search(self):
         from dizytv.core import parse_playlist
         from dizytv.global_search import GlobalSearch
@@ -168,16 +221,18 @@ class DesktopTests(unittest.TestCase):
             window=MainWindow(store,start_worker=False)
             self.assertIsNotNone(window.sort_picker)
             self.assertIsNotNone(window.show_disabled)
-            # A global shortcut must clear unrelated old filters rather than
-            # falsely reporting that there are zero loop channels.
+            # 24/7 is a normal Category dropdown value, not a sidebar button.
+            self.assertFalse(hasattr(window,'loop_filter_button'))
+            self.assertGreaterEqual(window.section_filter.findData('24/7 Shows & Loops'),0)
             window.source_filter.setCurrentIndex(window.source_filter.findData('<ace>'))
             window.favourites_only.setChecked(True)
             window.search.setText('not present')
             self.assertEqual(0,window.channels.count())
-            window.loop_filter_button.click()
-            self.assertEqual('',window.source_filter.currentData())
-            self.assertFalse(window.favourites_only.isChecked())
-            self.assertEqual('',window.search.text())
+            window.section_filter.setCurrentIndex(window.section_filter.findData('24/7 Shows & Loops'))
+            self.assertEqual(0,window.channels.count())  # honours other filters
+            window.source_filter.setCurrentIndex(0)
+            window.favourites_only.setChecked(False)
+            window.search.clear()
             self.assertEqual('24/7 Shows & Loops',window.section_filter.currentData())
             self.assertEqual(1,window.channels.count())
             self.assertEqual('South Park',window.grid.rows[0]['name'])
@@ -925,7 +980,10 @@ class DesktopTests(unittest.TestCase):
             window=MainWindow(Store(folder),start_worker=False)
             with patch('dizytv.desktop.QDesktopServices.openUrl',return_value=True) as open_url:
                 window.open_ace_stream_setup()
-                self.assertEqual('https://docs.acestream.net/products/',open_url.call_args.args[0].toString())
+                self.assertEqual(
+                    'https://wiki.acestream.media/Install_Ubuntu'
+                    if sys.platform.startswith('linux') else 'https://docs.acestream.net/products/',
+                    open_url.call_args.args[0].toString())
             window.close()
 
     def test_epg_mapping_picker_suggests_regions_and_saves_only_confirmed_choice(self):
@@ -1185,6 +1243,56 @@ class DesktopTests(unittest.TestCase):
             self.assertIn(DEFAULT_PLAYLIST_URLS[1],urls)
             self.assertEqual(len(urls),len(set(urls)))
             dialog.close()
+
+    def test_tools_system_usage_page_is_live_and_does_not_send_telemetry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            menu_labels=[action.text() for action in window.tools_button.menu().actions()]
+            self.assertIn('System usage…',menu_labels)
+            window.open_system_usage()
+            self.app.processEvents()
+            dlg=window.usage_dialog
+            self.assertTrue(dlg.isVisible())
+            self.assertIn('DizyTV',dlg.summary.text())
+            self.assertIn('Imported channels:',dlg.details.toPlainText())
+            dlg.close()
+            self.assertFalse(dlg.timer.isActive())
+            window.close()
+
+    def test_direct_http_buffer_setting_does_not_modify_ace_sessions(self):
+        from dizytv.core import default_state, validate_state
+        initial=default_state()
+        self.assertEqual(4000,initial['settings']['http_buffer_ms'])
+        initial['settings']['http_buffer_ms']=8000
+        validate_state(initial)
+        initial['settings']['http_buffer_ms']=90000
+        with self.assertRaisesRegex(ValueError,'HTTP playback buffer'):
+            validate_state(initial)
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            settings=Settings(window.state,window)
+            settings.http_buffer.setValue(8000)
+            self.assertEqual(8000,settings.values()['http_buffer_ms'])
+            settings.close()
+            window.close()
+
+    def test_progressive_health_scan_can_be_stopped_without_resetting_results(self):
+        from dizytv.desktop import ChannelHealthDialog
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            d=ChannelHealthDialog(store,None,Mock())
+            d.rows=[{'id':str(i),'name':'Channel '+str(i),
+                     'stream':'https://example.com/'+str(i)} for i in range(90)]
+            d.reset_filter()
+            self.assertEqual(90,d.progress.maximum())
+            d.start_progressive_scan()
+            self.assertTrue(d.scan_all)
+            self.assertTrue(d.stop_button.isEnabled())
+            d.stop_progressive_scan()
+            self.assertFalse(d.scan_all)
+            self.assertFalse(d.stop_button.isEnabled())
+            d.close()
 
     @classmethod
     def setUpClass(cls):

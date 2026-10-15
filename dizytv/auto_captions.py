@@ -58,10 +58,10 @@ def installed_language_model(language, root=None):
     if language not in LANGUAGE_MODELS:
         raise ValueError('Unsupported speech-model language')
     if language == 'English (bundled)':
-        model = bundled_speech_directory()/LANGUAGE_MODELS[language]
-    else:
-        model = Path(root) if root else user_models_directory()
-        model = model/LANGUAGE_MODELS[language]
+        bundled = bundled_speech_directory()/LANGUAGE_MODELS[language]
+        if (bundled/'am').is_dir() and (bundled/'conf').is_dir():
+            return bundled
+    model = (Path(root) if root else user_models_directory())/LANGUAGE_MODELS[language]
     return model if (model/'am').is_dir() and (model/'conf').is_dir() else None
 
 
@@ -71,8 +71,10 @@ def install_language_model(language, root=None, opener=urlopen):
     No user-supplied URL, archive traversal, links, ZIP bombs or partially
     installed model. Caller runs this away from the GUI thread.
     """
-    if language not in LANGUAGE_MODELS or language == 'English (bundled)':
-        raise ValueError('Choose an optional Vosk language to install')
+    if language not in LANGUAGE_MODELS:
+        raise ValueError('Choose a supported Vosk language')
+    if language == 'English (bundled)' and installed_language_model(language) is not None:
+        return str(installed_language_model(language))
     folder=Path(root) if root else user_models_directory()
     model_name=LANGUAGE_MODELS[language]
     existing=installed_language_model(language,folder)
@@ -130,8 +132,10 @@ def bundled_speech_directory():
 
 def verify_caption_engine(model_dir='',ffmpeg_path=''):
     packaged = bundled_speech_directory()
-    if not model_dir and (packaged / 'vosk-model-small-en-us-0.15').is_dir():
-        model_dir = str(packaged / 'vosk-model-small-en-us-0.15')
+    if not model_dir:
+        installed=installed_language_model('English (bundled)')
+        if installed is not None:
+            model_dir=str(installed)
     if not model_dir:
         raise ValueError('English speech model is missing; choose an extracted Vosk model in Settings')
     model=Path(model_dir)

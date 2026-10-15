@@ -68,6 +68,8 @@ if sys.platform=='darwin':
 elif os.name=='nt':
     args += ['--windowed','--icon','assets/branding/dizytv.ico']
 args += ['dizytv/__main__.py']
+if sys.platform.startswith('linux'):
+    args = [sys.executable,'-m','PyInstaller','--noconfirm','--clean',str(ROOT/'scripts'/'linux.spec')]
 subprocess.run(args,check=True)
 
 if sys.platform=='darwin':

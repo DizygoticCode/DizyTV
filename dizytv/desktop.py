@@ -1,4 +1,4 @@
-"""Native Qt desktop client for Windows and macOS."""
+"""Native Qt desktop client for Windows, macOS and Linux."""
 from __future__ import annotations
 import json
 import re
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
@@ -34,6 +34,9 @@ from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
 from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
                             LANGUAGE_MODELS, installed_language_model, install_language_model)
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
+from .health_history import HealthHistory
+from .duplicates import duplicate_groups
+from .system_usage import SystemSampler
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -335,8 +338,9 @@ def diagnose_video_output(decoded_audio, decoded_video, displayed_pictures,
         return None
     if decoded_video > 0:
         return ('Audio and video are decoding, but VLC is displaying no video '
-                'frames. Suspect libVLC video rendering / output / hardware '
-                'acceleration on this PC.')
+                'frames. A decoder count does not prove a usable frame or '
+                'keyframe. Check damaged segments, missing keyframes, codec '
+                'support and libVLC video output / hardware acceleration.')
     if video_tracks is not None and video_tracks > 0:
         return ('Audio is playing and a video track exists, but VLC is not '
                 'decoding video frames. Suspect the codec, damaged source, '
@@ -733,6 +737,11 @@ class Settings(QDialog):
         add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
+        add_uk_fast=QPushButton('Add UK FAST playlists + matching guides (Plex / Samsung / Pluto)',self)
+        add_uk_fast.setObjectName('addUKFastPlaylists')
+        add_uk_fast.setToolTip('Add the three UK FAST M3U sources and their matching XMLTV feeds without deleting your existing sources.')
+        add_uk_fast.clicked.connect(self.add_uk_fast_playlists)
+        form.addRow(add_uk_fast)
         add_shows=QPushButton('Add 24/7 show / sitcom channels (US FAST sources)',self)
         add_shows.setToolTip('Opt-in public Pluto/Plex/Samsung US feeds; find their series channels under 24/7 Shows & Loops.')
         add_shows.clicked.connect(self.add_show_loop_playlists)
@@ -752,8 +761,10 @@ class Settings(QDialog):
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
         self.engine_path=QLineEdit(self.original.get('engine_executable',''))
         self.engine_path.setReadOnly(True)
-        self.engine_path.setPlaceholderText('Auto-detect from Windows registry / AppData')
-        exe_button=QPushButton('Choose installed EXE')
+        self.engine_path.setPlaceholderText(
+            'Choose start-engine or auto-detect /opt/acestream/start-engine'
+            if sys.platform.startswith('linux') else 'Auto-detect from Windows registry / AppData')
+        exe_button=QPushButton('Choose Linux engine script' if sys.platform.startswith('linux') else 'Choose installed EXE')
         exe_button.clicked.connect(self.pick_engine_path)
         exe_row=QWidget(); exe_layout=QHBoxLayout(exe_row)
         exe_layout.setContentsMargins(0,0,0,0)
@@ -776,6 +787,13 @@ class Settings(QDialog):
         self.vlc_decoder.setCurrentText(self.original.get('vlc_decoder','Auto'))
         self.vlc_decoder.setToolTip('If audio plays but video stays black, try Software. Restart DizyTV after changing this setting.')
         form.addRow('VLC video decoding',self.vlc_decoder)
+        self.http_buffer=QSpinBox()
+        self.http_buffer.setRange(1000,12000)
+        self.http_buffer.setSingleStep(1000)
+        self.http_buffer.setSuffix(' ms')
+        self.http_buffer.setValue(self.original.get('http_buffer_ms',4000))
+        self.http_buffer.setToolTip('Direct HTTP/HLS only. More buffering can reduce stalls but increases live delay. Ace Stream engine playback is unaffected.')
+        form.addRow('HTTP/HLS network buffer',self.http_buffer)
         self.guide_scale=QSpinBox()
         self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
         self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
@@ -898,7 +916,7 @@ class Settings(QDialog):
         warning=QLabel('Timeshift requires available disk space and clear MPEG-TS or TS/HLS video. This is NOT a saved recording. The oldest data is automatically discarded; the buffer is deleted when playback stops. Encrypted/fMP4 streams fall back to live playback.')
         warning.setWordWrap(True)
         form.addRow(warning)
-        note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
+        note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nLinux uses an installed native Ace start-engine script and system libVLC. Mac playback can connect to a reachable engine.'); note.setWordWrap(True); form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
@@ -910,11 +928,26 @@ class Settings(QDialog):
         self.playlists.setPlainText('\n'.join(combined))
         self.add_uk_fast_guides(silent=True)
 
+    def add_uk_fast_playlists(self):
+        """Install matching FAST M3U/XMLTV pairs together, without partial edits."""
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        guides=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys([*existing,*FAST_GUIDE_BY_PLAYLIST.keys()]))
+        matching=list(dict.fromkeys([*guides,*FAST_GUIDE_BY_PLAYLIST.values()]))
+        if len(combined)>32 or len(matching)>20:
+            QMessageBox.warning(self,'DizyTV',
+                'No playlists or guides were changed. You need room for three UK FAST '
+                'M3U/XMLTV pairs (32 playlist / 20 guide limit). Remove unused entries '
+                'from the corresponding lists first.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+        self.feeds.setPlainText('\n'.join(matching))
+
     def add_uk_fast_guides(self,silent=False):
         active={u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()}
         matched=[url for playlist,url in FAST_GUIDE_BY_PLAYLIST.items() if playlist in active]
         if not matched:
-            if not silent:QMessageBox.information(self,'DizyTV','Add a UK FAST playlist (Plex, Samsung TV Plus or Pluto TV) first.')
+            if not silent:QMessageBox.information(self,'DizyTV','No matching UK FAST M3U sources selected. Click Add UK FAST playlists + matching guides above, then Save.')
             return
         existing=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys([*existing,*matched]))
@@ -960,9 +993,9 @@ class Settings(QDialog):
     def refresh_caption_language(self,*_):
         language=self.caption_language.currentText()
         installed=installed_language_model(language)
-        if language=='English (bundled)':
+        if language=='English (bundled)' and installed is not None:
             self.model_download.setEnabled(False)
-            self.model_state.setText('English uses the bundled Windows model; no download needed.')
+            self.model_state.setText('English model is installed.')
         elif installed is not None:
             self.model_download.setEnabled(False)
             self.model_state.setText('Installed • '+language)
@@ -972,7 +1005,7 @@ class Settings(QDialog):
 
     def download_caption_language(self):
         language=self.caption_language.currentText()
-        if language=='English (bundled)' or getattr(self,'download_task',None) is not None:return
+        if getattr(self,'download_task',None) is not None:return
         self.model_download.setEnabled(False)
         self.model_state.setText('Downloading '+language+' from official Vosk…')
         task=Task(lambda:install_language_model(language))
@@ -999,9 +1032,14 @@ class Settings(QDialog):
         if executable:self.auto_ffmpeg_path.setText(executable)
 
     def pick_engine_path(self):
+        if sys.platform.startswith('linux'):
+            selected=self.engine_path.text() or '/opt/acestream/'
+            options='Ace Stream Linux launcher (start-engine);;All files (*)'
+        else:
+            selected=self.engine_path.text() or os.environ.get('APPDATA','')
+            options='Ace Stream engine (ace_engine.exe ace_console.exe)'
         path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
-              self.engine_path.text() or os.environ.get('APPDATA',''),
-              'Ace Stream engine (ace_engine.exe ace_console.exe)')
+                                            selected,options)
         if path:self.engine_path.setText(path)
 
     def pick_folder(self):
@@ -1022,7 +1060,7 @@ class Settings(QDialog):
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
-                    theme=self.theme.currentText(),vlc_decoder=self.vlc_decoder.currentText(),
+                    theme=self.theme.currentText(),vlc_decoder=self.vlc_decoder.currentText(),http_buffer_ms=self.http_buffer.value(),
                     subtitles_enabled=self.cc_enabled.isChecked(),subtitle_language=self.cc_language.currentText(),
                     subtitle_font=self.cc_font.currentText(),subtitle_size=self.cc_size.value(),
                     subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
@@ -1041,6 +1079,7 @@ class ChannelHealthDialog(QDialog):
         state=store.read()
         self.store=store
         self.on_change=on_change
+        self.health_history=HealthHistory(store)
         self.last_batch_start=None
         self.setWindowTitle('Channel health — this computer')
         self.resize(725,540)
@@ -1049,6 +1088,7 @@ class ChannelHealthDialog(QDialog):
         self.selected=selected
         self.offset=0
         self.running=False
+        self.scan_all=False
         self.results=[]
         layout=QVBoxLayout(self)
         description=QLabel('Checks run from THIS PC (with its current VPN/network). '
@@ -1067,6 +1107,12 @@ class ChannelHealthDialog(QDialog):
         self.summary=QLabel('Ready • Test one channel or a manually requested batch of 40.')
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        self.progress=QProgressBar()
+        self.progress.setObjectName('healthScanProgress')
+        self.progress.setRange(0,len(self.rows))
+        self.progress.setValue(0)
+        self.progress.setFormat('%v / %m channels checked (%p%)')
+        layout.addWidget(self.progress)
         self.output=QListWidget()
         layout.addWidget(self.output,1)
         self.auto_hide=QCheckBox('Automatically hide after two consecutive 404/410 checks (opt-in)')
@@ -1081,6 +1127,14 @@ class ChannelHealthDialog(QDialog):
         self.batch_button=QPushButton('Check next 40')
         self.batch_button.clicked.connect(self.check_next)
         actions.addWidget(self.batch_button)
+        self.scan_button=QPushButton('Scan all progressively')
+        self.scan_button.setToolTip('Only on explicit request: process all selected channels in safe batches of 40, at most four network probes at a time.')
+        self.scan_button.clicked.connect(self.start_progressive_scan)
+        actions.addWidget(self.scan_button)
+        self.stop_button=QPushButton('Stop after current batch')
+        self.stop_button.setEnabled(False)
+        self.stop_button.clicked.connect(self.stop_progressive_scan)
+        actions.addWidget(self.stop_button)
         self.recheck_button=QPushButton('Recheck last 40')
         self.recheck_button.setEnabled(False)
         self.recheck_button.clicked.connect(self.recheck_last)
@@ -1105,9 +1159,19 @@ class ChannelHealthDialog(QDialog):
                 if not source or source in (row.get('sources') or [row.get('source')])]
 
     def reset_filter(self,*_):
+        # Changing sources cancels any queued continuation.
+        self.scan_all=False
+        total=len(self.filtered())
+        self.stop_button.setEnabled(False)
+        self.scan_button.setEnabled(not self.running and bool(total))
         self.offset=0
         self.results.clear()
         self.output.clear()
+        # A 0..0 range animates as indeterminate even when there is no work.
+        self.progress.setMaximum(max(1,total))
+        self.progress.setFormat('%v / %m channels checked (%p%)' if total
+                                else '0 / 0 channels checked')
+        self.progress.setValue(0)
         self.summary.setText(f'{len(self.filtered()):,} channels in this selection. '
                              'Each click probes at most 40 using four network connections.')
         self.batch_button.setEnabled(not self.running and bool(self.filtered()))
@@ -1115,6 +1179,44 @@ class ChannelHealthDialog(QDialog):
         self.last_batch_start=None
         self.recheck_button.setEnabled(False)
         self.hide_confirmed.setEnabled(False)
+
+    def start_progressive_scan(self):
+        if self.running or not self.filtered():return
+        if self.offset>=len(self.filtered()):
+            self.offset=0
+            self.results.clear()
+            self.output.clear()
+            self.progress.setValue(0)
+        self.scan_all=True
+        self.stop_button.setEnabled(True)
+        self.scan_button.setEnabled(False)
+        self.check_next()
+
+    def stop_progressive_scan(self):
+        # We cannot interrupt an in-flight DNS/HTTP call safely. At most one
+        # 40-channel batch finishes; no further batch will be started.
+        self.scan_all=False
+        self.stop_button.setEnabled(False)
+        self.scan_button.setEnabled(not self.running)
+        self.batch_button.setEnabled(not self.running and self.offset<len(self.filtered()))
+        if self.running:
+            self.summary.setText('Stopping after current batch; completed results will be retained.')
+        else:
+            self.summary.setText(f'Paused after {self.offset:,} / {len(self.filtered()):,} channels.')
+
+    def closeEvent(self,event):
+        self.stop_progressive_scan()
+        super().closeEvent(event)
+
+    def reject(self):
+        # Escape rejects a QDialog without going through closeEvent.
+        self.stop_progressive_scan()
+        super().reject()
+
+    def continue_progressive_scan(self):
+        # Stop/Close/Escape may arrive after a continuation has been queued.
+        if self.scan_all:
+            self.check_next()
 
     def check_selected(self):
         # This dialog is modeless: the main window's selection can change.
@@ -1173,10 +1275,20 @@ class ChannelHealthDialog(QDialog):
         self.health_task=task
         def success(payload):
             entries,end=payload
+            checker_busy=any(entry['status']=='checker-busy' for entry in entries)
+            # Capacity is a local scanner state, not a channel observation.
+            # Keep the retry cursor and previous saved channel results intact.
+            entries=[entry for entry in entries if entry['status']!='checker-busy']
             self.running=False
             self.source.setEnabled(True)
             if not one:self.offset=end
+            self.progress.setValue(self.offset)
             self.results.extend(entries)
+            try:
+                self.health_history.record(entries)
+                history_error=False
+            except (OSError,ValueError):
+                history_error=True
             for entry in entries:
                 item=QListWidgetItem(entry['name'][:90]+'  •  '+
                                      entry['status'].replace('-',' ')+
@@ -1195,15 +1307,36 @@ class ChannelHealthDialog(QDialog):
             self.summary.setText(f'{len(self.results)} checks this session · '+
                                  ', '.join(f'{k}: {n}' for k,n in sorted(counts.items()))+
                                  f' · batch position {self.offset}/{len(self.filtered())}. '
-                                 'Results are network reachability hints, not playback proof.')
-            self.batch_button.setEnabled(self.offset<len(self.filtered()))
+                                 'Results are network reachability hints, not playback proof.'+
+                                 (' Previous-result cache could not be saved.' if history_error else ''))
+            total=len(self.filtered())
             self.batch_button.setText('Check next 40')
+            if checker_busy:
+                self.scan_all=False
+                self.summary.setText('Paused: stream checker is busy; retry unchecked channels later. '+self.summary.text())
+            elif self.scan_all and self.offset<total:
+                # A provider telling us to slow down is a reason to pause,
+                # not to hammer the rest of its catalogue.
+                if any(x['status']=='rate-limited' for x in entries):
+                    self.scan_all=False
+                    self.summary.setText('Paused on provider HTTP 429 rate limit. '+self.summary.text())
+                else:
+                    QTimer.singleShot(0,self.continue_progressive_scan)
+            if self.offset>=total:
+                self.scan_all=False
+            self.batch_button.setEnabled(self.offset<total and not self.scan_all)
+            self.stop_button.setEnabled(self.scan_all)
+            self.scan_button.setEnabled(not self.scan_all)
             self.selected_button.setEnabled(True)
             self.health_task=None
         def failure(message):
             self.running=False
+            self.scan_all=False
+            self.stop_button.setEnabled(False)
+            self.scan_button.setEnabled(True)
             self.source.setEnabled(True)
-            self.summary.setText('Health check failed; retry the batch. '+message[:120])
+            # Transport errors can contain signed stream URLs or credentials.
+            self.summary.setText('Health check failed; retry the batch.')
             self.batch_button.setEnabled(True)
             self.recheck_button.setEnabled(self.last_batch_start is not None)
             self.selected_button.setEnabled(True)
@@ -1217,6 +1350,262 @@ class ChannelHealthDialog(QDialog):
         # Never put URLs, access tokens, full headers or IPs in the clipboard.
         QApplication.clipboard().setText(json.dumps(self.results,indent=2))
 
+class ChannelDuplicatesDialog(QDialog):
+    """Human-reviewed same-name candidates; never delete or auto-hide feeds."""
+
+    PAGE_GROUPS=80
+
+    def __init__(self,store,on_change=None,parent=None):
+        super().__init__(parent)
+        self.store=store
+        self.on_change=on_change
+        self.setWindowTitle('DizyTV — duplicate channel candidates')
+        self.resize(920,630)
+        self.history=HealthHistory(store)
+        self.groups=[]
+        self.matches=[]
+        self.loaded=0
+        self.disabled=set()
+        layout=QVBoxLayout(self)
+        intro=QLabel(
+            'Candidates share a channel name, country and TV/radio type, but may '
+            'be different streams, providers or quality levels. +1 and named regional '
+            'variants are kept distinct. Select individual entries to hide or restore; '
+            'nothing is deleted or hidden automatically. Last HTTP results do NOT '
+            'confirm video playback.')
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        top=QHBoxLayout()
+        self.query=QLineEdit()
+        self.query.setPlaceholderText('Filter duplicate names or providers')
+        self.query.textChanged.connect(self.refilter)
+        top.addWidget(self.query,1)
+        self.status_filter=QComboBox()
+        self.status_filter.addItem('Every previous check status','')
+        self.status_filter.addItem('Includes HTTP 404 / 410 result','missing')
+        self.status_filter.addItem('Has not been checked','unchecked')
+        self.status_filter.addItem('Includes access-limited result','access-limited')
+        self.status_filter.currentIndexChanged.connect(self.refilter)
+        top.addWidget(self.status_filter)
+        layout.addLayout(top)
+        self.tree=QTreeWidget()
+        self.tree.setObjectName('duplicateChannelTree')
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(['Channel / candidate group','Playlist source','Last HTTP result','Visibility'])
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setColumnWidth(0,300)
+        self.tree.setColumnWidth(1,215)
+        self.tree.setColumnWidth(2,205)
+        self.tree.setColumnWidth(3,90)
+        layout.addWidget(self.tree,1)
+        self.count_label=QLabel()
+        layout.addWidget(self.count_label)
+        row=QHBoxLayout()
+        self.hide_button=QPushButton('Hide selected channels')
+        self.hide_button.clicked.connect(lambda:self.update_visibility(True))
+        row.addWidget(self.hide_button)
+        self.restore_button=QPushButton('Restore selected channels')
+        self.restore_button.clicked.connect(lambda:self.update_visibility(False))
+        row.addWidget(self.restore_button)
+        self.more_button=QPushButton('Load 80 more groups')
+        self.more_button.clicked.connect(self.show_more)
+        row.addWidget(self.more_button)
+        self.refresh_button=QPushButton('Refresh last results')
+        self.refresh_button.clicked.connect(self.refresh)
+        row.addWidget(self.refresh_button)
+        close=QPushButton('Close')
+        close.clicked.connect(self.close)
+        row.addWidget(close)
+        layout.addLayout(row)
+        self.refresh()
+
+    def refresh(self):
+        state=self.store.read()
+        self.groups=duplicate_groups(state['channels'])
+        self.disabled=set(state.get('disabled_channels',()))
+        self.latest=self.history.read()
+        self.refilter()
+
+    def refilter(self,*_):
+        query=self.query.text().casefold().strip()
+        check=self.status_filter.currentData()
+        matches=[]
+        for key,rows in self.groups:
+            if query:
+                if query not in key[0] and not any(
+                        query in source_label((r.get('sources') or
+                                  [r.get('source','')])[0]).casefold()
+                        for r in rows):
+                    continue
+            if check and not any(
+                    (r.get('id') not in self.latest if check=='unchecked'
+                     else self.latest.get(r.get('id'),{}).get('status')==check)
+                    for r in rows):
+                continue
+            matches.append((key,rows))
+        self.matches=matches
+        self.loaded=0
+        self.tree.clear()
+        self.show_more()
+
+    def show_more(self):
+        chunk=self.matches[self.loaded:self.loaded+self.PAGE_GROUPS]
+        for key,rows in chunk:
+            label=display_channel_name(rows[0].get('name',''))
+            group=QTreeWidgetItem([f'{label}  ({len(rows)} candidates · {rows[0].get("country") or "Unspecified"})'])
+            group.setFlags(group.flags() & ~Qt.ItemIsSelectable)
+            self.tree.addTopLevelItem(group)
+            for ch in rows:
+                cid=ch['id']
+                sources=ch.get('sources') or [ch.get('source','')]
+                labels=list(dict.fromkeys(source_label(u) for u in sources if u))
+                source=', '.join(labels[:2])+(' + more' if len(labels)>2 else '')
+                result=self.latest.get(cid)
+                health=('Not checked' if result is None else
+                        result['status'].replace('-',' ')+
+                        ' · '+time.strftime('%Y-%m-%d %H:%M',time.localtime(result['checked'])))
+                item=QTreeWidgetItem([
+                    display_channel_name(ch['name'])+'  ['+cid[:8]+']',
+                    source or 'Unknown playlist',health,
+                    'Hidden' if cid in self.disabled else 'Visible',
+                ])
+                item.setData(0,Qt.UserRole,cid)
+                group.addChild(item)
+        self.loaded+=len(chunk)
+        self.more_button.setEnabled(self.loaded<len(self.matches))
+        self.count_label.setText(
+            f'{len(self.groups):,} groups with matching names · '
+            f'{len(self.matches):,} matching groups · '
+            f'{self.loaded:,} displayed. Select channel entries, not group headers.')
+
+    def selected_ids(self):
+        return {item.data(0,Qt.UserRole) for item in self.tree.selectedItems()
+                if item.parent() is not None and item.data(0,Qt.UserRole)}
+
+    def update_visibility(self,hide):
+        ids=self.selected_ids()
+        if not ids:
+            self.count_label.setText('Select individual channel rows first.')
+            return
+        known={ch['id'] for ch in self.store.read()['channels']}
+        ids &= known
+        if not ids:return
+        previous=set(self.disabled)
+        def apply(state):
+            disabled=set(state.get('disabled_channels',[]))
+            if hide:disabled.update(ids)
+            else:disabled.difference_update(ids)
+            state['disabled_channels']=sorted(disabled)
+        self.store.update(apply)
+        if self.on_change:self.on_change()
+        self.disabled=set(self.store.read()['disabled_channels'])
+        for group_idx in range(self.tree.topLevelItemCount()):
+            group=self.tree.topLevelItem(group_idx)
+            for row_idx in range(group.childCount()):
+                item=group.child(row_idx)
+                cid=item.data(0,Qt.UserRole)
+                if cid in ids:
+                    item.setText(3,'Hidden' if cid in self.disabled else 'Visible')
+        changed=len(previous.symmetric_difference(self.disabled))
+        self.count_label.setText(
+            f'{changed} channels '+('hidden' if hide else 'restored')+
+            '. Changes affect the channel browser, guide and global search.')
+
+
+class SystemUsageDialog(QDialog):
+    """Read-only resource and VLC diagnostic panel, sampled only while visible."""
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner=owner
+        self.sampler=SystemSampler()
+        self.setWindowTitle('DizyTV — system usage')
+        self.setObjectName('systemUsageDialog')
+        self.resize(630,435)
+        layout=QVBoxLayout(self)
+        self.summary=QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self.details=QPlainTextEdit()
+        self.details.setReadOnly(True)
+        self.details.setObjectName('systemUsageReadout')
+        layout.addWidget(self.details,1)
+        explanation=QLabel(
+            'CPU is shown as % of all logical cores and % of one core. '
+            'Process memory includes libVLC in this process, but excludes detached '
+            'recorders, external Ace Engine, and the FFmpeg caption child process. '
+            'Measurements stay on this device. A reachable URL is not proof of playback.')
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
+        self.timer=QTimer(self)
+        self.timer.setInterval(1250)
+        self.timer.timeout.connect(self.refresh_snapshot)
+        self.refresh_snapshot()
+
+    @staticmethod
+    def fmt(value,unit=''):
+        return 'Unavailable' if value is None else str(value)+unit
+
+    def refresh_snapshot(self):
+        owner=self.owner
+        stats=self.sampler.snapshot(owner.store.directory)
+        ram=self.fmt(stats['process_memory_mib'],' MiB')
+        if stats['process_memory_peak_only']:
+            ram+=' (peak, not current)'
+        self.summary.setText(
+            'DizyTV: '+self.fmt(stats['process_cpu_percent'],'% total CPU')+
+            '  •  '+ram+' RAM')
+        lines=[
+            'Platform: '+stats['platform'],
+            'Logical CPU cores: '+str(stats['logical_cores']),
+            'DizyTV CPU / all cores: '+self.fmt(stats['process_cpu_percent'],'%'),
+            'DizyTV CPU / single-core equivalent: '+self.fmt(stats['process_one_core_percent'],'%'),
+            'DizyTV working memory: '+ram,
+            'System physical RAM used: '+self.fmt(stats['system_used_mib'],' MiB')+
+            ' / '+self.fmt(stats['system_total_mib'],' MiB')+
+            ' ('+self.fmt(stats['system_used_percent'],'%')+')',
+            'Free space in app data folder: '+self.fmt(stats['recording_disk_free_gib'],' GiB'),
+            'Imported channels: '+format(len(owner.state.get('channels',[])),','),
+            'Guide programmes: '+format(len(owner.guide.get('programmes',[])),','),
+            'Timeshift mode: '+('Active' if owner.timeshift is not None else 'Off'),
+            'Local speech captions: '+('Active' if owner._auto_caption_worker is not None else 'Off'),
+            'Player state: '+(str(owner.player.get_state()) if owner.player else 'Stopped'),
+        ]
+        if owner.player is not None:
+            media=None
+            try:
+                import vlc
+                media=owner.player.get_media()
+                counters=vlc.MediaStats()
+                if media is not None and media.get_stats(counters):
+                    lines.extend([
+                        'VLC decoded audio: '+str(counters.decoded_audio),
+                        'VLC decoded video: '+str(counters.decoded_video),
+                        'VLC displayed pictures: '+str(counters.displayed_pictures),
+                        'VLC lost pictures: '+str(counters.lost_pictures),
+                        'VLC demux bitrate: '+str(round(counters.demux_bitrate,2))+' MiB/s',
+                        'VLC input bitrate: '+str(round(counters.input_bitrate,2))+' MiB/s',
+                    ])
+            except (AttributeError,RuntimeError,TypeError,OSError):
+                lines.append('VLC playback counters unavailable')
+            finally:
+                if media is not None:media.release()
+        self.details.setPlainText('\n'.join(lines))
+
+    def showEvent(self,event):
+        self.timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self,event):
+        self.timer.stop()
+        super().hideEvent(event)
+
+    def closeEvent(self,event):
+        self.timer.stop()
+        super().closeEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
@@ -1228,6 +1617,7 @@ class MainWindow(QMainWindow):
         self._subtitle_track_signature=()
         self._vlc_subtitle_profile=None
         self._playback_url=''
+        self._play_request_serial=0
         self._auto_caption_worker=None
         self._auto_caption_worker_serial=None
         self._auto_caption_stopping=False
@@ -1241,6 +1631,10 @@ class MainWindow(QMainWindow):
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
         self._video_issue_notified=False
+        self._direct_video_sample=None
+        self._direct_video_progress=0
+        self._direct_video_stalled=False
+        self._active_direct_video=False
         self.detached_controls=None;self.detached_hide_timer=QTimer(self)
         self.detached_hide_timer.setSingleShot(True)
         self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
@@ -1282,6 +1676,8 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction('Set up Ace Stream engine…',self.open_ace_stream_setup)
         tools_menu.addAction('Check channel health…',self.open_channel_health)
+        tools_menu.addAction('Find duplicate channels…',self.open_duplicate_channels)
+        tools_menu.addAction('System usage…',self.open_system_usage)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
@@ -1331,15 +1727,12 @@ class MainWindow(QMainWindow):
         self.sort_picker.currentTextChanged.connect(self.change_channel_sort)
         order_row.addWidget(self.sort_picker,1)
         side.addWidget(order)
-        self.loop_filter_button=QPushButton('24/7 Shows & Loops')
-        self.loop_filter_button.setToolTip('Show dedicated TV-series marathons and 24/7 themed channels')
-        self.loop_filter_button.clicked.connect(self.filter_24_7)
-        side.addWidget(self.loop_filter_button)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
         self.country_tree.setMaximumHeight(240)
         self.country_tree.itemClicked.connect(self.country_tree_clicked)
         self.country_tree.itemDoubleClicked.connect(self.country_tree_double_clicked)
+        self.country_tree.itemExpanded.connect(self.populate_expanded_section)
         side.addWidget(self.country_tree)
         self._tree_dirty=True
         selectors=QWidget()
@@ -1460,7 +1853,7 @@ class MainWindow(QMainWindow):
         bar=self.controls_scroll.horizontalScrollBar()
         bar.rangeChanged.connect(self.sync_player_button_arrows)
         bar.valueChanged.connect(lambda _value:self.sync_player_button_arrows())
-        QTimer.singleShot(0,self.sync_player_button_arrows)
+        QTimer.singleShot(0,self,self.sync_player_button_arrows)
         self.tv_controls=controls
         for item in range(controls.count()):
             widget=controls.itemAt(item).widget()
@@ -1535,26 +1928,6 @@ class MainWindow(QMainWindow):
         self._tree_dirty=True
         self.render_channels()
 
-    def filter_24_7(self):
-        # This is a global directory shortcut, not a refinement of the last
-        # unrelated country, playlist, favourites or genre filters.
-        for widget in (self.country_filter,self.genre_filter,
-                       self.kind_filter,self.source_filter):
-            widget.blockSignals(True)
-            widget.setCurrentIndex(0)
-            widget.blockSignals(False)
-        self.search.blockSignals(True)
-        self.search.clear()
-        self.search.blockSignals(False)
-        self.favourites_only.blockSignals(True)
-        self.favourites_only.setChecked(False)
-        self.favourites_only.blockSignals(False)
-        self.section_filter.blockSignals(True)
-        self.section_filter.setCurrentIndex(max(0,self.section_filter.findData('24/7 Shows & Loops')))
-        self.section_filter.blockSignals(False)
-        self.render_channels()
-        self.status.setText(f'24/7 Shows & Loops: {self.channels.count()} channels across all playlists.')
-
     def refresh_disabled_channels(self,*_):
         self._tree_dirty=True
         self.render_channels()
@@ -1578,6 +1951,24 @@ class MainWindow(QMainWindow):
         self.refresh_disabled_channels()
         self.status.setText(('Restored ' if current else 'Hidden ')+label+
                             ' — use Show disabled to restore it later.')
+
+    def open_system_usage(self):
+        existing=getattr(self,'usage_dialog',None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        self.usage_dialog=SystemUsageDialog(self)
+        self.usage_dialog.show()
+
+    def open_duplicate_channels(self):
+        existing=getattr(self,'duplicate_dialog',None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        self.duplicate_dialog=ChannelDuplicatesDialog(self.store,self.refresh_disabled_channels,self)
+        self.duplicate_dialog.show()
 
     def open_channel_health(self):
         dialog=getattr(self,'health_dialog',None)
@@ -1630,30 +2021,68 @@ class MainWindow(QMainWindow):
     def build_country_tree(self,channels):
         if not self._tree_dirty:return
         self.country_tree.blockSignals(True)
-        self.country_tree.clear()
-        groups={}
-        for ch in channels:
-            country=ch.get('country') or 'Unspecified'
-            section=channel_section(ch)
-            groups.setdefault(country,{}).setdefault(section,[]).append(ch)
-        for country in sorted(groups,key=lambda c:(c=='Unspecified',c.casefold())):
-            sections=groups[country]
-            total=sum(len(values) for values in sections.values())
-            country_item=QTreeWidgetItem([f'{country} ({total})'])
-            country_item.setData(0,Qt.UserRole,('country',country,'',''))
-            self.country_tree.addTopLevelItem(country_item)
-            for section in sorted(sections):
-                values=sorted(sections[section],key=lambda ch:display_channel_name(ch['name']).casefold())
-                section_item=QTreeWidgetItem([f'{section} ({len(values)})'])
-                section_item.setData(0,Qt.UserRole,('section',country,section,''))
-                country_item.addChild(section_item)
-                for ch in values:
-                    channel_item=QTreeWidgetItem([display_channel_name(ch['name'])])
-                    channel_item.setData(0,Qt.UserRole,('channel',country,section,ch['id']))
-                    section_item.addChild(channel_item)
-            country_item.setExpanded(country in ('United Kingdom','United States'))
-        self.country_tree.blockSignals(False)
-        self._tree_dirty=False
+        self.country_tree.setUpdatesEnabled(False)
+        try:
+            self.country_tree.clear()
+            self._tree_generation=getattr(self,'_tree_generation',0)+1
+            self._tree_children={}
+            groups={}
+            for ch in channels:
+                country=ch.get('country') or 'Unspecified'
+                section=channel_section(ch)
+                groups.setdefault(country,{}).setdefault(section,[]).append(ch)
+            lazy=len(channels)>3000
+            for country in sorted(groups,key=lambda c:(c=='Unspecified',c.casefold())):
+                sections=groups[country]
+                total=sum(len(values) for values in sections.values())
+                country_item=QTreeWidgetItem([f'{country} ({total})'])
+                country_item.setData(0,Qt.UserRole,('country',country,'',''))
+                self.country_tree.addTopLevelItem(country_item)
+                for section in sorted(sections):
+                    values=sections[section]
+                    section_item=QTreeWidgetItem([f'{section} ({len(values)})'])
+                    section_item.setData(0,Qt.UserRole,('section',country,section,''))
+                    country_item.addChild(section_item)
+                    if lazy:
+                        # Populating thousands of nested QTreeWidgetItems during
+                        # each import previously froze the UI for several seconds.
+                        # Load only an expanded section and yield every 250 rows.
+                        self._tree_children[(country,section)]=values
+                        section_item.addChild(QTreeWidgetItem(['Expand to browse channels…']))
+                    else:
+                        for ch in sorted(values,key=lambda c:display_channel_name(c['name']).casefold()):
+                            leaf=QTreeWidgetItem([display_channel_name(ch['name'])])
+                            leaf.setData(0,Qt.UserRole,('channel',country,section,ch['id']))
+                            section_item.addChild(leaf)
+                country_item.setExpanded(country in ('United Kingdom','United States'))
+            self._tree_dirty=False
+        finally:
+            self.country_tree.setUpdatesEnabled(True)
+            self.country_tree.blockSignals(False)
+
+    def populate_expanded_section(self,item):
+        data=item.data(0,Qt.UserRole)
+        if not data or data[0]!='section':return
+        _,country,section,_=data
+        key=(country,section)
+        values=getattr(self,'_tree_children',{}).pop(key,None)
+        if values is None:return
+        generation=self._tree_generation
+        item.takeChildren()  # discard the one placeholder
+        ordered=sorted(values,key=lambda c:display_channel_name(c['name']).casefold())
+        def fill(start=0):
+            if generation!=self._tree_generation:return
+            self.country_tree.setUpdatesEnabled(False)
+            try:
+                for ch in ordered[start:start+250]:
+                    leaf=QTreeWidgetItem([display_channel_name(ch['name'])])
+                    leaf.setData(0,Qt.UserRole,('channel',country,section,ch['id']))
+                    item.addChild(leaf)
+            finally:
+                self.country_tree.setUpdatesEnabled(True)
+            if start+250<len(ordered):
+                QTimer.singleShot(0,self.country_tree,lambda:fill(start+250))
+        fill()
 
     def country_tree_clicked(self,item,*_):
         item_data=item.data(0,Qt.UserRole)
@@ -1717,6 +2146,8 @@ class MainWindow(QMainWindow):
         selected_country=self.country_filter.currentData()
         selected_section=self.section_filter.currentData()
         sections={channel_section(ch) for ch in source if not selected_country or ch.get('country','Unspecified')==selected_country}
+        # Always show the 24/7 category even before its optional sources load.
+        sections.add('24/7 Shows & Loops')
         self.section_filter.blockSignals(True); self.section_filter.clear()
         self.section_filter.addItem('All categories','')
         for section in sorted(sections):
@@ -1761,15 +2192,20 @@ class MainWindow(QMainWindow):
         genre=self.genre_filter.currentData()
         by_channel,_=self.guide_index()
         resolved={}
+        guide_channels={}
         programmes=[]
         end=self.guide_start+6*3600
         for ch in channels:
             key=self.matched_guide(ch)
             resolved[ch['id']]=key
+            # Alternate streams can share an EPG ID. Index its programmes once
+            # so every row paints one copy, preserving the active genre union.
+            guide_channels[key]=guide_channels.get(key,False) or not genre or ch.get('genre','Unspecified')==genre
+        for key,all_genres in guide_channels.items():
             for p in by_channel.get(key,()):
                 if not (p['start']<end and p['end']>self.guide_start):
                     continue
-                if genre and ch.get('genre','Unspecified')!=genre and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
+                if not all_genres and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
                     continue
                 programmes.append(p)
         self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
@@ -1809,7 +2245,7 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
-        QTimer.singleShot(0,self.sync_player_button_arrows)
+        QTimer.singleShot(0,self,self.sync_player_button_arrows)
 
     def scroll_player_buttons(self,step):
         bar=self.controls_scroll.horizontalScrollBar()
@@ -1837,7 +2273,8 @@ class MainWindow(QMainWindow):
             # Direct HTTP/HLS and Ace playback has no local timeshift watchdog.
             # Do not report an otherwise healthy Playing stream as buffering
             # just because last_good_video was set when playback started.
-            if self.timeshift is None:return 'live'
+            if self.timeshift is None:
+                return 'buffering' if self._direct_video_stalled else 'live'
             return 'live' if time.monotonic()-self.last_good_video<18 else 'buffering'
         return 'buffering'
 
@@ -1878,6 +2315,7 @@ class MainWindow(QMainWindow):
         """Inspect actual video and audio counters without restarting playback."""
         if not self.player or not self.playback_started:
             return None
+        media=None
         try:
             import vlc
             media=self.player.get_media()
@@ -1892,21 +2330,54 @@ class MainWindow(QMainWindow):
                 int(stats.displayed_pictures),tracks if tracks>=0 else None,size)
         except (AttributeError,TypeError,RuntimeError,OSError):
             return None
+        finally:
+            if media is not None:media.release()
 
-    def media_activity(self):
+    def media_activity(self,video_only=False):
         """VLC's decoded picture/audio counters catch freezes with State.Playing.
 
         Older VLC builds may not provide stats; do not guess in that case.
         """
+        media=None
         try:
             import vlc
             media=self.player.get_media()
             if media is None:return None
             stats=vlc.MediaStats()
             if not media.get_stats(stats):return None
+            if video_only:return int(stats.displayed_pictures)
             return int(stats.displayed_pictures)+int(stats.played_abuffers)
         except (AttributeError,TypeError,RuntimeError,OSError):
             return None
+        finally:
+            if media is not None:media.release()
+
+    def check_direct_playback(self,now=None):
+        """Warn about frozen HTTP video without retrying or touching Ace sessions.
+
+        Audio may keep advancing while the last video frame is frozen. Only
+        observe displayed pictures, after this session has displayed a frame;
+        unavailable stats and an intentional pause are not evidence of a stall.
+        """
+        now=time.monotonic() if now is None else now
+        active=(self.player and self.playback_started and self.timeshift is None
+                and self._active_direct_video
+                and str(self.player.get_state()).endswith('.Playing'))
+        frames=self.media_activity(video_only=True) if active else None
+        if frames is None or frames<=0:
+            self._direct_video_sample=None
+            self._direct_video_progress=now
+            self._direct_video_stalled=False
+            return
+        if frames!=self._direct_video_sample:
+            self._direct_video_sample=frames
+            self._direct_video_progress=now
+            self._direct_video_stalled=False
+        elif now-self._direct_video_progress>=18 and not self._direct_video_stalled:
+            self._direct_video_stalled=True
+            self.status.setText('Video frame counter stopped advancing for 18 seconds. '
+                                'The source, segments or video output may be stalled; '
+                                'try another feed or check System usage decoder counters.')
 
     def check_live_timeshift(self,now=None):
         """Recover VLC buffering/errors only if the local cache is still growing.
@@ -1960,6 +2431,7 @@ class MainWindow(QMainWindow):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
         self.check_live_timeshift()
+        self.check_direct_playback()
         self.sync_subtitles()
         if self._auto_caption_overlay is not None and time.monotonic()-self._auto_caption_updated>6:
             self._auto_caption_overlay.hide()
@@ -2476,6 +2948,7 @@ class MainWindow(QMainWindow):
     def play_url(self,url):
         self.stop_auto_captions()
         self._playback_url=url
+        self._active_direct_video=False
         try:
             self.init_player()
             self.player.stop()
@@ -2484,6 +2957,18 @@ class MainWindow(QMainWindow):
             # This is format compatibility, not bypassing geo/DRM restrictions.
             if url.lower().startswith(('http://','https://')):
                 media.add_option(':http-user-agent='+PLAYBACK_USER_AGENT)
+                # Apply only to direct network media, not captured local DVR.
+                # VLC's per-media network caching is preferable to global
+                # decoder/reclock changes, and avoids changing working Ace sessions.
+                from .core import ace_id
+                direct=(self.selected is not None and
+                        not ace_id(self.selected.get('stream','')) and self.timeshift is None)
+                # Browsing a different channel must not change how we monitor
+                # the media already playing, especially an Ace engine session.
+                self._active_direct_video=bool(direct and channel_kind(self.selected)!='Radio')
+                if direct:
+                    media.add_option(':network-caching='+str(
+                        self.state['settings'].get('http_buffer_ms',4000)))
             self.player.set_media(media); media.release()
             self._subtitle_auto_applied=False
             self._subtitle_manual_track=None
@@ -2492,6 +2977,9 @@ class MainWindow(QMainWindow):
             self.playback_started=time.monotonic(); self.playback_reported=False
             self._last_media_activity=None
             self._video_issue_notified=False
+            self._direct_video_sample=None
+            self._direct_video_progress=0
+            self._direct_video_stalled=False
             self.last_good_video=time.monotonic()
             self.source_check_serial+=1
             self.pause_button.setText('⏸ Pause')
@@ -2570,8 +3058,10 @@ class MainWindow(QMainWindow):
 
     def open_ace_stream_setup(self):
         # Do not redistribute, download or silently execute proprietary binaries.
-        # The browser opens the provider's official page with the latest Windows version.
-        if not QDesktopServices.openUrl(QUrl('https://docs.acestream.net/products/')):
+        # The browser opens official engine documentation for this platform.
+        site=('https://wiki.acestream.media/Install_Ubuntu' if sys.platform.startswith('linux')
+              else 'https://docs.acestream.net/products/')
+        if not QDesktopServices.openUrl(QUrl(site)):
             self.error('Could not open the official Ace Stream products page in your browser.')
 
     def diagnose_stream(self):
@@ -2665,9 +3155,16 @@ class MainWindow(QMainWindow):
         ch=self.selected
         url=stream_url(ch['stream'],self.state['settings']['engine_url'])
         from .core import ace_id
-        if ace_id(ch['stream']):
-            if self.engine_task is not None:
-                self.status.setText('Ace Stream engine startup is already in progress…'); return
+        is_ace=ace_id(ch['stream']) is not None
+        if is_ace and self.engine_task is not None:
+            self.status.setText('Ace Stream engine startup is already in progress…'); return
+        if not is_ace:
+            # Supersede pending Ace preparation when tuning a direct channel.
+            # Its late callbacks must neither start video nor block a new Ace request.
+            self.engine_task=None
+        self._play_request_serial+=1
+        serial=self._play_request_serial
+        if is_ace:
             self.status.setText('Connecting to Ace Engine and preparing channel; waiting for available peers…')
             def prepare():
                 ensure_ready(self.state['settings']['engine_url'],
@@ -2676,10 +3173,12 @@ class MainWindow(QMainWindow):
             task=Task(prepare)
             self.engine_task=task
             def ready(playback_url):
+                if serial!=self._play_request_serial or self.engine_task is not task:return
                 self.engine_task=None
                 if self.selected and self.selected['id']==ch['id']:
                     self.play_stream(playback_url)
             def failed(message):
+                if serial!=self._play_request_serial or self.engine_task is not task:return
                 self.engine_task=None
                 if self.selected and self.selected['id']==ch['id']:
                     self.status.setText('Ace playback failed: '+message)
@@ -3139,6 +3638,9 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def stop_playback(self):
+        self._play_request_serial+=1
+        self.engine_task=None
+        self.source_check_serial+=1
         self.stop_auto_captions()
         if self.player:self.player.stop()
         self.close_timeshift()
@@ -3198,6 +3700,10 @@ class MainWindow(QMainWindow):
             selected,ok=QInputDialog.getItem(self,'Play recording segment','An interrupted recording contains multiple preserved files',paths,0,False)
             if not ok:return
         else:selected=paths[0]
+        # A recording is a new playback request: detach the live capture and
+        # pending engine callback before its watchdog or seek controls can
+        # redirect the file back to LIVE.
+        self.stop_playback()
         self.play_url(str(Path(selected).resolve()))
     def delete_file(self):
         job=self.selected_job()
@@ -3241,6 +3747,12 @@ class MainWindow(QMainWindow):
             self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
+        # Modeless tools may own timers or queued progressive work. Hiding the
+        # main window does not close them, so route shutdown through their
+        # cancellation/cleanup handlers before stopping the player.
+        for name in ('health_dialog','duplicate_dialog','usage_dialog'):
+            dialog=getattr(self,name,None)
+            if dialog is not None:dialog.close()
         for timer in (self.light_timer,self.detached_hide_timer,
                       self.detached_mouse_timer,self.clock,
                       self.refresh_clock,self.guide_clock):

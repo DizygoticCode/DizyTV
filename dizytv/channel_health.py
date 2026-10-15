@@ -6,7 +6,7 @@ No URLs (including query tokens) or IP addresses are saved in reports.
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import http.client
 import ipaddress
 import queue
@@ -120,6 +120,10 @@ def _probe_public(url, timeout):
                 # The next iteration revalidates and pins every redirect hop.
                 current = urljoin(clean, location)
                 continue
+            # Error status is already conclusive at the headers. Waiting for
+            # a slow error body could lose a 429 and keep scanning its provider.
+            if status >= 400:
+                return interpret_http(status)
             # read1 samples only the first available chunk: read(2048) could
             # otherwise wait forever for a slow trickle to fill the buffer.
             data = response.read1(MAX_RESPONSE)
@@ -140,7 +144,7 @@ def _bounded_probe(url, timeout):
 
     def worker():
         if not _PROBE_SLOTS.acquire(blocking=False):
-            result.put(('unreachable', 'Stream checker is busy; retry later'))
+            result.put(('checker-busy', 'Stream checker is busy; not probed, retry later'))
             return
         try:
             try:
@@ -215,7 +219,12 @@ def check_channel(channel, timeout=TIMEOUT, opener=None):
 
 
 def check_batch(channels, start=0, batch_size=BATCH_SIZE, workers=MAX_WORKERS, checker=check_channel):
-    """40 max / four parallel requests; no persistent background polling."""
+    """Check a contiguous prefix, pausing on HTTP 429 or exhausted capacity.
+
+    At most four probes are in flight. Those already started may finish after
+    a pause; the returned offset resumes at the first unchecked channel. A
+    trailing checker-busy entry signals a pause, not a completed observation.
+    """
     if not isinstance(start,int) or start<0:
         raise ValueError('Invalid batch offset')
     if not isinstance(batch_size,int) or not 1<=batch_size<=BATCH_SIZE:
@@ -224,12 +233,33 @@ def check_batch(channels, start=0, batch_size=BATCH_SIZE, workers=MAX_WORKERS, c
         raise ValueError('Invalid worker count')
     portion=list(channels[start:start+batch_size])
     results=[None]*len(portion)
+    paused=threading.Event()
+
+    def check_one(channel):
+        result=checker(channel)
+        if result['status'] in ('rate-limited','checker-busy'):
+            # Publish from the worker before the coordinator can refill slots.
+            paused.set()
+        return result
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        tasks={pool.submit(checker,ch):i for i,ch in enumerate(portion)}
-        for future in as_completed(tasks):
-            i=tasks[future]
-            try:result=future.result()
-            except Exception:result={'status':'unreachable','detail':'Unexpected stream probe failure'}
-            results[i]={'id':portion[i].get('id',''),'name':str(portion[i].get('name',''))[:150],
-                        'status':result['status'],'detail':result['detail']}
-    return results,start+len(portion)
+        next_index=0
+        tasks={}
+        while tasks or (next_index<len(portion) and not paused.is_set()):
+            while not paused.is_set() and len(tasks)<workers and next_index<len(portion):
+                tasks[pool.submit(check_one,portion[next_index])]=next_index
+                next_index+=1
+            completed,_=wait(tasks,return_when=FIRST_COMPLETED)
+            # Inspect all ready results before scheduling any more requests.
+            for future in completed:
+                i=tasks.pop(future)
+                try:result=future.result()
+                except Exception:result={'status':'unreachable','detail':'Unexpected stream probe failure'}
+                results[i]={'id':portion[i].get('id',''),'name':str(portion[i].get('name',''))[:150],
+                            'status':result['status'],'detail':result['detail']}
+    for i,result in enumerate(results[:next_index]):
+        if result['status']=='checker-busy':
+            # Do not skip or cache channels for which no probe could start.
+            # Already-running results after this gap are retried only manually.
+            return results[:i+1],start+i
+    return results[:next_index],start+next_index

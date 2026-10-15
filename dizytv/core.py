@@ -154,7 +154,7 @@ def default_state():
                          'timeshift_enabled': False, 'timeshift_minutes': 30,
                          'timeshift_max_bytes': 4*1024**3, 'timeshift_dir': '',
                          'ui_scale': 100, 'button_size': 'Normal', 'engine_executable': '', 'guide_scale': 100, 'theme': 'Green',
-                         'vlc_decoder': 'Auto',
+                         'vlc_decoder': 'Auto', 'http_buffer_ms': 4000,
                          'subtitles_enabled': True, 'subtitle_size': 28,
                          'subtitle_colour': 'White', 'subtitle_position': 'Bottom',
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
@@ -426,7 +426,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language','channel_sort'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','http_buffer_ms','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language','channel_sort'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -450,6 +450,8 @@ def validate_state(state):
     _integer(settings['reserve_bytes'], 0, 1024**5, 'storage reserve')
     if 'ui_scale' in settings:
         _integer(settings['ui_scale'],75,150,'interface scale')
+    if 'http_buffer_ms' in settings:
+        _integer(settings['http_buffer_ms'],1000,12000,'HTTP playback buffer')
     if 'guide_scale' in settings:
         _integer(settings['guide_scale'],55,130,'guide scale')
     if 'theme' in settings and settings['theme'] not in ('Green','Dark','Light'):

@@ -30,6 +30,10 @@ SHOW_NAMES = (
     'comedy movies', 'comedy series', 'drama series', 'sitcom legends',
     'classic tv drama', 'comedy hub',
 )
+# Compile once: category filtering can classify tens of thousands of channels.
+# Friends has a narrower rule below to exclude unrelated children's titles.
+SHOW_NAME = re.compile(r'(?<!\w)(?:'+'|'.join(
+    re.escape(show) for show in SHOW_NAMES if show != 'friends')+r')(?!\w)')
 LOOP_TAG = re.compile(
     r'(?:\b24\s*/\s*7\b|\b247\b|\b24[- ]hour\b|\b24\s*7\b|'
     r'\bmarathon\b|\bbinge[- ]?watch\b|\bnon[- ]stop\b|'
@@ -75,14 +79,9 @@ def is_show_loop_channel(channel):
     if NON_SHOW.search(name+' '+group):
         return False
     name_normal=re.sub(r'\s+', ' ',re.sub(r'[^a-z0-9 ]+',' ',name)).strip()
-    def named_show(show):
-        # Avoid treating generic children's titles like Garfield and Friends
-        # or Ryan and Friends as the dedicated sitcom "Friends" channel.
-        if show=='friends':
-            return bool(name_normal=='friends' or
-                        re.search(r'(?:247|24 7) friends|friends (?:tv|sitcom)',name_normal))
-        return bool(re.search(r'(?<!\w)'+re.escape(show)+r'(?!\w)',name_normal))
-    named=any(named_show(show) for show in SHOW_NAMES)
+    # Avoid treating Garfield and Friends or Ryan and Friends as the sitcom.
+    named=bool(SHOW_NAME.search(name_normal) or name_normal=='friends' or
+               re.search(r'(?:247|24 7) friends|friends (?:tv|sitcom)',name_normal))
     tagged=bool(LOOP_TAG.search(name+' '+group))
     group_loop=bool(re.search(r'show[- ]loops?|sitcom[- ]marathons?|'
                               r'24\s*/\s*7\s*(?:series|tv|shows)',group,re.I))
@@ -90,16 +89,18 @@ def is_show_loop_channel(channel):
 
 
 def channel_sort_key(ch,mode,position=0):
-    from .core import channel_section
-    name=_name(ch.get('name',''))
-    base=_base(ch.get('name',''))
-    plus=int(_plus_one(ch.get('name','')))
-    country=str(ch.get('country','Unspecified'))
-    section=channel_section(ch)
     if mode=='Playlist order':
         return (position,)
+    name=_name(ch.get('name',''))
+    suffix=re.search(r'\s*\+\s*1$',name)
+    base=name[:suffix.start()] if suffix else name
+    plus=int(suffix is not None)
+    country=str(ch.get('country','Unspecified'))
     if mode=='Similar names / +1':
         return (base,plus,name,position)
+    if mode in ('Country → category','Category → name'):
+        from .core import channel_section
+        section=channel_section(ch)
     if mode=='Country → category':
         return (country!='United Kingdom',country.casefold(),
                 section.casefold(),base,plus,position)

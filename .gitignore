@@ -46,6 +46,7 @@ Thumbs.db
 __pycache__/
 .superpowers/
 *.spec
+!scripts/linux.spec
 *.egg-info/
 assets/branding/*.ico
 assets/branding/*.icns
