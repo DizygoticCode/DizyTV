@@ -106,3 +106,57 @@ Settings → **Subtitles / closed captions** controls the default on/off state a
 ## 0.1.13-alpha — Ace Stream session playback (experimental)
 
 The engine detection previously proved only that port 6878 accepted TCP connections. Ace content is now started through the official `format=json` playback middleware; its validated playback URL is passed to libVLC and engine/session errors are surfaced instead of leaving the player indefinitely at Connecting. New playlist refreshes preserve `infohash` vs `content_id` and supported codec options when rewriting URLs to the user's configured Ace engine. The user still needs an installed, running Ace engine plus VLC 3 on Windows. An online engine does not mean a given source has peers, supports the current session, or is authorized for playback. A physical Windows test successfully played a Sky Sports Ace channel inside DizyTV on 0.1.12. Other providers/channels (including a reported audio-with-black-video case) still require device validation.
+
+
+---
+
+## Extended guidance archived from the original README
+
+The following original long-form guidance was also retained when the README was shortened. Refer to the current [user guide](USER-GUIDE.md) for the recommended steps and any changes after v0.1.15.
+
+## Getting started
+
+1. Install DizyTV for your platform.
+2. **Windows:** install VLC 3 x64 and separately install/open Ace Stream. **Android:** separately install/open the engine; libVLC is included in the APK.
+3. **Mac:** install VLC 3 for the app's CPU architecture and configure a reachable Windows/Linux Ace Stream engine in Settings. The PKG includes the native Mac client and does not include a Mac engine.
+4. Let the default free playlists import on first launch. UK Freeview and US-lite XMLTV guide URLs are preconfigured; refresh the guide and use **Map EPG** when a name is ambiguous or no programme data exists. You can enable/disable any playlist or guide URL in **Settings**.
+5. Choose your recording folder and leave timezone on **auto**, or choose an IANA zone. Android also needs exact-alarm access when scheduling and permission for recording notifications.
+6. Use country/genre/type filters and favourites. **Edit categories** fills gaps in source metadata; **Use source categories** clears an edit.
+
+## Channels and the guide
+
+DizyTV imports publicly listed playlists directly on the device: [search-ace.stream](https://search-ace.stream/doc), [Free-TV UK / worldwide](https://github.com/Free-TV/IPTV), and [IPTV-org](https://github.com/iptv-org/iptv) country/category feeds. New defaults include public HTTP/HLS lists for Canada, Australia, New Zealand, South Africa, Singapore and Hong Kong, plus separate **Classic**, **Series**, **Movies**, **Comedy** and **Sports** playlists to help discover 24/7-style programme and film channels. These are catalogues of available streams, not guaranteed English-only, always-on, officially licensed, or currently playable content; regional availability and provider rights still apply. Existing installations keep their configured sources; choose **Settings → Add built-in free playlists** to add the new presets without replacing personal URLs. An optional, much larger IPTV-org worldwide index can still be added in Settings. Each source refreshes independently; a failed source retains its cached entries. Identical stream identifiers/URLs are deduplicated, and stable IDs preserve favourites, mappings and category edits across refreshes. No channel dataset is bundled. Public links can be broken, geo-restricted, or subject to broadcaster access requirements.
+
+Country filters use explicit M3U metadata, recognised country groups and bracketed country tags such as `[RU]` and `[UK]`. Genres use source metadata and mapped XMLTV programme categories. TV/radio follows source metadata or saved edits; transport follows the stream. Missing metadata appears as **Unspecified**. Quality tags such as `[HD]` are not countries.
+
+Built-in guide URLs point to [Freeview-EPG](https://github.com/dp247/Freeview-EPG) (UK) and [EPGTalk](https://github.com/acidjesuz/EPGTalk) (US lite). These are public third-party services queried directly by the app, not copied or redistributed in the release. Guide refresh runs automatically on initial use and periodically on desktop; Android supports manual refresh. Matching first uses explicit TVG-IDs and saved mappings, then unique display names (including safe spacing, punctuation and number-word variants). Similar but uncertain XMLTV channels are suggested in a searchable **Map EPG** picker for explicit confirmation; ambiguous regional variants are never assigned automatically. Times are parsed into UTC and displayed locally; channels can play without a guide match. Listings do not establish stream availability or distribution rights.
+
+## Recording and backups
+
+| Platform | Scheduling behaviour in this alpha |
+| --- | --- |
+| **Windows / Mac** | Detached recorder continues after the window closes while the computer is awake. Open DizyTV after reboot to restart it. Wake-from-sleep is not implemented. |
+| **Android** | Exact alarms, a visible foreground service and reboot recovery are implemented. Force-stop, engine availability, storage permissions and vendor battery restrictions affect execution and need device testing. |
+
+The recorder checks write access and free space where the provider reports it, rejects overlapping timers and preserves partial output. Older recordings are not automatically deleted.
+
+On desktop, use **Tools → Save local backup** or **Tools → Restore local backup** from the top toolbar (no separate Backup tab). **Backup** saves your setup to a local JSON file. **Restore** previews replacement, resets storage permissions and pauses future timers. Video files and EPG cache are excluded. Choose storage and rearm timers after restoring. Backups can move preferences between platforms; see [backup format](BACKUP-FORMAT.md).
+
+## Development
+
+Desktop: Python 3.12, PySide6 6.11.2, python-vlc 3.0.21203. Android: Kotlin 2.1.20/JDK 17, AGP 8.11.1, Gradle 8.13, compile SDK 36 / target 35, libVLC 3.7.5.
+
+```bash
+python -m venv .venv
+# Activate the environment, then:
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+python -m dizytv
+
+# Android, with JDK 17, Android SDK and Gradle 8.13:
+gradle -p android testDebugUnitTest lintDebug assembleDebug
+```
+
+The [native workflow](.github/workflows/native-builds.yml) packages Windows and separate Apple Silicon/Intel Mac builds, checks packaged desktop launch and Mac payload/signature, and builds/verifies the Android APK. Installer scripts, pinned dependencies and [third-party notices](THIRD-PARTY-NOTICES.md) are included.
+
+DizyTV currently imports feeds and records locally. A DizyServer metadata service and server recorder are future work. This project does not deploy or change DizyTrades, DizyChat or the existing server.

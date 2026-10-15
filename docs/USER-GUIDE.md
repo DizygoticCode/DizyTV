@@ -9,7 +9,7 @@ This guide covers the published **0.1.15-alpha** desktop release. Some improveme
 - **Windows:** Download the native Windows `.exe` installer from [the GitHub release](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.15-alpha), close DizyTV, finish any active recording and install. VLC **3 x64** and an independently installed Ace Stream engine are used for Ace playback; direct HTTP/HLS does not need Ace.
 - **Android:** Download the APK and install using Android's permitted app installation flow. Use the matching engine app for Ace streams if needed. These test APKs have CI debug signing and are not guaranteed to update in place over previous builds; make a backup before changing them.
 - **macOS:** Use the `.pkg` for your Mac CPU architecture (Apple Silicon or Intel), install VLC 3 and configure a reachable Ace Stream engine separately. The Mac app does not include its own engine.
-- **Linux (unreleased):** Native Debian `.deb` packaging and the separately installed Linux Ace `start-engine` launcher are being tested in PR #23. See [Linux setup](LINUX.md). Do not treat PR build artifacts as a verified final release.
+- **Linux (unreleased):** Native Debian `.deb` packaging and the separately installed Linux Ace `start-engine` launcher are being tested in PR #23. See [Linux setup](https://github.com/DizygoticCode/DizyTV/blob/feat/progressive-health-buffering-linux-0116/docs/LINUX.md). Do not treat PR build artifacts as a verified final release.
 
 DizyTV does not bundle channels or an IPTV subscription. It imports playlists you choose. A listed channel is **not a promise of playback**, local availability, programme rights, or supported encryption.
 
@@ -68,4 +68,4 @@ If importing or playback fails:
 - Check VLC 3 installation and your active stream subtitles/video decoder settings. Direct HLS performance is different from Ace engine peer health.
 - For Windows updater errors, close the visible app and finish recordings first. The installer protects an active recorder worker rather than indiscriminately killing it.
 
-More details: [Linux](LINUX.md) · [Distribution](DISTRIBUTION.md) · [Backup format](BACKUP-FORMAT.md) · [Older release notes](RELEASE-NOTES.md).
+More details: [Linux](https://github.com/DizygoticCode/DizyTV/blob/feat/progressive-health-buffering-linux-0116/docs/LINUX.md) · [Distribution](DISTRIBUTION.md) · [Backup format](BACKUP-FORMAT.md) · [Older release notes](RELEASE-NOTES.md).

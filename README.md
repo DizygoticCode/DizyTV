@@ -34,7 +34,7 @@ Direct installer links (no ZIP extraction required):
 6. **Save favourites or record:** Select **★ Add / remove favourite**. For recordings, first select a storage folder under Settings, then click **Record** or schedule from the guide.
 7. **Maintain your lists:** Use **Tools → Check channel health** for a manual HTTP reachability check, and **Show disabled → Hide / restore selected** for reversible cleanup. Save your configuration with **Tools → Save local backup**.
 
-**[Read the full illustrated-by-steps usage guide →](docs/USER-GUIDE.md)**
+**[Read the full step-by-step user guide →](docs/USER-GUIDE.md)**
 
 ## Features
 
@@ -65,7 +65,7 @@ python -m dizytv
 | --- | --- |
 | [User guide](docs/USER-GUIDE.md) | Playlists, EPG, TV controls, search, recordings and troubleshooting |
 | [Release notes](docs/RELEASE-NOTES.md) | Earlier alpha changes and longer technical descriptions |
-| [Linux installation](docs/LINUX.md) | Native Linux package, Ace Engine, libVLC and FFmpeg/Vosk (in development) |
+| [Linux installation](https://github.com/DizygoticCode/DizyTV/blob/feat/progressive-health-buffering-linux-0116/docs/LINUX.md) | Native Linux package, Ace Engine, libVLC and FFmpeg/Vosk (in development) |
 | [Distribution](docs/DISTRIBUTION.md) | Native packages, signing limitations, upgrades |
 | [Build verification](docs/BUILD-VERIFICATION.md) | CI tests and what still needs device testing |
 | [Roadmap](ROADMAP.md) · [Licences](THIRD-PARTY-NOTICES.md) | Planned work and third-party obligations |
