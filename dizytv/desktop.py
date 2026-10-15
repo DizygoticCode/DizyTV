@@ -779,6 +779,13 @@ class Settings(QDialog):
         self.vlc_decoder.setCurrentText(self.original.get('vlc_decoder','Auto'))
         self.vlc_decoder.setToolTip('If audio plays but video stays black, try Software. Restart DizyTV after changing this setting.')
         form.addRow('VLC video decoding',self.vlc_decoder)
+        self.http_buffer=QSpinBox()
+        self.http_buffer.setRange(1000,12000)
+        self.http_buffer.setSingleStep(1000)
+        self.http_buffer.setSuffix(' ms')
+        self.http_buffer.setValue(self.original.get('http_buffer_ms',4000))
+        self.http_buffer.setToolTip('Direct HTTP/HLS only. More buffering can reduce stalls but increases live delay. Ace Stream engine playback is unaffected.')
+        form.addRow('HTTP/HLS network buffer',self.http_buffer)
         self.guide_scale=QSpinBox()
         self.guide_scale.setRange(55,130);self.guide_scale.setSingleStep(5)
         self.guide_scale.setSuffix(' %');self.guide_scale.setValue(self.original.get('guide_scale',100))
@@ -1030,7 +1037,7 @@ class Settings(QDialog):
                     timeshift_max_bytes=int(self.timeshift_limit.value()*1024**3),
                     timeshift_dir=self.timeshift_folder.text(),
                     ui_scale=self.ui_scale.value(),button_size=self.button_size.currentText(),
-                    theme=self.theme.currentText(),vlc_decoder=self.vlc_decoder.currentText(),
+                    theme=self.theme.currentText(),vlc_decoder=self.vlc_decoder.currentText(),http_buffer_ms=self.http_buffer.value(),
                     subtitles_enabled=self.cc_enabled.isChecked(),subtitle_language=self.cc_language.currentText(),
                     subtitle_font=self.cc_font.currentText(),subtitle_size=self.cc_size.value(),
                     subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
@@ -2685,6 +2692,15 @@ class MainWindow(QMainWindow):
             # This is format compatibility, not bypassing geo/DRM restrictions.
             if url.lower().startswith(('http://','https://')):
                 media.add_option(':http-user-agent='+PLAYBACK_USER_AGENT)
+                # Apply only to direct network media, not captured local DVR.
+                # VLC's per-media network caching is preferable to global
+                # decoder/reclock changes, and avoids changing working Ace sessions.
+                direct=(self.selected is not None and
+                        not str(self.selected.get('stream','')).startswith(
+                            ('acestream:', 'acestream://')) and self.timeshift is None)
+                if direct:
+                    media.add_option(':network-caching='+str(
+                        self.state['settings'].get('http_buffer_ms',4000)))
             self.player.set_media(media); media.release()
             self._subtitle_auto_applied=False
             self._subtitle_manual_track=None
