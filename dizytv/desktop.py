@@ -917,6 +917,126 @@ class Settings(QDialog):
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
+class ChannelHealthDialog(QDialog):
+    """Explicit per-device channel checks in manually requested 40-item batches."""
+
+    def __init__(self,state,selected,pool,parent=None):
+        super().__init__(parent)
+        from .sources import configured_playlists, source_label
+        self.setWindowTitle('Channel health — this computer')
+        self.resize(725,540)
+        self.pool=pool
+        self.rows=list(state['channels'])
+        self.selected=selected
+        self.offset=0
+        self.running=False
+        self.results=[]
+        layout=QVBoxLayout(self)
+        description=QLabel('Checks run from THIS PC (with its current VPN/network). '
+                           'A responding URL does not prove video playback. '
+                           'Ace streams require real engine/peer playback. '
+                           'No channels will be removed or hidden.')
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        self.source=QComboBox()
+        self.source.addItem('All imported channels','')
+        for url in configured_playlists(state['settings']):
+            self.source.addItem(source_label(url),url)
+        self.source.currentIndexChanged.connect(self.reset_filter)
+        layout.addWidget(self.source)
+        self.summary=QLabel('Ready • Test one channel or a manually requested batch of 40.')
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self.output=QListWidget()
+        layout.addWidget(self.output,1)
+        actions=QHBoxLayout()
+        self.selected_button=QPushButton('Check selected channel')
+        self.selected_button.setEnabled(selected is not None)
+        self.selected_button.clicked.connect(self.check_selected)
+        actions.addWidget(self.selected_button)
+        self.batch_button=QPushButton('Check next 40')
+        self.batch_button.clicked.connect(self.check_next)
+        actions.addWidget(self.batch_button)
+        copy=QPushButton('Copy results')
+        copy.clicked.connect(self.copy_results)
+        actions.addWidget(copy)
+        close=QPushButton('Close')
+        close.clicked.connect(self.close)
+        actions.addWidget(close)
+        layout.addLayout(actions)
+        self.reset_filter()
+
+    def filtered(self):
+        source=self.source.currentData()
+        return [row for row in self.rows
+                if not source or source in (row.get('sources') or [row.get('source')])]
+
+    def reset_filter(self,*_):
+        self.offset=0
+        self.results.clear()
+        self.output.clear()
+        self.summary.setText(f'{len(self.filtered()):,} channels in this selection. '
+                             'Each click probes at most 40 using four network connections.')
+        self.batch_button.setEnabled(not self.running and bool(self.filtered()))
+        self.batch_button.setText('Check first 40')
+
+    def check_selected(self):
+        if self.selected is not None:self.run_batch([self.selected],0,one=True)
+
+    def check_next(self):
+        rows=self.filtered()
+        if self.offset>=len(rows):
+            self.summary.setText('All channels in this selection have been checked.')
+            return
+        self.run_batch(rows,self.offset)
+
+    def run_batch(self,rows,start,one=False):
+        if self.running:return
+        from .channel_health import check_batch, BATCH_SIZE
+        self.running=True
+        self.batch_button.setEnabled(False)
+        self.selected_button.setEnabled(False)
+        count=min(BATCH_SIZE,len(rows)-start)
+        self.summary.setText(f'Checking {count} streams from this computer… '
+                             'A region/DRM-dependent stream may still fail in VLC.')
+        task=Task(lambda:check_batch(rows,start,1 if one else BATCH_SIZE))
+        self.health_task=task
+        def success(payload):
+            entries,end=payload
+            self.running=False
+            if not one:self.offset=end
+            self.results.extend(entries)
+            for entry in entries:
+                item=QListWidgetItem(entry['name'][:90]+'  •  '+
+                                     entry['status'].replace('-',' ')+
+                                     ' — '+entry['detail'])
+                self.output.addItem(item)
+            counts={}
+            for entry in self.results:
+                counts[entry['status']]=counts.get(entry['status'],0)+1
+            self.summary.setText(f'{len(self.results)} checks this session · '+
+                                 ', '.join(f'{k}: {n}' for k,n in sorted(counts.items()))+
+                                 f' · batch position {self.offset}/{len(self.filtered())}. '
+                                 'Results are network reachability hints, not playback proof.')
+            self.batch_button.setEnabled(self.offset<len(self.filtered()))
+            self.batch_button.setText('Check next 40')
+            self.selected_button.setEnabled(self.selected is not None)
+            self.health_task=None
+        def failure(message):
+            self.running=False
+            self.summary.setText('Health check failed; retry the batch. '+message[:120])
+            self.batch_button.setEnabled(True)
+            self.selected_button.setEnabled(self.selected is not None)
+            self.health_task=None
+        task.signals.success.connect(success)
+        task.signals.failure.connect(failure)
+        self.pool.start(task)
+
+    def copy_results(self):
+        import json
+        # Never put URLs, access tokens, full headers or IPs in the clipboard.
+        QApplication.clipboard().setText(json.dumps(self.results,indent=2))
+
 class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
@@ -980,6 +1100,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction('Restore local backup…',self.restore)
         tools_menu.addSeparator()
         tools_menu.addAction('Set up Ace Stream engine…',self.open_ace_stream_setup)
+        tools_menu.addAction('Check channel health…',self.open_channel_health)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
@@ -1199,6 +1320,16 @@ class MainWindow(QMainWindow):
             if path.exists() and path.stat().st_size<=100*1024**2:
                 self.guide=json.loads(path.read_text(encoding='utf-8'))
         except (OSError,ValueError):pass
+    def open_channel_health(self):
+        dialog=getattr(self,'health_dialog',None)
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog=ChannelHealthDialog(self.store.read(),self.selected,self.pool,self)
+        self.health_dialog=dialog
+        dialog.show()
+
     def show_source_status(self):
         state=self.store.read(); counts={}
         for ch in state['channels']:
