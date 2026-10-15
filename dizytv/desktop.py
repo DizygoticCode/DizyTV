@@ -1,4 +1,4 @@
-"""Native Qt desktop client for Windows and macOS."""
+"""Native Qt desktop client for Windows, macOS and Linux."""
 from __future__ import annotations
 import json
 import re
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
@@ -1049,6 +1049,7 @@ class ChannelHealthDialog(QDialog):
         self.selected=selected
         self.offset=0
         self.running=False
+        self.scan_all=False
         self.results=[]
         layout=QVBoxLayout(self)
         description=QLabel('Checks run from THIS PC (with its current VPN/network). '
@@ -1067,6 +1068,12 @@ class ChannelHealthDialog(QDialog):
         self.summary=QLabel('Ready • Test one channel or a manually requested batch of 40.')
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        self.progress=QProgressBar()
+        self.progress.setObjectName('healthScanProgress')
+        self.progress.setRange(0,len(self.rows))
+        self.progress.setValue(0)
+        self.progress.setFormat('%v / %m channels checked (%p%)')
+        layout.addWidget(self.progress)
         self.output=QListWidget()
         layout.addWidget(self.output,1)
         self.auto_hide=QCheckBox('Automatically hide after two consecutive 404/410 checks (opt-in)')
@@ -1081,6 +1088,14 @@ class ChannelHealthDialog(QDialog):
         self.batch_button=QPushButton('Check next 40')
         self.batch_button.clicked.connect(self.check_next)
         actions.addWidget(self.batch_button)
+        self.scan_button=QPushButton('Scan all progressively')
+        self.scan_button.setToolTip('Only on explicit request: process all selected channels in safe batches of 40, at most four network probes at a time.')
+        self.scan_button.clicked.connect(self.start_progressive_scan)
+        actions.addWidget(self.scan_button)
+        self.stop_button=QPushButton('Stop after current batch')
+        self.stop_button.setEnabled(False)
+        self.stop_button.clicked.connect(self.stop_progressive_scan)
+        actions.addWidget(self.stop_button)
         self.recheck_button=QPushButton('Recheck last 40')
         self.recheck_button.setEnabled(False)
         self.recheck_button.clicked.connect(self.recheck_last)
@@ -1105,9 +1120,15 @@ class ChannelHealthDialog(QDialog):
                 if not source or source in (row.get('sources') or [row.get('source')])]
 
     def reset_filter(self,*_):
+        # Changing sources cancels any queued continuation.
+        self.scan_all=False
+        self.stop_button.setEnabled(False)
+        self.scan_button.setEnabled(not self.running)
         self.offset=0
         self.results.clear()
         self.output.clear()
+        self.progress.setMaximum(len(self.filtered()))
+        self.progress.setValue(0)
         self.summary.setText(f'{len(self.filtered()):,} channels in this selection. '
                              'Each click probes at most 40 using four network connections.')
         self.batch_button.setEnabled(not self.running and bool(self.filtered()))
@@ -1115,6 +1136,29 @@ class ChannelHealthDialog(QDialog):
         self.last_batch_start=None
         self.recheck_button.setEnabled(False)
         self.hide_confirmed.setEnabled(False)
+
+    def start_progressive_scan(self):
+        if self.running:return
+        if self.offset>=len(self.filtered()):
+            self.offset=0
+            self.results.clear()
+            self.output.clear()
+            self.progress.setValue(0)
+        self.scan_all=True
+        self.stop_button.setEnabled(True)
+        self.scan_button.setEnabled(False)
+        self.check_next()
+
+    def stop_progressive_scan(self):
+        # We cannot interrupt an in-flight DNS/HTTP call safely. At most one
+        # 40-channel batch finishes; no further batch will be started.
+        self.scan_all=False
+        self.stop_button.setEnabled(False)
+        self.scan_button.setEnabled(not self.running)
+        if self.running:
+            self.summary.setText('Stopping after current batch; completed results will be retained.')
+        else:
+            self.summary.setText(f'Paused after {self.offset:,} / {len(self.filtered()):,} channels.')
 
     def check_selected(self):
         # This dialog is modeless: the main window's selection can change.
@@ -1176,6 +1220,7 @@ class ChannelHealthDialog(QDialog):
             self.running=False
             self.source.setEnabled(True)
             if not one:self.offset=end
+            self.progress.setValue(self.offset)
             self.results.extend(entries)
             for entry in entries:
                 item=QListWidgetItem(entry['name'][:90]+'  •  '+
@@ -1196,12 +1241,28 @@ class ChannelHealthDialog(QDialog):
                                  ', '.join(f'{k}: {n}' for k,n in sorted(counts.items()))+
                                  f' · batch position {self.offset}/{len(self.filtered())}. '
                                  'Results are network reachability hints, not playback proof.')
-            self.batch_button.setEnabled(self.offset<len(self.filtered()))
+            total=len(self.filtered())
+            self.batch_button.setEnabled(self.offset<total and not self.scan_all)
             self.batch_button.setText('Check next 40')
+            if self.scan_all and self.offset<total:
+                # A provider telling us to slow down is a reason to pause,
+                # not to hammer the rest of its catalogue.
+                if any(x['status']=='rate-limited' for x in entries):
+                    self.scan_all=False
+                    self.summary.setText('Paused on provider HTTP 429 rate limit. '+self.summary.text())
+                else:
+                    QTimer.singleShot(0,self.check_next)
+            if self.offset>=total:
+                self.scan_all=False
+            self.stop_button.setEnabled(self.scan_all)
+            self.scan_button.setEnabled(not self.scan_all)
             self.selected_button.setEnabled(True)
             self.health_task=None
         def failure(message):
             self.running=False
+            self.scan_all=False
+            self.stop_button.setEnabled(False)
+            self.scan_button.setEnabled(True)
             self.source.setEnabled(True)
             self.summary.setText('Health check failed; retry the batch. '+message[:120])
             self.batch_button.setEnabled(True)
