@@ -149,7 +149,8 @@ def default_state():
                          'subtitles_enabled': True, 'subtitle_size': 28,
                          'subtitle_colour': 'White', 'subtitle_position': 'Bottom',
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
-                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': ''},
+                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': '',
+                         'auto_caption_language': 'English (bundled)'},
             'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
 
 
@@ -413,7 +414,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -443,6 +444,9 @@ def validate_state(state):
         raise ValueError('Invalid appearance theme')
     from .subtitles import validate_caption_settings
     validate_caption_settings(settings)
+    from .auto_captions import LANGUAGE_MODELS
+    if settings.get('auto_caption_language','English (bundled)') not in LANGUAGE_MODELS:
+        raise ValueError('Invalid offline caption language')
     for key in ('auto_caption_model_dir','auto_caption_ffmpeg_path'):
         value=settings.get(key,'')
         if not isinstance(value,str) or len(value)>4096:
