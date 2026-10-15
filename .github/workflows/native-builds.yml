@@ -32,12 +32,12 @@ jobs:
       - name: Verify APK signature and checksum
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.15-alpha-android-universal-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.16-alpha-android-universal-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/*.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.15-alpha-android
+          name: DizyTV-0.1.16-alpha-android
           path: dist/
           if-no-files-found: error
           retention-days: 30
@@ -127,7 +127,7 @@ jobs:
             Start-Sleep -Seconds 3
             $old.Refresh()
             if ($old.HasExited) { throw 'Old worker did not start' }
-            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.15-alpha-windows-x64.exe').Path
+            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.16-alpha-windows-x64.exe').Path
             $install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $target + '"')) -PassThru -Wait
             if ($install.ExitCode -ne 0) { throw "Upgrade failed with running idle worker: exit $($install.ExitCode)" }
             $old.Refresh()
@@ -157,12 +157,12 @@ jobs:
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
           # Validate the exact release filename in each native build, not only
           # in publish-alpha after waiting for every other platform to finish.
-          test -s "dist/DizyTV-0.1.15-alpha-${{ matrix.target }}.pkg"
-          pkgutil --payload-files "dist/DizyTV-0.1.15-alpha-${{ matrix.target }}.pkg"
+          test -s "dist/DizyTV-0.1.16-alpha-${{ matrix.target }}.pkg"
+          pkgutil --payload-files "dist/DizyTV-0.1.16-alpha-${{ matrix.target }}.pkg"
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.15-alpha-${{ matrix.target }}
+          name: DizyTV-0.1.16-alpha-${{ matrix.target }}
           path: |
             dist/*.exe
             dist/*.pkg
@@ -170,10 +170,56 @@ jobs:
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+  package-linux:
+    name: Ubuntu 24.04 x64 • .deb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Linux libVLC, Qt runtime libraries, and Debian packager
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
+      - name: Install pinned Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Full unit and desktop UI tests
+        run: python -m unittest discover -s tests -v
+      - name: Source smoke startup
+        run: python -m dizytv --smoke-test --data-dir smoke-source
+      - name: Build native Linux executable
+        run: python scripts/build_desktop.py
+      - name: Package .deb
+        run: python scripts/package_linux.py
+      - name: Verify packaged app and .deb metadata
+        run: |
+          test -s dist/DizyTV-0.1.16-alpha-linux-amd64.deb
+          dpkg-deb --contents dist/DizyTV-0.1.16-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
+          dpkg-deb --field dist/DizyTV-0.1.16-alpha-linux-amd64.deb
+          mkdir smoke-installed
+          dpkg-deb --extract dist/DizyTV-0.1.16-alpha-linux-amd64.deb smoke-installed
+          test -x smoke-installed/usr/bin/dizytv
+          test -f smoke-installed/usr/share/applications/dizytv.desktop
+          smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
+          sha256sum dist/DizyTV-0.1.16-alpha-linux-amd64.deb > dist/DizyTV-0.1.16-alpha-linux-amd64.deb.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DizyTV-0.1.16-alpha-linux-amd64
+          path: |
+            dist/DizyTV-0.1.16-alpha-linux-amd64.deb
+            dist/DizyTV-0.1.16-alpha-linux-amd64.deb.sha256
+          if-no-files-found: error
+          retention-days: 30
+
   publish-alpha:
     name: Publish direct installer downloads
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [android, desktop]
+    needs: [android, desktop, package-linux]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -181,23 +227,24 @@ jobs:
       - name: Download verified installers
         uses: actions/download-artifact@v4
         with:
-          pattern: DizyTV-0.1.15-alpha-*
+          pattern: DizyTV-0.1.16-alpha-*
           path: native-artifacts
       - name: Collect native files and generate release checksums
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release
-          find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' \) -exec cp -- '{}' release/ \;
+          find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' -o -name '*.deb' \) -exec cp -- '{}' release/ \;
           for asset in \
-            DizyTV-Setup-0.1.15-alpha-windows-x64.exe \
-            DizyTV-0.1.15-alpha-android-universal-debug.apk \
-            DizyTV-0.1.15-alpha-macos-arm64.pkg \
-            DizyTV-0.1.15-alpha-macos-x86_64.pkg; do
+            DizyTV-Setup-0.1.16-alpha-windows-x64.exe \
+            DizyTV-0.1.16-alpha-android-universal-debug.apk \
+            DizyTV-0.1.16-alpha-macos-arm64.pkg \
+            DizyTV-0.1.16-alpha-macos-x86_64.pkg \
+            DizyTV-0.1.16-alpha-linux-amd64.deb; do
             test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
           done
-          test "$(find release -type f | wc -l)" -eq 4
-          (cd release && sha256sum *.exe *.apk *.pkg > SHA256SUMS.txt)
+          test "$(find release -type f | wc -l)" -eq 5
+          (cd release && sha256sum *.exe *.apk *.pkg *.deb > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
       - name: Publish versioned pre-release once
         shell: bash
@@ -205,13 +252,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.1.15-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'v0.1.15-alpha already exists; refusing to silently replace published binaries.'
+          if gh release view v0.1.16-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.16-alpha already exists; refusing to silently replace published binaries.'
             exit 0
           fi
-          gh release create v0.1.15-alpha release/* \
+          gh release create v0.1.16-alpha release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DizyTV 0.1.15 alpha — 24/7 channels, sorting and health checks' \
+            --title 'DizyTV 0.1.16 alpha — 24/7 channels, sorting and health checks' \
             --prerelease \
-          --notes 'DizyTV 0.1.15 alpha adds a dedicated 24/7 Shows & Loops category, global shortcut, UK +1 and Freeview-style sorting, reversible disabled-channel visibility in browser/guide/search, and UK public 24/7 FAST playlist presets (Plex, Samsung TV Plus, Pluto TV) with optional US Roku/Tubi sources, plus an opt-in 40-channel batch checker (max four concurrent public HTTP checks). Results distinguish reachable HLS manifests, dead URLs, access-denied/possible geo limits, rate limiting, and Ace streams requiring playback; HTTP availability is never claimed to prove VLC/video decoding. The Windows offline captions feature uses bundled FFmpeg and Vosk English assets as before; other official Vosk small languages can now be downloaded on demand and selected in Settings. Caption attempts report more specific FFmpeg audio failure; timeshift captioning reads original source without disabling timeshift. No background 15,000-channel polling or VPN switching. All previous Ace Stream session playback, timeshift, live controls and app features remain. Direct native Windows EXE, Android debug APK and Mac Intel/Apple Silicon PKGs. See README for known limitations and QA checks.'
+          --notes 'DizyTV 0.1.16 alpha adds a dedicated 24/7 Shows & Loops category, global shortcut, UK +1 and Freeview-style sorting, reversible disabled-channel visibility in browser/guide/search, and UK public 24/7 FAST playlist presets (Plex, Samsung TV Plus, Pluto TV) with optional US Roku/Tubi sources, plus an opt-in 40-channel batch checker (max four concurrent public HTTP checks). Results distinguish reachable HLS manifests, dead URLs, access-denied/possible geo limits, rate limiting, and Ace streams requiring playback; HTTP availability is never claimed to prove VLC/video decoding. The Windows offline captions feature uses bundled FFmpeg and Vosk English assets as before; other official Vosk small languages can now be downloaded on demand and selected in Settings. Caption attempts report more specific FFmpeg audio failure; timeshift captioning reads original source without disabling timeshift. No background 15,000-channel polling or VPN switching. All previous Ace Stream session playback, timeshift, live controls and app features remain. Direct native Windows EXE, Android debug APK, Mac Intel/Apple Silicon PKGs and experimental Linux amd64 .deb. See README for known limitations and QA checks.'
