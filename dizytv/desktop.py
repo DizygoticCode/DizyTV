@@ -753,8 +753,10 @@ class Settings(QDialog):
         self.engine=QLineEdit(self.original['engine_url']); form.addRow('Ace engine address',self.engine)
         self.engine_path=QLineEdit(self.original.get('engine_executable',''))
         self.engine_path.setReadOnly(True)
-        self.engine_path.setPlaceholderText('Auto-detect from Windows registry / AppData')
-        exe_button=QPushButton('Choose installed EXE')
+        self.engine_path.setPlaceholderText(
+            'Choose start-engine or auto-detect /opt/acestream/start-engine'
+            if sys.platform.startswith('linux') else 'Auto-detect from Windows registry / AppData')
+        exe_button=QPushButton('Choose Linux engine script' if sys.platform.startswith('linux') else 'Choose installed EXE')
         exe_button.clicked.connect(self.pick_engine_path)
         exe_row=QWidget(); exe_layout=QHBoxLayout(exe_row)
         exe_layout.setContentsMargins(0,0,0,0)
@@ -899,7 +901,7 @@ class Settings(QDialog):
         warning=QLabel('Timeshift requires available disk space and clear MPEG-TS or TS/HLS video. This is NOT a saved recording. The oldest data is automatically discarded; the buffer is deleted when playback stops. Encrypted/fMP4 streams fall back to live playback.')
         warning.setWordWrap(True)
         form.addRow(warning)
-        note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nMac playback connects to a reachable Windows/Linux Ace engine.'); note.setWordWrap(True); form.addRow(note)
+        note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nLinux uses an installed native Ace start-engine script and system libVLC. Mac playback can connect to a reachable engine.'); note.setWordWrap(True); form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
@@ -961,9 +963,9 @@ class Settings(QDialog):
     def refresh_caption_language(self,*_):
         language=self.caption_language.currentText()
         installed=installed_language_model(language)
-        if language=='English (bundled)':
+        if language=='English (bundled)' and installed is not None:
             self.model_download.setEnabled(False)
-            self.model_state.setText('English uses the bundled Windows model; no download needed.')
+            self.model_state.setText('English model is installed.')
         elif installed is not None:
             self.model_download.setEnabled(False)
             self.model_state.setText('Installed • '+language)
@@ -973,7 +975,7 @@ class Settings(QDialog):
 
     def download_caption_language(self):
         language=self.caption_language.currentText()
-        if language=='English (bundled)' or getattr(self,'download_task',None) is not None:return
+        if getattr(self,'download_task',None) is not None:return
         self.model_download.setEnabled(False)
         self.model_state.setText('Downloading '+language+' from official Vosk…')
         task=Task(lambda:install_language_model(language))
@@ -1000,9 +1002,14 @@ class Settings(QDialog):
         if executable:self.auto_ffmpeg_path.setText(executable)
 
     def pick_engine_path(self):
+        if sys.platform.startswith('linux'):
+            selected=self.engine_path.text() or '/opt/acestream/'
+            options='Ace Stream Linux launcher (start-engine);;All files (*)'
+        else:
+            selected=self.engine_path.text() or os.environ.get('APPDATA','')
+            options='Ace Stream engine (ace_engine.exe ace_console.exe)'
         path,_=QFileDialog.getOpenFileName(self,'Locate an installed Ace Stream engine',
-              self.engine_path.text() or os.environ.get('APPDATA',''),
-              'Ace Stream engine (ace_engine.exe ace_console.exe)')
+                                            selected,options)
         if path:self.engine_path.setText(path)
 
     def pick_folder(self):
@@ -2764,8 +2771,10 @@ class MainWindow(QMainWindow):
 
     def open_ace_stream_setup(self):
         # Do not redistribute, download or silently execute proprietary binaries.
-        # The browser opens the provider's official page with the latest Windows version.
-        if not QDesktopServices.openUrl(QUrl('https://docs.acestream.net/products/')):
+        # The browser opens official engine documentation for this platform.
+        site=('https://wiki.acestream.media/Install_Ubuntu' if sys.platform.startswith('linux')
+              else 'https://docs.acestream.net/products/')
+        if not QDesktopServices.openUrl(QUrl(site)):
             self.error('Could not open the official Ace Stream products page in your browser.')
 
     def diagnose_stream(self):
