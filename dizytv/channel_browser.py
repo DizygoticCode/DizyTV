@@ -26,6 +26,8 @@ SHOW_NAMES = (
     'how i met your mother', 'mr bean', 'sister sister', 'corner gas',
     'classic tv comedy', 'hit sitcoms', 'tv land sitcoms',
     'pluto tv sitcoms', 'pluto tv comedy movies', 'tv comedy movies',
+    'comedy movies', 'comedy series', 'drama series', 'sitcom legends',
+    'classic tv drama', 'comedy hub',
 )
 LOOP_TAG = re.compile(
     r'(?:\b24\s*/\s*7\b|\b247\b|\b24[- ]hour\b|\b24\s*7\b|'
