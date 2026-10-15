@@ -49,6 +49,35 @@ class EngineTests(unittest.TestCase):
                 engine.ensure_ready('http://192.168.1.2:6878')
             path.assert_not_called()
 
+    def test_linux_native_engine_prefers_installed_start_engine(self):
+        from pathlib import Path
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(engine.shutil,'which',return_value='/usr/local/bin/start-engine'), \
+             patch.object(Path,'is_file',return_value=True), \
+             patch.object(engine.os,'access',return_value=True):
+            self.assertEqual(Path('/usr/local/bin/start-engine'),engine.linux_engine_path())
+            with self.assertRaisesRegex(RuntimeError,'start-engine'):
+                engine.linux_engine_path('/tmp/unsafe-script')
+
+    def test_linux_launcher_starts_only_for_local_engine(self):
+        from pathlib import Path
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(engine,'running',side_effect=[False,True]), \
+             patch.object(engine,'linux_engine_path',return_value=Path('/opt/acestream/start-engine')), \
+             patch.object(engine.subprocess,'Popen') as spawn:
+            self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
+            spawn.assert_called_once()
+            self.assertEqual(['/opt/acestream/start-engine','--client-console'],spawn.call_args.args[0])
+            self.assertEqual('/opt/acestream',spawn.call_args.kwargs['cwd'])
+
+    def test_linux_remote_engine_is_connect_only(self):
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(engine,'running',return_value=False), \
+             patch.object(engine,'linux_engine_path') as locate:
+            with self.assertRaisesRegex(RuntimeError,'unreachable'):
+                engine.ensure_ready('http://192.0.2.10:6878')
+            locate.assert_not_called()
+
     def test_existing_engine_started_once(self):
         with patch.object(engine.sys,'platform','win32'),patch.object(engine,'windows_engine_path',return_value=__import__('pathlib').Path('C:/ACEStream/engine/ace_console.exe')),patch.object(engine,'running',side_effect=[False,False,True]),patch.object(engine.subprocess,'Popen') as spawn,patch.object(engine.time,'sleep'):
             self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878',startup_seconds=5))
