@@ -40,12 +40,25 @@ OPTIONAL_FAST_PLAYLISTS = (
     ("Roku FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/roku_all.m3u", "United States"),
     ("Tubi FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/tubi_all.m3u", "United States"),
 )
-# These guide URLs are opt-in download links; their contents are never redistributed.
+# Matching FAST XMLTV listings use the same opaque channel IDs in their M3U
+# tvg-id attributes. Guide files are opt-in URLs; contents are not redistributed.
+# UK Freeview listings and FAST listings are different catalogues.
+UK_FAST_GUIDES = (
+    ("Plex UK FAST EPG", "https://i.mjh.nz/Plex/gb.xml.gz"),
+    ("Samsung TV Plus UK FAST EPG", "https://i.mjh.nz/SamsungTVPlus/gb.xml.gz"),
+    ("Pluto TV UK FAST EPG", "https://i.mjh.nz/PlutoTV/gb.xml.gz"),
+)
 FREE_GUIDES = (
     ("UK Freeview (seven days)", "https://raw.githubusercontent.com/dp247/Freeview-EPG/master/epg.xml"),
     ("US lightweight XMLTV", "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_lite.xml.gz"),
+    *UK_FAST_GUIDES,
 )
-# Sixteen bounded free HTTP/Ace/category sources; the worldwide mega-index stays opt-in.
+FAST_GUIDE_BY_PLAYLIST = dict(zip(
+    (row[1] for row in FREE_PLAYLISTS if row[0] in (
+        "Plex FAST UK · series/24-7", "Samsung TV Plus FAST UK", "Pluto TV FAST UK")),
+    (url for _,url in UK_FAST_GUIDES),
+))
+# Keep source count bounded; the worldwide mega-index stays opt-in.
 DEFAULT_PLAYLIST_URLS = [row[1] for row in FREE_PLAYLISTS[:-1]]
 DEFAULT_GUIDE_URLS = [row[1] for row in FREE_GUIDES]
 COUNTRY_HINTS = {row[1]: row[2] for row in FREE_PLAYLISTS if row[2]}
