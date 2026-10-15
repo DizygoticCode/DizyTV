@@ -76,7 +76,7 @@ def is_show_loop_channel(channel):
         if show=='friends':
             return bool(name_normal=='friends' or
                         re.search(r'(?:247|24 7) friends|friends (?:tv|sitcom)',name_normal))
-        return bool(re.search(r'(?<!\\w)'+re.escape(show)+r'(?!\\w)',name_normal))
+        return bool(re.search(r'(?<!\w)'+re.escape(show)+r'(?!\w)',name_normal))
     named=any(named_show(show) for show in SHOW_NAMES)
     tagged=bool(LOOP_TAG.search(name+' '+group))
     group_loop=bool(re.search(r'show[- ]loops?|sitcom[- ]marathons?|'
