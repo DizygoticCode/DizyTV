@@ -1401,6 +1401,7 @@ class MainWindow(QMainWindow):
         self.country_tree.setMaximumHeight(240)
         self.country_tree.itemClicked.connect(self.country_tree_clicked)
         self.country_tree.itemDoubleClicked.connect(self.country_tree_double_clicked)
+        self.country_tree.itemExpanded.connect(self.populate_expanded_section)
         side.addWidget(self.country_tree)
         self._tree_dirty=True
         selectors=QWidget()
@@ -1691,30 +1692,68 @@ class MainWindow(QMainWindow):
     def build_country_tree(self,channels):
         if not self._tree_dirty:return
         self.country_tree.blockSignals(True)
-        self.country_tree.clear()
-        groups={}
-        for ch in channels:
-            country=ch.get('country') or 'Unspecified'
-            section=channel_section(ch)
-            groups.setdefault(country,{}).setdefault(section,[]).append(ch)
-        for country in sorted(groups,key=lambda c:(c=='Unspecified',c.casefold())):
-            sections=groups[country]
-            total=sum(len(values) for values in sections.values())
-            country_item=QTreeWidgetItem([f'{country} ({total})'])
-            country_item.setData(0,Qt.UserRole,('country',country,'',''))
-            self.country_tree.addTopLevelItem(country_item)
-            for section in sorted(sections):
-                values=sorted(sections[section],key=lambda ch:display_channel_name(ch['name']).casefold())
-                section_item=QTreeWidgetItem([f'{section} ({len(values)})'])
-                section_item.setData(0,Qt.UserRole,('section',country,section,''))
-                country_item.addChild(section_item)
-                for ch in values:
-                    channel_item=QTreeWidgetItem([display_channel_name(ch['name'])])
-                    channel_item.setData(0,Qt.UserRole,('channel',country,section,ch['id']))
-                    section_item.addChild(channel_item)
-            country_item.setExpanded(country in ('United Kingdom','United States'))
-        self.country_tree.blockSignals(False)
-        self._tree_dirty=False
+        self.country_tree.setUpdatesEnabled(False)
+        try:
+            self.country_tree.clear()
+            self._tree_generation=getattr(self,'_tree_generation',0)+1
+            self._tree_children={}
+            groups={}
+            for ch in channels:
+                country=ch.get('country') or 'Unspecified'
+                section=channel_section(ch)
+                groups.setdefault(country,{}).setdefault(section,[]).append(ch)
+            lazy=len(channels)>3000
+            for country in sorted(groups,key=lambda c:(c=='Unspecified',c.casefold())):
+                sections=groups[country]
+                total=sum(len(values) for values in sections.values())
+                country_item=QTreeWidgetItem([f'{country} ({total})'])
+                country_item.setData(0,Qt.UserRole,('country',country,'',''))
+                self.country_tree.addTopLevelItem(country_item)
+                for section in sorted(sections):
+                    values=sections[section]
+                    section_item=QTreeWidgetItem([f'{section} ({len(values)})'])
+                    section_item.setData(0,Qt.UserRole,('section',country,section,''))
+                    country_item.addChild(section_item)
+                    if lazy:
+                        # Populating thousands of nested QTreeWidgetItems during
+                        # each import previously froze the UI for several seconds.
+                        # Load only an expanded section and yield every 250 rows.
+                        self._tree_children[(country,section)]=values
+                        section_item.addChild(QTreeWidgetItem(['Expand to browse channels…']))
+                    else:
+                        for ch in sorted(values,key=lambda c:display_channel_name(c['name']).casefold()):
+                            leaf=QTreeWidgetItem([display_channel_name(ch['name'])])
+                            leaf.setData(0,Qt.UserRole,('channel',country,section,ch['id']))
+                            section_item.addChild(leaf)
+                country_item.setExpanded(country in ('United Kingdom','United States'))
+            self._tree_dirty=False
+        finally:
+            self.country_tree.setUpdatesEnabled(True)
+            self.country_tree.blockSignals(False)
+
+    def populate_expanded_section(self,item):
+        data=item.data(0,Qt.UserRole)
+        if not data or data[0]!='section':return
+        _,country,section,_=data
+        key=(country,section)
+        values=getattr(self,'_tree_children',{}).pop(key,None)
+        if values is None:return
+        generation=self._tree_generation
+        item.takeChildren()  # discard the one placeholder
+        ordered=sorted(values,key=lambda c:display_channel_name(c['name']).casefold())
+        def fill(start=0):
+            if generation!=self._tree_generation:return
+            self.country_tree.setUpdatesEnabled(False)
+            try:
+                for ch in ordered[start:start+250]:
+                    leaf=QTreeWidgetItem([display_channel_name(ch['name'])])
+                    leaf.setData(0,Qt.UserRole,('channel',country,section,ch['id']))
+                    item.addChild(leaf)
+            finally:
+                self.country_tree.setUpdatesEnabled(True)
+            if start+250<len(ordered):
+                QTimer.singleShot(0,lambda:fill(start+250))
+        fill()
 
     def country_tree_clicked(self,item,*_):
         item_data=item.data(0,Qt.UserRole)
