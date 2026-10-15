@@ -19,12 +19,16 @@ SHOW_NAMES = (
     'king of the hill', 'american dad', 'frasier', 'cheers',
     'the office', 'seinfeld', 'everybody loves raymond', 'modern family',
     'the middle', 'scrubs', 'two and a half men', 'malcolm in the middle',
+    'only fools and horses', 'fawlty towers', 'peep show', 'the inbetweeners',
+    'friday night dinner', 'the young ones', 'midsomer murders',
+    'murder she wrote', 'columbo', 'the twilight zone', 'the addams family',
+    'degrassi', 'saved by the bell',
     'how i met your mother', 'mr bean', 'sister sister', 'corner gas',
     'classic tv comedy', 'hit sitcoms', 'tv land sitcoms',
     'pluto tv sitcoms', 'pluto tv comedy movies', 'tv comedy movies',
 )
 LOOP_TAG = re.compile(
-    r'(?:\b24\s*/\s*7\b|\b24[- ]hour\b|\b24\s*7\b|'
+    r'(?:\b24\s*/\s*7\b|\b247\b|\b24[- ]hour\b|\b24\s*7\b|'
     r'\bmarathon\b|\bbinge[- ]?watch\b|\bnon[- ]stop\b|'
     r'\bloop(?:s|ing)?\b)', re.I
 )
@@ -66,8 +70,14 @@ def is_show_loop_channel(channel):
     if NON_SHOW.search(name+' '+group):
         return False
     name_normal=re.sub(r'\s+', ' ',re.sub(r'[^a-z0-9 ]+',' ',name)).strip()
-    named=any(re.search(r'(?<!\w)'+re.escape(show)+r'(?!\w)',name_normal)
-              for show in SHOW_NAMES)
+    def named_show(show):
+        # Avoid treating generic children's titles like Garfield and Friends
+        # or Ryan and Friends as the dedicated sitcom "Friends" channel.
+        if show=='friends':
+            return bool(name_normal=='friends' or
+                        re.search(r'(?:247|24 7) friends|friends (?:tv|sitcom)',name_normal))
+        return bool(re.search(r'(?<!\\w)'+re.escape(show)+r'(?!\\w)',name_normal))
+    named=any(named_show(show) for show in SHOW_NAMES)
     tagged=bool(LOOP_TAG.search(name+' '+group))
     group_loop=bool(re.search(r'show[- ]loops?|sitcom[- ]marathons?|'
                               r'24\s*/\s*7\s*(?:series|tv|shows)',group,re.I))
