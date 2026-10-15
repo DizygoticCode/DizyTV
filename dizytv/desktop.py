@@ -34,6 +34,8 @@ from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
 from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
                             LANGUAGE_MODELS, installed_language_model, install_language_model)
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
+from .health_history import HealthHistory
+from .duplicates import duplicate_groups
 from .system_usage import SystemSampler
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
@@ -734,6 +736,11 @@ class Settings(QDialog):
         add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
+        add_uk_fast=QPushButton('Add UK FAST playlists + matching guides (Plex / Samsung / Pluto)',self)
+        add_uk_fast.setObjectName('addUKFastPlaylists')
+        add_uk_fast.setToolTip('Add the three UK FAST M3U sources and their matching XMLTV feeds without deleting your existing sources.')
+        add_uk_fast.clicked.connect(self.add_uk_fast_playlists)
+        form.addRow(add_uk_fast)
         add_shows=QPushButton('Add 24/7 show / sitcom channels (US FAST sources)',self)
         add_shows.setToolTip('Opt-in public Pluto/Plex/Samsung US feeds; find their series channels under 24/7 Shows & Loops.')
         add_shows.clicked.connect(self.add_show_loop_playlists)
@@ -920,11 +927,26 @@ class Settings(QDialog):
         self.playlists.setPlainText('\n'.join(combined))
         self.add_uk_fast_guides(silent=True)
 
+    def add_uk_fast_playlists(self):
+        """Install matching FAST M3U/XMLTV pairs together, without partial edits."""
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        guides=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys([*existing,*FAST_GUIDE_BY_PLAYLIST.keys()]))
+        matching=list(dict.fromkeys([*guides,*FAST_GUIDE_BY_PLAYLIST.values()]))
+        if len(combined)>32 or len(matching)>20:
+            QMessageBox.warning(self,'DizyTV',
+                'No playlists or guides were changed. You need room for three UK FAST '
+                'M3U/XMLTV pairs (32 playlist / 20 guide limit). Remove unused entries '
+                'from the corresponding lists first.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+        self.feeds.setPlainText('\n'.join(matching))
+
     def add_uk_fast_guides(self,silent=False):
         active={u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()}
         matched=[url for playlist,url in FAST_GUIDE_BY_PLAYLIST.items() if playlist in active]
         if not matched:
-            if not silent:QMessageBox.information(self,'DizyTV','Add a UK FAST playlist (Plex, Samsung TV Plus or Pluto TV) first.')
+            if not silent:QMessageBox.information(self,'DizyTV','No matching UK FAST M3U sources selected. Click Add UK FAST playlists + matching guides above, then Save.')
             return
         existing=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys([*existing,*matched]))
@@ -1056,6 +1078,7 @@ class ChannelHealthDialog(QDialog):
         state=store.read()
         self.store=store
         self.on_change=on_change
+        self.health_history=HealthHistory(store)
         self.last_batch_start=None
         self.setWindowTitle('Channel health — this computer')
         self.resize(725,540)
@@ -1237,6 +1260,11 @@ class ChannelHealthDialog(QDialog):
             if not one:self.offset=end
             self.progress.setValue(self.offset)
             self.results.extend(entries)
+            try:
+                self.health_history.record(entries)
+                history_error=False
+            except (OSError,ValueError):
+                history_error=True
             for entry in entries:
                 item=QListWidgetItem(entry['name'][:90]+'  •  '+
                                      entry['status'].replace('-',' ')+
@@ -1255,7 +1283,8 @@ class ChannelHealthDialog(QDialog):
             self.summary.setText(f'{len(self.results)} checks this session · '+
                                  ', '.join(f'{k}: {n}' for k,n in sorted(counts.items()))+
                                  f' · batch position {self.offset}/{len(self.filtered())}. '
-                                 'Results are network reachability hints, not playback proof.')
+                                 'Results are network reachability hints, not playback proof.'+
+                                 (' Previous-result cache could not be saved.' if history_error else ''))
             total=len(self.filtered())
             self.batch_button.setEnabled(self.offset<total and not self.scan_all)
             self.batch_button.setText('Check next 40')
@@ -1441,6 +1470,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction('Set up Ace Stream engine…',self.open_ace_stream_setup)
         tools_menu.addAction('Check channel health…',self.open_channel_health)
+        tools_menu.addAction('Find duplicate channels…',self.open_duplicate_channels)
         tools_menu.addAction('System usage…',self.open_system_usage)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
@@ -1491,10 +1521,6 @@ class MainWindow(QMainWindow):
         self.sort_picker.currentTextChanged.connect(self.change_channel_sort)
         order_row.addWidget(self.sort_picker,1)
         side.addWidget(order)
-        self.loop_filter_button=QPushButton('24/7 Shows & Loops')
-        self.loop_filter_button.setToolTip('Show dedicated TV-series marathons and 24/7 themed channels')
-        self.loop_filter_button.clicked.connect(self.filter_24_7)
-        side.addWidget(self.loop_filter_button)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
         self.country_tree.setMaximumHeight(240)
@@ -1696,26 +1722,6 @@ class MainWindow(QMainWindow):
         self._tree_dirty=True
         self.render_channels()
 
-    def filter_24_7(self):
-        # This is a global directory shortcut, not a refinement of the last
-        # unrelated country, playlist, favourites or genre filters.
-        for widget in (self.country_filter,self.genre_filter,
-                       self.kind_filter,self.source_filter):
-            widget.blockSignals(True)
-            widget.setCurrentIndex(0)
-            widget.blockSignals(False)
-        self.search.blockSignals(True)
-        self.search.clear()
-        self.search.blockSignals(False)
-        self.favourites_only.blockSignals(True)
-        self.favourites_only.setChecked(False)
-        self.favourites_only.blockSignals(False)
-        self.section_filter.blockSignals(True)
-        self.section_filter.setCurrentIndex(max(0,self.section_filter.findData('24/7 Shows & Loops')))
-        self.section_filter.blockSignals(False)
-        self.render_channels()
-        self.status.setText(f'24/7 Shows & Loops: {self.channels.count()} channels across all playlists.')
-
     def refresh_disabled_channels(self,*_):
         self._tree_dirty=True
         self.render_channels()
@@ -1748,6 +1754,15 @@ class MainWindow(QMainWindow):
             return
         self.usage_dialog=SystemUsageDialog(self)
         self.usage_dialog.show()
+
+    def open_duplicate_channels(self):
+        existing=getattr(self,'duplicate_dialog',None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        self.duplicate_dialog=ChannelDuplicatesDialog(self.store,self.refresh_disabled_channels,self)
+        self.duplicate_dialog.show()
 
     def open_channel_health(self):
         dialog=getattr(self,'health_dialog',None)
@@ -1925,6 +1940,8 @@ class MainWindow(QMainWindow):
         selected_country=self.country_filter.currentData()
         selected_section=self.section_filter.currentData()
         sections={channel_section(ch) for ch in source if not selected_country or ch.get('country','Unspecified')==selected_country}
+        # Always show the 24/7 category even before its optional sources load.
+        sections.add('24/7 Shows & Loops')
         self.section_filter.blockSignals(True); self.section_filter.clear()
         self.section_filter.addItem('All categories','')
         for section in sorted(sections):
