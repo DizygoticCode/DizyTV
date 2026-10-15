@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
-from PySide6.QtWidgets import QApplication
 from dizytv.channel_health import (
     public_stream_url,interpret_http,check_channel,check_batch,BATCH_SIZE,MAX_WORKERS
 )
@@ -48,7 +47,6 @@ class HealthTests(unittest.TestCase):
             status=check_channel({'stream':'https://example.com/stream.m3u8?token=private'},opener=opener)
         self.assertEqual('manifest-only',status['status'])
         self.assertNotIn('private',str(status))
-        self.assertEqual(2048,Response('x').read.__defaults__[0] if Response('x').read.__defaults__ else 2048)
         self.assertEqual(4,opened[0][1])
         self.assertEqual('engine-required',check_channel(
             {'stream':'acestream://0123456789abcdef0123456789abcdef01234567'})['status'])
