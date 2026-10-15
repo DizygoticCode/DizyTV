@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -6,7 +7,7 @@ from io import BytesIO
 import zipfile
 
 from dizytv.auto_captions import (caption_text, ffmpeg_capture_args, verify_caption_engine, PLAYBACK_USER_AGENT,
-                                   LANGUAGE_MODELS, installed_language_model, install_language_model)
+                                   LANGUAGE_MODELS, installed_language_model, install_language_model, remove_language_model)
 from dizytv.core import default_state, validate_state, export_backup, restore_backup
 
 
@@ -105,6 +106,67 @@ class OfflineCaptionTests(unittest.TestCase):
             self.assertTrue(Path(path,'am').is_dir())
             self.assertEqual(Path(path),installed_language_model(selected,folder))
             self.assertEqual(path,install_language_model(selected,folder,opener=lambda request,timeout:None))
+
+    def test_download_progress_cancel_and_safe_remove(self):
+        language='French'
+        name=LANGUAGE_MODELS[language]
+        def content():
+            with BytesIO() as data:
+                with zipfile.ZipFile(data,'w') as archive:
+                    archive.writestr(name+'/am/final.mdl',b'fixture')
+                    archive.writestr(name+'/conf/model.conf',b'fixture')
+                return data.getvalue()
+        class Fake:
+            def __init__(self,data,url=None):
+                self.source=BytesIO(data)
+                self.headers={'Content-Length':str(len(data))}
+                self.url=url or 'https://alphacephei.com/vosk/models/'+name+'.zip'
+            def __enter__(self):return self
+            def __exit__(self,*_):pass
+            def geturl(self):return self.url
+            def read(self,n):return self.source.read(n)
+
+        with tempfile.TemporaryDirectory() as root:
+            data=content()
+            progress=[]
+            destination=install_language_model(language,root,opener=lambda *a,**k:Fake(data),
+                                               progress=lambda done,total:progress.append((done,total)))
+            self.assertEqual((len(data),len(data)),progress[-1])
+            self.assertEqual(Path(destination),installed_language_model(language,root))
+            self.assertTrue(remove_language_model(language,root))
+            self.assertFalse(remove_language_model(language,root))
+            self.assertIsNone(installed_language_model(language,root))
+            with self.assertRaisesRegex(ValueError,'default English'):
+                remove_language_model('English (bundled)',root)
+
+            cancel=threading.Event()
+            def stop_after_first_progress(done,total):
+                if done:cancel.set()
+            with self.assertRaisesRegex(ValueError,'cancelled'):
+                install_language_model(language,root,opener=lambda *a,**k:Fake(data),
+                                       cancel=cancel,progress=stop_after_first_progress)
+            self.assertIsNone(installed_language_model(language,root))
+            self.assertEqual([],list(Path(root).glob('.vosk-download-*')))
+
+    def test_language_download_refuses_unverified_redirect_and_incomplete_body(self):
+        name=LANGUAGE_MODELS['French']
+        class Fake:
+            def __init__(self,url,payload=b'incomplete'):
+                self.url=url
+                self.payload=BytesIO(payload)
+                self.headers={'Content-Length':str(len(payload)+99)}
+            def __enter__(self):return self
+            def __exit__(self,*_):pass
+            def geturl(self):return self.url
+            def read(self,n):return self.payload.read(n)
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(ValueError,'official Vosk'):
+                install_language_model('French',root,opener=lambda *a,**k:
+                    Fake('https://evil.example/vosk/models/'+name+'.zip'))
+            with self.assertRaisesRegex(ValueError,'incomplete'):
+                install_language_model('French',root,opener=lambda *a,**k:
+                    Fake('https://alphacephei.com/vosk/models/'+name+'.zip'))
+            self.assertIsNone(installed_language_model('French',root))
 
     def test_ffmpeg_argv_does_not_use_shell_and_handles_stream_audio_only(self):
         url='https://example.com/legal-live.m3u8'
