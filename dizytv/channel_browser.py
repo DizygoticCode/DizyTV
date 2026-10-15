@@ -13,6 +13,7 @@ CHANNEL_SORT_MODES = (
 
 SHOW_NAMES = (
     'south park', 'rick and morty', 'family guy', 'the simpsons',
+    'os simpsons',
     'simpsons', 'brooklyn nine nine', 'brooklyn 99', 'the goldbergs',
     'big bang theory', 'young sheldon', 'friends', 'futurama',
     'king of the hill', 'american dad', 'frasier', 'cheers',
