@@ -1,0 +1,56 @@
+name: Native Linux alpha
+on:
+  pull_request:
+    paths: ['dizytv/**', 'scripts/**', 'tests/**', 'requirements.txt', 'pyproject.toml', '.github/workflows/linux-alpha.yml']
+  push:
+    branches: [main]
+    paths: ['dizytv/**', 'scripts/**', 'tests/**', 'requirements.txt', 'pyproject.toml', '.github/workflows/linux-alpha.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package-linux:
+    name: Ubuntu 24.04 x64 • .deb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install Linux libVLC, Qt runtime libraries, and Debian packager
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
+      - name: Install pinned Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Full unit and desktop UI tests
+        run: python -m unittest discover -s tests -v
+      - name: Source smoke startup
+        run: python -m dizytv --smoke-test --data-dir smoke-source
+      - name: Build native Linux executable
+        run: python scripts/build_desktop.py
+      - name: Package .deb
+        run: python scripts/package_linux.py
+      - name: Verify packaged app and .deb metadata
+        run: |
+          test -s dist/DizyTV-0.1.15-alpha-linux-amd64.deb
+          dpkg-deb --contents dist/DizyTV-0.1.15-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
+          dpkg-deb --field dist/DizyTV-0.1.15-alpha-linux-amd64.deb
+          mkdir smoke-installed
+          dpkg-deb --extract dist/DizyTV-0.1.15-alpha-linux-amd64.deb smoke-installed
+          test -x smoke-installed/usr/bin/dizytv
+          test -f smoke-installed/usr/share/applications/dizytv.desktop
+          smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
+          sha256sum dist/DizyTV-0.1.15-alpha-linux-amd64.deb > dist/DizyTV-0.1.15-alpha-linux-amd64.deb.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DizyTV-0.1.15-alpha-linux-amd64
+          path: |
+            dist/DizyTV-0.1.15-alpha-linux-amd64.deb
+            dist/DizyTV-0.1.15-alpha-linux-amd64.deb.sha256
+          if-no-files-found: error
+          retention-days: 30
