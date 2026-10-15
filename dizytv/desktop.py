@@ -29,7 +29,8 @@ from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
-from .auto_captions import verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT
+from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
+                            LANGUAGE_MODELS, installed_language_model, install_language_model)
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -796,6 +797,23 @@ class Settings(QDialog):
                     'Picture-based broadcast captions may ignore these settings. '
                     'Automatic speech-generated subtitles require a separate opt-in recognition engine.')
         hint.setWordWrap(True);form.addRow(hint)
+        self.caption_language=QComboBox()
+        self.caption_language.setObjectName('captionLanguage')
+        self.caption_language.addItems(list(LANGUAGE_MODELS))
+        self.caption_language.setCurrentText(self.original.get('auto_caption_language','English (bundled)'))
+        form.addRow('Speech transcription language',self.caption_language)
+        model_actions=QWidget()
+        model_actions_layout=QHBoxLayout(model_actions)
+        model_actions_layout.setContentsMargins(0,0,0,0)
+        self.model_download=QPushButton('Download selected language model')
+        self.model_download.clicked.connect(self.download_caption_language)
+        self.model_state=QLabel('')
+        self.model_state.setWordWrap(True)
+        model_actions_layout.addWidget(self.model_download)
+        model_actions_layout.addWidget(self.model_state,1)
+        form.addRow('Optional Vosk languages',model_actions)
+        self.caption_language.currentTextChanged.connect(self.refresh_caption_language)
+        self.refresh_caption_language()
         self.auto_model_path=QLineEdit(self.original.get('auto_caption_model_dir',''))
         self.auto_model_path.setObjectName('autoCaptionModelPath')
         self.auto_model_path.setReadOnly(True)
@@ -818,10 +836,10 @@ class Settings(QDialog):
         ffmpeg_layout.addWidget(self.auto_ffmpeg_path,1)
         ffmpeg_layout.addWidget(ffmpeg_btn)
         form.addRow('FFmpeg for local speech captions',ffmpeg_row)
-        generated=QLabel('Experimental: Start local speech captions separately from the CC menu while watching. '
-                         'Windows installer includes FFmpeg and the English model (other platforms may require setup); makes a second connection '
-                         'to the playing stream, uses local CPU/RAM and may lag several seconds. '
-                         'Off by default. No cloud speech service or microphone capture.')
+        generated=QLabel('Windows includes FFmpeg, Vosk runtime/DLLs and the English speech model. '
+                         'Use CC → Generate live subtitles, including for streams without built-in captions. '
+                         'Other languages are optional downloads. Uses local CPU/RAM and a second stream connection; '
+                         'off by default, no cloud speech service or microphone.')
         generated.setWordWrap(True);form.addRow(generated)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
@@ -874,6 +892,37 @@ class Settings(QDialog):
         if dialog.exec()==QDialog.Accepted and dialog.added_urls:
             self.playlists.setPlainText('\n'.join(dict.fromkeys([*active,*dialog.added_urls])))
 
+    def refresh_caption_language(self,*_):
+        language=self.caption_language.currentText()
+        installed=installed_language_model(language)
+        if language=='English (bundled)':
+            self.model_download.setEnabled(False)
+            self.model_state.setText('English uses the bundled Windows model; no download needed.')
+        elif installed is not None:
+            self.model_download.setEnabled(False)
+            self.model_state.setText('Installed • '+language)
+        else:
+            self.model_download.setEnabled(True)
+            self.model_state.setText('Not installed • download once to your user data folder.')
+
+    def download_caption_language(self):
+        language=self.caption_language.currentText()
+        if language=='English (bundled)' or getattr(self,'download_task',None) is not None:return
+        self.model_download.setEnabled(False)
+        self.model_state.setText('Downloading '+language+' from official Vosk…')
+        task=Task(lambda:install_language_model(language))
+        self.download_task=task
+        def done(path):
+            self.download_task=None
+            self.refresh_caption_language()
+        def failed(message):
+            self.download_task=None
+            self.model_state.setText('Download failed: '+message[:140])
+            self.model_download.setEnabled(True)
+        task.signals.success.connect(done)
+        task.signals.failure.connect(failed)
+        QThreadPool.globalInstance().start(task)
+
     def choose_auto_caption_model(self):
         folder=QFileDialog.getExistingDirectory(
             self,'Select extracted offline Vosk speech model',self.auto_model_path.text())
@@ -914,6 +963,7 @@ class Settings(QDialog):
                     subtitle_colour=self.cc_colour.currentText(),subtitle_position=self.cc_position.currentText(),
                     auto_caption_model_dir=self.auto_model_path.text(),
                     auto_caption_ffmpeg_path=self.auto_ffmpeg_path.text(),
+                    auto_caption_language=self.caption_language.currentText(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
@@ -2019,12 +2069,21 @@ class MainWindow(QMainWindow):
         if not self.player or not self.playback_started or not self._playback_url:
             self.status.setText('Play a live channel before starting local speech captions.')
             return
-        if self.timeshift is not None:
-            self.status.setText('Return to direct live playback and disable rolling timeshift before generating captions.')
-            return
         settings=self.state['settings']
+        language=settings.get('auto_caption_language','English (bundled)')
+        model_override=settings.get('auto_caption_model_dir','') if language=='English (bundled)' else ''
+        if language!='English (bundled)':
+            installed=installed_language_model(language)
+            if installed is None:
+                self.status.setText('Offline '+language+' model not installed. '
+                                    'Open Settings → Optional Vosk languages and download it first.')
+                return
+            model_override=str(installed)
+        # When timeshift is playing a local loopback URL, the external FFmpeg
+        # audio reader needs the original source, not a short buffer segment.
+        caption_source=(self.timeshift.source if self.timeshift is not None else self._playback_url)
         try:
-            ffmpeg,model=verify_caption_engine(settings.get('auto_caption_model_dir',''),
+            ffmpeg,model=verify_caption_engine(model_override,
                                                settings.get('auto_caption_ffmpeg_path',''))
         except (ValueError,OSError) as exc:
             self.status.setText('Local captions unavailable: '+str(exc)+
@@ -2042,12 +2101,13 @@ class MainWindow(QMainWindow):
         def safe_finished(reason):
             try:signals.finished.emit(serial,reason)
             except RuntimeError:pass
-        worker=LocalCaptionWorker(ffmpeg,self._playback_url,model,safe_caption,safe_finished)
+        worker=LocalCaptionWorker(ffmpeg,caption_source,model,safe_caption,safe_finished)
         self._auto_caption_worker=worker
         self._auto_caption_worker_serial=serial
         self._auto_caption_stopping=False
-        self.status.setText('Starting optional offline captions; recognising live audio locally. '
-                            'A second connection to this stream is used; no microphone or cloud STT.')
+        self.status.setText('Starting '+language+' offline captions (local FFmpeg + Vosk). '
+                            'Listening for speech; captions may take several seconds. '
+                            'Second source connection; no microphone or cloud speech.')
         worker.start()
 
     def sync_subtitles(self):
