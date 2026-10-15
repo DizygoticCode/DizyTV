@@ -31,11 +31,18 @@ class BrowserTests(unittest.TestCase):
         for name,group in (
             ('BBC News','News'),('Sky Sports 24/7','Sport'),
             ('Classic Rock 24/7','Music'),('BBC One','General'),
-            ('Southampton FC 24/7','Football')):
+            ('Southampton FC 24/7','Football'),
+            ('Garfield and Friends','Kids'),
+            ('Barbie and Friends','Kids')):
             with self.subTest(name=name):
                 self.assertFalse(is_show_loop_channel(channel(name,group)))
                 self.assertNotEqual('24/7 Shows & Loops',
                                     channel_section(channel(name,group)))
+
+    def test_247_alias_and_exact_friends_sitcom(self):
+        self.assertTrue(is_show_loop_channel(channel('247 South Park')))
+        self.assertTrue(is_show_loop_channel(channel('247 Friends')))
+        self.assertFalse(is_show_loop_channel(channel('Garfield and Friends','Kids')))
 
     def test_group_tag_finds_generic_named_marathons(self):
         self.assertTrue(is_show_loop_channel(channel('The Classics','24/7 Comedy Series')))
