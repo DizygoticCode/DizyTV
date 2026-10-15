@@ -2,8 +2,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from io import BytesIO
+import zipfile
 
-from dizytv.auto_captions import caption_text, ffmpeg_capture_args, verify_caption_engine, PLAYBACK_USER_AGENT
+from dizytv.auto_captions import (caption_text, ffmpeg_capture_args, verify_caption_engine, PLAYBACK_USER_AGENT,
+                                   LANGUAGE_MODELS, installed_language_model, install_language_model)
 from dizytv.core import default_state, validate_state, export_backup, restore_backup
 
 
@@ -67,6 +70,41 @@ class OfflineCaptionTests(unittest.TestCase):
                 chosen=verify_caption_engine(str(other),str(selected))
                 self.assertEqual(str(selected.resolve()),chosen[0])
                 self.assertEqual(str(other.resolve()),chosen[1])
+
+    def test_speech_language_selection_is_validated(self):
+        state=default_state()
+        state['settings']['auto_caption_language']='French'
+        validate_state(state)
+        self.assertEqual('French',restore_backup(export_backup(state))['settings']['auto_caption_language'])
+        state['settings']['auto_caption_language']='some/unknown.zip'
+        with self.assertRaisesRegex(ValueError,'language'):validate_state(state)
+
+    def test_opt_in_small_vosk_install_accepts_root_folder_and_rejects_traversal(self):
+        selected='French'
+        prefix=LANGUAGE_MODELS[selected]
+        def archive_entry(name):
+            memory=BytesIO()
+            with zipfile.ZipFile(memory,'w') as out:
+                out.writestr(prefix+'/',b'')
+                out.writestr(prefix+'/am/',b'')
+                out.writestr(prefix+'/conf/',b'')
+                out.writestr(prefix+'/am/final.mdl',b'fixture')
+                if name:out.writestr(name,b'unsafe')
+            return memory.getvalue()
+        class FakeDownload:
+            def __init__(self,data):self.data=BytesIO(data)
+            def __enter__(self):return self
+            def __exit__(self,*a):pass
+            def geturl(self):return 'https://alphacephei.com/vosk/models/'+prefix+'.zip'
+            def read(self,n):return self.data.read(n)
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ValueError):
+                install_language_model(selected,folder,opener=lambda request,timeout:FakeDownload(archive_entry('../escape')))
+            self.assertIsNone(installed_language_model(selected,folder))
+            path=install_language_model(selected,folder,opener=lambda request,timeout:FakeDownload(archive_entry('')))
+            self.assertTrue(Path(path,'am').is_dir())
+            self.assertEqual(Path(path),installed_language_model(selected,folder))
+            self.assertEqual(path,install_language_model(selected,folder,opener=lambda request,timeout:None))
 
     def test_ffmpeg_argv_does_not_use_shell_and_handles_stream_audio_only(self):
         url='https://example.com/legal-live.m3u8'
