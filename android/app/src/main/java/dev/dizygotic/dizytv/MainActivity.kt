@@ -241,6 +241,11 @@ class MainActivity:Activity() {
     private fun channels() {
         val input=EditText(this).apply { hint="Search channels or groups"; setText(search); setSingleLine(true) }; body.addView(input)
         val filter=CheckBox(this).apply { text="★ Favourites only"; isChecked=onlyFavourites }; body.addView(filter)
+        body.addView(button("24/7 Shows & Loops") {
+            countryFilter=""
+            sectionFilter="24/7 Shows & Loops"
+            render()
+        })
         val refresh=button("Refresh channel catalogue") { refreshChannels() }; body.addView(refresh)
         body.addView(button("Source counts / import errors") {
             val s=store.read()
@@ -707,6 +712,18 @@ class MainActivity:Activity() {
         list.addView(button("Add built-in free playlists") {
             val existing=fields["playlist_urls"]!!.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
             fields["playlist_urls"]!!.setText((existing+Sources.presets).distinct().joinToString("\n"))
+        })
+        list.addView(button("Add 24/7 shows & sitcoms (US/worldwide)") {
+            val existing=fields["playlist_urls"]!!.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val joined=(existing+Sources.optionalShowLoops).distinct()
+            require(joined.size<=16) { "Android supports 16 active sources; remove unused sources first" }
+            fields["playlist_urls"]!!.setText(joined.joinToString("\n"))
+        })
+        list.addView(button("Add UK E4 / +1 retransmission candidates") {
+            val existing=fields["playlist_urls"]!!.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val joined=(existing+Sources.optionalUkPlusOne).distinct()
+            require(joined.size<=16) { "Android supports 16 active sources; remove unused sources first" }
+            fields["playlist_urls"]!!.setText(joined.joinToString("\n"))
         })
         field("engine_url","Ace engine URL",original.getString("engine_url"))
         field("xmltv_urls","XMLTV URLs — one per line",Domain.strings(original.getJSONArray("xmltv_urls")).joinToString("\n"))
