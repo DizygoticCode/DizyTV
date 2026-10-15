@@ -140,7 +140,7 @@ Built-in guide URLs point to [Freeview-EPG](https://github.com/dp247/Freeview-EP
 
 The recorder checks write access and free space where the provider reports it, rejects overlapping timers and preserves partial output. Older recordings are not automatically deleted.
 
-On desktop, use **Tools → Save local backup** or **Tools → Restore local backup** from the top toolbar (no separate Backup tab). **Backup** saves your setup to a local JSON file. **Restore** previews replacement, resets storage permissions and pauses future timers. Video files and EPG cache are excluded. Choose storage and rearm timers after restoring. Backups can move preferences between platforms; see [backup format](docs/BACKUP-FORMAT.md).
+On desktop, use **Tools → Save local backup** or **Tools → Restore local backup** from the top toolbar (no separate Backup tab). **Backup** saves your setup to a local JSON file. **Restore** previews replacement, resets storage permissions and pauses future timers. Video files and EPG cache are excluded. Choose storage and rearm timers after restoring. Backups can move preferences between platforms; see [backup format](BACKUP-FORMAT.md).
 
 ## Development
 
