@@ -136,14 +136,14 @@ class DesktopTests(unittest.TestCase):
                                'Samsung TV Plus FAST UK','Pluto TV FAST UK')]
             # User who imported only Plex should get only Plex's guide, not
             # every FAST EPG (which would waste bandwidth).
-            dialog.playlists.setPlainText('\\n'.join(links[:1]))
+            dialog.playlists.setPlainText('\n'.join(links[:1]))
             dialog.feeds.setPlainText(DEFAULT_GUIDE_URLS[0])
             dialog.add_uk_fast_guides()
             self.assertEqual([DEFAULT_GUIDE_URLS[0],FAST_GUIDE_BY_PLAYLIST[links[0]]],
                              dialog.values()['xmltv_urls'])
             dialog.add_uk_fast_guides()
             self.assertEqual(2,len(dialog.values()['xmltv_urls']))
-            dialog.playlists.setPlainText('\\n'.join(links))
+            dialog.playlists.setPlainText('\n'.join(links))
             dialog.add_uk_fast_guides()
             self.assertEqual(4,len(dialog.values()['xmltv_urls']))
             self.assertEqual(3,len(set(dialog.values()['xmltv_urls']) & set(FAST_GUIDE_BY_PLAYLIST.values())))
