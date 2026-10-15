@@ -1,5 +1,15 @@
 # Native alpha build verification
 
+## 0.1.16-alpha — 15 October 2026
+
+The [five-platform PR CI run on `9136c93`](https://github.com/DizygoticCode/DizyTV/actions/runs/38815152069) completed successfully: Windows x64 EXE packaging/upgrade verification, macOS arm64 and Intel PKGs, Ubuntu 24.04 amd64 DEB with system libVLC, and Android universal debug APK tests/lint/signature. A local full Python/PySide6 run passed **223 tests, zero failures or skips**; macOS arm64 CI retained five expected skips for offscreen/other-platform-only cases. GitHub code re-review reported no major issues. The release publishing step runs after all native jobs succeed on `main`.
+
+Native Linux X11 testing displayed an embedded synthetic HLS video pattern and exercised a stalled-video warning with continued audio. This does **not** establish live stream reliability, geo/DRM access, real-device Ace peer playback or acceptable performance for a 15,000–30,000-channel Windows catalogue. Those remain acceptance checks. See the [PR #23 investigation report](https://github.com/DizygoticCode/DizyTV/pull/23#issuecomment-6202945241) and [Linux instructions](LINUX.md).
+
+---
+
+## Historical 0.1.0-alpha baseline
+
 Date: **11 October 2026**. Application version: **0.1.0-alpha**.
 
 Verified application source: [`ba30a3966a16fe64e48a98e73f2dd222dae734fb`](https://github.com/DizygoticCode/DizyTV/commit/ba30a3966a16fe64e48a98e73f2dd222dae734fb).
