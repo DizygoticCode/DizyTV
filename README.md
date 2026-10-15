@@ -1,6 +1,22 @@
 <p align="center"><img src="assets/branding/dizytv-logo.png" alt="DizyTV logo" width="220" /></p>
 <h1 align="center">DizyTV</h1>
 <p align="center"><strong>Live TV, a full programme guide and local recordings — in your own app.</strong></p>
+<p align="center">
+  <img alt="Native alpha" src="https://img.shields.io/badge/status-native%20alpha-f59e0b?style=for-the-badge" />
+  <a href="#downloads"><img alt="Windows EXE" src="https://img.shields.io/badge/Windows-EXE-0078d4?style=for-the-badge" /></a>
+  <a href="#downloads"><img alt="Android APK" src="https://img.shields.io/badge/Android-APK-3ddc84?style=for-the-badge&amp;logo=android&amp;logoColor=white" /></a>
+  <a href="#downloads"><img alt="macOS PKG" src="https://img.shields.io/badge/macOS-PKG-374151?style=for-the-badge&amp;logo=apple&amp;logoColor=white" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/pull/23"><img alt="Linux DEB in development" src="https://img.shields.io/badge/Linux-DEB%20in%20development-f59e0b?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
+</p>
+
+<p align="center">
+  <a href="#features"><img alt="Explore features" src="https://img.shields.io/badge/Explore-Features-699769?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml"><img alt="View native builds" src="https://img.shields.io/badge/View-Native%20Builds-5865f2?style=for-the-badge" /></a>
+  <a href="docs/USER-GUIDE.md"><img alt="Full user guide" src="https://img.shields.io/badge/Read-User%20Guide-699769?style=for-the-badge" /></a>
+  <a href="docs/DISTRIBUTION.md"><img alt="Installation guide" src="https://img.shields.io/badge/Read-Install%20Guide-699769?style=for-the-badge" /></a>
+  <a href="ROADMAP.md"><img alt="Read roadmap" src="https://img.shields.io/badge/Read-Roadmap-374151?style=for-the-badge" /></a>
+</p>
+
 <p align="center">Windows · Android · macOS · Linux desktop in development</p>
 
 DizyTV brings M3U/IPTV playlists, XMLTV listings, Ace Stream and ordinary HTTP/HLS channels into a native TV interface. Browse by country, genre and category, find a programme with global search, save favourites and record broadcasts to your own storage.
@@ -18,6 +34,13 @@ Direct installer links (no ZIP extraction required):
 | **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-arm64.pkg) | macOS 13+; VLC 3 |
 | **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-x86_64.pkg) | macOS 13+; VLC 3 |
 | **Linux** | [Linux build progress (PR #23)](https://github.com/DizygoticCode/DizyTV/pull/23) | Ubuntu/Debian x86-64 target; not released |
+
+<p align="center">
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-Setup-0.1.15-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+</p>
 
 [All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
 
