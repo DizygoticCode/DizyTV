@@ -1,4 +1,4 @@
-"""Start an existing local Ace Stream engine on Windows, never bundle it.
+"""Connect to independently installed Ace Stream engines on Windows and Linux.
 
 The video still renders in DizyTV's own libVLC player. This helper uses a
 background worker, so checking/installing an engine cannot freeze the Qt GUI.
@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -72,11 +73,39 @@ def windows_engine_path(explicit=''):
     return None
 
 
+def linux_engine_path(explicit=''):
+    """Find the separately installed Linux start-engine launcher.
+
+    Ace Stream recommends start-engine over the raw executable: the wrapper
+    sets the correct library paths. Do not download or bundle engine binaries.
+    """
+    if not sys.platform.startswith('linux'):
+        return None
+    if explicit:
+        chosen=Path(explicit).expanduser()
+        if chosen.name!='start-engine' or not chosen.is_file() or not os.access(chosen,os.X_OK):
+            raise RuntimeError('Select an executable Linux Ace Stream start-engine script in Settings.')
+        return chosen
+    candidates=[
+        shutil.which('start-engine'),
+        '/opt/acestream/start-engine',
+        '/usr/local/bin/start-engine',
+        str(Path.home()/'acestream'/'start-engine'),
+        str(Path.home()/'.local'/'opt'/'acestream'/'start-engine'),
+    ]
+    for candidate in candidates:
+        if candidate:
+            path=Path(candidate).expanduser()
+            if path.name=='start-engine' and path.is_file() and os.access(path,os.X_OK):
+                return path
+    return None
+
+
 def engine_diagnostics(address,timeout=3):
     """Distinguish reachable HTTP engine API from a mere open TCP port."""
     host,port=engine_endpoint(address)
     if host not in ('127.0.0.1','localhost','::1'):
-        return 'Configured engine is remote; cannot auto-start a Windows engine.'
+        return 'Configured engine is remote; automatic local startup is unavailable.'
     api=address.rstrip('/')+'/webui/api/service?method=get_version'
     try:
         with urlopen(api,timeout=timeout) as response:
@@ -89,7 +118,7 @@ def engine_diagnostics(address,timeout=3):
                 '. This verifies the engine, not the stream; its content ID may have no available peers.')
     except (HTTPError,URLError,TimeoutError,OSError,ValueError,TypeError):
         return ('Ace Engine API is not responding on localhost port '+str(port)+
-                '. Check the engine, its HTTP port and Windows firewall.')
+                '. Check the engine, its HTTP port and local firewall.')
 
 
 def start_playback_session(stream, address, timeout=20):
@@ -156,24 +185,38 @@ def start_playback_session(stream, address, timeout=20):
 
 
 def ensure_ready(address, startup_seconds=25, executable_path=''):
-    """Called off the UI thread. Never launch for a remote/custom engine URL."""
+    """Use existing engine, or start a *trusted local* installed launcher.
+
+    Remote engines are connect-only. Never auto-install, auto-download, or
+    execute an arbitrary playlist URL as a local process.
+    """
     if running(address):
         return 'connected'
     host,port=engine_endpoint(address)
-    if host not in ('127.0.0.1','localhost','::1') or port!=6878 or sys.platform!='win32':
+    if host not in ('127.0.0.1','localhost','::1') or port!=6878:
         raise RuntimeError('Ace Stream engine is unreachable at the configured address. Check Settings.')
-    executable=windows_engine_path(executable_path)
-    if executable is None:
-        raise RuntimeError('Ace Stream engine not detected. In Settings, choose your installed ace_console.exe or ace_engine.exe (usually %APPDATA%\\ACEStream\\engine), or use Set up Ace Stream engine.')
-    flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
-    args=[str(executable)]
-    if executable.name.lower()=='ace_console.exe':
-        args.append('--client-console')
+    if sys.platform=='win32':
+        executable=windows_engine_path(executable_path)
+        if executable is None:
+            raise RuntimeError('Ace Stream engine not detected. In Settings, choose your installed ace_console.exe or ace_engine.exe (usually %APPDATA%\\ACEStream\\engine).')
+        args=[str(executable)]
+        if executable.name.lower()=='ace_console.exe':
+            args.append('--client-console')
+        flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
+    elif sys.platform.startswith('linux'):
+        executable=linux_engine_path(executable_path)
+        if executable is None:
+            raise RuntimeError('Ace Stream engine not detected on Linux. Install the publisher-provided engine separately, then select its start-engine script in Settings.')
+        args=[str(executable),'--client-console']
+        flags=0
+    else:
+        raise RuntimeError('Ace Stream engine is unreachable. Start the configured engine separately and retry.')
     subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL,close_fds=True,creationflags=flags,cwd=str(executable.parent))
+                     stderr=subprocess.DEVNULL,close_fds=True,creationflags=flags,
+                     cwd=str(executable.parent))
     deadline=time.monotonic()+startup_seconds
     while time.monotonic()<deadline:
         if running(address):
             return 'started'
         time.sleep(0.35)
-    raise RuntimeError('Ace engine launched but localhost port 6878 is still unavailable. Check Windows firewall/engine settings and the configured engine URL.')
+    raise RuntimeError('Engine launched but localhost port 6878 is still unavailable. Check engine logs, dependencies, permissions and localhost firewall.')
