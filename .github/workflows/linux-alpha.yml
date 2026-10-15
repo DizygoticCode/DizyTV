@@ -37,20 +37,20 @@ jobs:
         run: python scripts/package_linux.py
       - name: Verify packaged app and .deb metadata
         run: |
-          test -s dist/DizyTV-0.1.15-alpha-linux-amd64.deb
-          dpkg-deb --contents dist/DizyTV-0.1.15-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
-          dpkg-deb --field dist/DizyTV-0.1.15-alpha-linux-amd64.deb
+          test -s dist/DizyTV-0.1.16-alpha-linux-amd64.deb
+          dpkg-deb --contents dist/DizyTV-0.1.16-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
+          dpkg-deb --field dist/DizyTV-0.1.16-alpha-linux-amd64.deb
           mkdir smoke-installed
-          dpkg-deb --extract dist/DizyTV-0.1.15-alpha-linux-amd64.deb smoke-installed
+          dpkg-deb --extract dist/DizyTV-0.1.16-alpha-linux-amd64.deb smoke-installed
           test -x smoke-installed/usr/bin/dizytv
           test -f smoke-installed/usr/share/applications/dizytv.desktop
           smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
-          sha256sum dist/DizyTV-0.1.15-alpha-linux-amd64.deb > dist/DizyTV-0.1.15-alpha-linux-amd64.deb.sha256
+          sha256sum dist/DizyTV-0.1.16-alpha-linux-amd64.deb > dist/DizyTV-0.1.16-alpha-linux-amd64.deb.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.15-alpha-linux-amd64
+          name: DizyTV-0.1.16-alpha-linux-amd64
           path: |
-            dist/DizyTV-0.1.15-alpha-linux-amd64.deb
-            dist/DizyTV-0.1.15-alpha-linux-amd64.deb.sha256
+            dist/DizyTV-0.1.16-alpha-linux-amd64.deb
+            dist/DizyTV-0.1.16-alpha-linux-amd64.deb.sha256
           if-no-files-found: error
           retention-days: 30
