@@ -34,6 +34,7 @@ from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
 from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
                             LANGUAGE_MODELS, installed_language_model, install_language_model)
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
+from .system_usage import SystemSampler
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -1278,6 +1279,89 @@ class ChannelHealthDialog(QDialog):
         # Never put URLs, access tokens, full headers or IPs in the clipboard.
         QApplication.clipboard().setText(json.dumps(self.results,indent=2))
 
+class SystemUsageDialog(QDialog):
+    """Read-only resource and VLC diagnostic panel, sampled only while visible."""
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner=owner
+        self.sampler=SystemSampler()
+        self.setWindowTitle('DizyTV — system usage')
+        self.setObjectName('systemUsageDialog')
+        self.resize(630,435)
+        layout=QVBoxLayout(self)
+        self.summary=QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self.details=QPlainTextEdit()
+        self.details.setReadOnly(True)
+        self.details.setObjectName('systemUsageReadout')
+        layout.addWidget(self.details,1)
+        explanation=QLabel(
+            'CPU is shown as % of all logical cores and % of one core. '
+            'Process memory includes libVLC in this process, but excludes detached '
+            'recorders, external Ace Engine, and the FFmpeg caption child process. '
+            'Measurements stay on this device. A reachable URL is not proof of playback.')
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
+        self.timer=QTimer(self)
+        self.timer.setInterval(1250)
+        self.timer.timeout.connect(self.refresh_snapshot)
+        self.timer.start()
+        self.refresh_snapshot()
+
+    @staticmethod
+    def fmt(value,unit=''):
+        return 'Unavailable' if value is None else str(value)+unit
+
+    def refresh_snapshot(self):
+        owner=self.owner
+        stats=self.sampler.snapshot(owner.store.directory)
+        ram=self.fmt(stats['process_memory_mib'],' MiB')
+        if stats['process_memory_peak_only']:
+            ram+=' (peak, not current)'
+        self.summary.setText(
+            'DizyTV: '+self.fmt(stats['process_cpu_percent'],'% total CPU')+
+            '  •  '+ram+' RAM')
+        lines=[
+            'Platform: '+stats['platform'],
+            'Logical CPU cores: '+str(stats['logical_cores']),
+            'DizyTV CPU / all cores: '+self.fmt(stats['process_cpu_percent'],'%'),
+            'DizyTV CPU / single-core equivalent: '+self.fmt(stats['process_one_core_percent'],'%'),
+            'DizyTV working memory: '+ram,
+            'System physical RAM used: '+self.fmt(stats['system_used_mib'],' MiB')+
+            ' / '+self.fmt(stats['system_total_mib'],' MiB')+
+            ' ('+self.fmt(stats['system_used_percent'],'%')+')',
+            'Free space in app data folder: '+self.fmt(stats['recording_disk_free_gib'],' GiB'),
+            'Imported channels: '+format(len(owner.state.get('channels',[])),','),
+            'Guide programmes: '+format(len(owner.guide.get('programmes',[])),','),
+            'Timeshift mode: '+('Active' if owner.timeshift is not None else 'Off'),
+            'Local speech captions: '+('Active' if owner._auto_caption_worker is not None else 'Off'),
+            'Player state: '+(str(owner.player.get_state()) if owner.player else 'Stopped'),
+        ]
+        if owner.player is not None:
+            try:
+                import vlc
+                media=owner.player.get_media()
+                counters=vlc.MediaStats()
+                if media is not None and media.get_stats(counters):
+                    lines.extend([
+                        'VLC decoded audio: '+str(counters.decoded_audio),
+                        'VLC decoded video: '+str(counters.decoded_video),
+                        'VLC displayed pictures: '+str(counters.displayed_pictures),
+                        'VLC lost pictures: '+str(counters.lost_pictures),
+                        'VLC demux bitrate: '+str(round(counters.demux_bitrate,2))+' MiB/s',
+                        'VLC input bitrate: '+str(round(counters.input_bitrate,2))+' MiB/s',
+                    ])
+            except (AttributeError,RuntimeError,TypeError,OSError):
+                lines.append('VLC playback counters unavailable')
+        self.details.setPlainText('\n'.join(lines))
+
+    def closeEvent(self,event):
+        self.timer.stop()
+        super().closeEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self,store=None,start_worker=True):
         super().__init__(); self.store=store or Store(); self.player=None; self.vlc_instance=None; self.task=None
@@ -1343,6 +1427,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction('Set up Ace Stream engine…',self.open_ace_stream_setup)
         tools_menu.addAction('Check channel health…',self.open_channel_health)
+        tools_menu.addAction('System usage…',self.open_system_usage)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
@@ -1640,6 +1725,15 @@ class MainWindow(QMainWindow):
         self.refresh_disabled_channels()
         self.status.setText(('Restored ' if current else 'Hidden ')+label+
                             ' — use Show disabled to restore it later.')
+
+    def open_system_usage(self):
+        existing=getattr(self,'usage_dialog',None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        self.usage_dialog=SystemUsageDialog(self)
+        self.usage_dialog.show()
 
     def open_channel_health(self):
         dialog=getattr(self,'health_dialog',None)
