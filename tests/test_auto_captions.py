@@ -134,7 +134,7 @@ class OfflineCaptionTests(unittest.TestCase):
                                                progress=lambda done,total:progress.append((done,total)))
             self.assertEqual((len(data),len(data)),progress[-1])
             self.assertEqual(Path(destination),installed_language_model(language,root))
-            self.assertEqual(Path(destination),managed_language_model(language,root))
+            self.assertEqual(Path(destination).resolve(),managed_language_model(language,root))
             self.assertTrue((Path(destination)/MANAGED_MODEL_MARKER).is_file())
             # A selected custom model must remain untouched even if its path
             # happens to match the DizyTV-managed language directory.
@@ -146,7 +146,7 @@ class OfflineCaptionTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError,'Windows lock'):
                     remove_language_model(language,root)
             # Failed rename: the entire installed model is still published.
-            self.assertEqual(Path(destination),managed_language_model(language,root))
+            self.assertEqual(Path(destination).resolve(),managed_language_model(language,root))
             self.assertTrue((Path(destination)/'am'/'final.mdl').exists())
             self.assertTrue(remove_language_model(language,root))
             self.assertFalse(remove_language_model(language,root))
