@@ -8,6 +8,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Multiple small PR commits used to queue dozens of redundant native macOS
+# builds. Keep only the newest pull-request build; never cancel a main release.
+concurrency:
+  group: native-alpha-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   android:
     name: Android / universal APK
