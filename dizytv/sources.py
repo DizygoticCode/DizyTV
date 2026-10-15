@@ -47,6 +47,7 @@ OPTIONAL_SHOW_LOOP_PLAYLISTS = (
     ("Pluto TV US sitcoms and series", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plutotv_us.m3u", "United States"),
     ("Plex US TV marathons", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plex_us.m3u", "United States"),
     ("Samsung TV Plus US sitcoms", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/samsungtvplus_us.m3u", "United States"),
+    ("Pluto global show collections (third-party)", "https://raw.githubusercontent.com/iprtl/m3u/live/Pluto.m3u", ""),
 )
 # Third-party UK retransmission candidates requested by users. These are
 # separate, opt-in sources because they may include short-lived/session-bound
