@@ -4,6 +4,7 @@ These are *classification* rules, not evidence of valid stream playback.
 Opaque stream IDs and source metadata are never rewritten by these helpers.
 """
 import re
+import unicodedata
 from urllib.parse import urlparse
 
 CHANNEL_SORT_MODES = (
@@ -50,8 +51,10 @@ FREEVIEW_UK = {
 
 def _name(name):
     from .core import display_channel_name
-    label=display_channel_name(name).casefold()
-    return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9+ ]+', ' ', label)).strip()
+    # A Unicode-aware sort key is essential for international IPTV names.
+    # ASCII-only cleaning belongs in English show classification, not sorting.
+    label=unicodedata.normalize('NFKC',display_channel_name(name)).casefold()
+    return re.sub(r'\s+', ' ', re.sub(r'[^\w+ ]+', ' ', label)).strip()
 
 
 def _base(name):
