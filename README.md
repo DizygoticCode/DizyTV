@@ -6,7 +6,7 @@
   <a href="#downloads"><img alt="Windows EXE" src="https://img.shields.io/badge/Windows-EXE-0078d4?style=for-the-badge" /></a>
   <a href="#downloads"><img alt="Android APK" src="https://img.shields.io/badge/Android-APK-3ddc84?style=for-the-badge&amp;logo=android&amp;logoColor=white" /></a>
   <a href="#downloads"><img alt="macOS PKG" src="https://img.shields.io/badge/macOS-PKG-374151?style=for-the-badge&amp;logo=apple&amp;logoColor=white" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/pull/23"><img alt="Linux DEB in development" src="https://img.shields.io/badge/Linux-DEB%20in%20development-f59e0b?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
+  <a href="#downloads"><img alt="Linux DEB" src="https://img.shields.io/badge/Linux-DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
 </p>
 
 <p align="center">
@@ -17,13 +17,13 @@
   <a href="ROADMAP.md"><img alt="Read roadmap" src="https://img.shields.io/badge/Read-Roadmap-374151?style=for-the-badge" /></a>
 </p>
 
-<p align="center">Windows · Android · macOS · Linux desktop (.deb in 0.1.16-alpha development)</p>
+<p align="center">Windows · Android · macOS · Linux desktop (experimental Ubuntu/Debian x86-64 .deb)</p>
 
 DizyTV brings M3U/IPTV playlists, XMLTV listings, Ace Stream and ordinary HTTP/HLS channels into a native TV interface. Browse by country, genre and category, find a programme with global search, save favourites and record broadcasts to your own storage.
 
-**Current public build:** [v0.1.15-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.15-alpha). This is a **development release**, not a verified replacement for a licensed TV service. Channels are imported from third parties, may be unavailable or geographically restricted, and may require an external player engine.
+**Current public build:** [v0.1.16-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.16-alpha). This is a **development release**, not a verified replacement for a licensed TV service. Channels are imported from third parties, may be unavailable or geographically restricted, and may require an external player engine.
 
-**Next build in review:** [0.1.16-alpha (PR #23)](https://github.com/DizygoticCode/DizyTV/pull/23) adds native Linux packaging, playback diagnostics, more robust stream handling and large-playlist improvements. **These changes are not yet in the public downloads below.**
+**New in 0.1.16-alpha:** native Linux `.deb` support, improved playback diagnostics, safer HLS/Ace handling, progressive channel health scanning, duplicate management and faster large-catalogue browsing. All five platform release CI jobs passed; physical-device playback and real large-channel catalogues still need testing.
 
 ## Downloads
 
@@ -31,21 +31,21 @@ Direct installer links (no ZIP extraction required):
 
 | Platform | Download | Requirement |
 | --- | --- | --- |
-| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-Setup-0.1.15-alpha-windows-x64.exe) | Windows x64; VLC 3 x64 for playback |
-| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-android-universal-debug.apk) | Android 8+ |
-| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-arm64.pkg) | macOS 13+; VLC 3 |
-| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-x86_64.pkg) | macOS 13+; VLC 3 |
-| **Linux** | [Linux build progress (PR #23)](https://github.com/DizygoticCode/DizyTV/pull/23) | Ubuntu/Debian x86-64 target; not released |
+| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-Setup-0.1.16-alpha-windows-x64.exe) | Windows x64; VLC 3 x64 for playback |
+| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-android-universal-debug.apk) | Android 8+ |
+| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-arm64.pkg) | macOS 13+; VLC 3 |
+| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-x86_64.pkg) | macOS 13+; VLC 3 |
+| **Linux** | [Ubuntu/Debian x64 installer (.deb)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-linux-amd64.deb) | Ubuntu 24.04 x64 CI-verified; other Debian-family distros require testing; system libVLC 3 |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-Setup-0.1.15-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/pull/23"><img alt="Linux DEB coming in 0.1.16 alpha" src="https://img.shields.io/badge/Linux-DEB%20Coming%20Soon-f59e0b?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-Setup-0.1.16-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-linux-amd64.deb"><img alt="Download Ubuntu Linux DEB directly" src="https://img.shields.io/badge/Download-Linux%20DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
 </p>
 
-[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
 
 > [!CAUTION]
 > These alpha packages are not yet publicly code-signed: Windows EXE is unsigned, Mac PKGs are unnotarized and the Android APK is debug-signed. **Do not disable browser or device security protections** to get around a security warning. Save a backup before changing test versions; Android debug signing keys can prevent in-place upgrades.
@@ -73,18 +73,18 @@ Direct installer links (no ZIP extraction required):
 
 DizyTV **does not bundle paid IPTV subscriptions, provide DRM circumvention or guarantee any individual stream**. It can list a channel for which the broadcaster has no playable video on your network. Public links are not a substitute for authorised access.
 
-## Coming in 0.1.16-alpha (under review)
+## New in 0.1.16-alpha
 
-[PR #23](https://github.com/DizygoticCode/DizyTV/pull/23) contains the following **implemented but not yet released** updates to the desktop app:
+The [0.1.16-alpha development work (PR #23)](https://github.com/DizygoticCode/DizyTV/pull/23) delivered these updates to the desktop app:
 
-- **Linux x86-64:** native Ubuntu/Debian `.deb` packaging with PySide6 and installed VLC 3; optional separately installed Ace Stream Engine or an already running remote engine. Linux can use an installed FFmpeg and an optional Vosk language model for captions. [Linux setup guide](https://github.com/DizygoticCode/DizyTV/blob/feat/progressive-health-buffering-linux-0116/docs/LINUX.md).
+- **Linux x86-64:** native Ubuntu/Debian `.deb` packaging with PySide6 and installed VLC 3; optional separately installed Ace Stream Engine or an already running remote engine. Linux can use an installed FFmpeg and an optional Vosk language model for captions. [Linux setup guide](docs/LINUX.md).
 - **Playback diagnostics and handling:** adjustable 1–12-second HTTP/HLS network buffer (4 seconds by default); passive warning for stalled video frames while audio continues; safer cancellation of delayed Ace playback requests; direct HTTP-form Ace stream cache guard.
 - **Large catalogues:** more efficient category and search updates; lazy country-tree population. Synthetic 30,000-channel benchmarks improved substantially, but some large views may still block the UI briefly.
 - **Channel maintenance:** opt-in progressive HTTP/HLS health checks in batches of 40, cancellation on close or app shutdown, stop after batch and pause on HTTP 429; saved check history; conservative duplicate-channel grouping with reversible hide/restore.
 - **Tools → System usage:** local-only CPU, memory, disk, catalogue-size and available VLC decoder statistics.
 - **UK FAST sources:** Settings action to add public Plex, Samsung TV Plus and Pluto TV playlists with matching XMLTV guide presets, without overwriting existing sources.
 
-**Testing status:** Codex reported 219 local Python/PySide6 tests passing, 26 local Android Kotlin/JVM tests and native Linux packaging/playback-fixture checks. GitHub's [five-platform CI](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) is still the release gate. HTTP status alone cannot establish successful decoding; real Windows catalogue performance, live third-party channels, Ace Stream sessions and physical-device playback need manual testing. **Do not treat these features as part of the published 0.1.15 installers.**
+**Testing status:** 223 local Python/PySide6 tests passed with no failures or skips. Android Kotlin/JVM tests and Linux X11 synthetic HLS video checks passed. The [official five-platform release workflow](https://github.com/DizygoticCode/DizyTV/actions/runs/38817548197) successfully built and published all five installers with checksum files (macOS Apple Silicon CI retains five expected skips). HTTP reachability does not prove decoded video; real Windows catalogue performance, live third-party channels, Ace sessions and physical-device playback still need manual testing.
 
 ## Development and documents
 
@@ -100,7 +100,7 @@ python -m dizytv
 | --- | --- |
 | [User guide](docs/USER-GUIDE.md) | Playlists, EPG, TV controls, search, recordings and troubleshooting |
 | [Release notes](docs/RELEASE-NOTES.md) | Earlier alpha changes and longer technical descriptions |
-| [Linux installation](https://github.com/DizygoticCode/DizyTV/blob/feat/progressive-health-buffering-linux-0116/docs/LINUX.md) | Native Linux package, Ace Engine, libVLC and FFmpeg/Vosk (in development) |
+| [Linux installation](docs/LINUX.md) | Native Ubuntu/Debian package, separately installed Ace Engine, libVLC and optional FFmpeg/Vosk |
 | [Distribution](docs/DISTRIBUTION.md) | Native packages, signing limitations, upgrades |
 | [Build verification](docs/BUILD-VERIFICATION.md) | CI tests and what still needs device testing |
 | [Roadmap](ROADMAP.md) · [Licences](THIRD-PARTY-NOTICES.md) | Planned work and third-party obligations |
