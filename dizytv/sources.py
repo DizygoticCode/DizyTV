@@ -40,6 +40,14 @@ OPTIONAL_FAST_PLAYLISTS = (
     ("Roku FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/roku_all.m3u", "United States"),
     ("Tubi FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/tubi_all.m3u", "United States"),
 )
+# Third-party UK retransmission candidates requested by users. These are
+# separate, opt-in sources because they may include short-lived/session-bound
+# links, unsupported DRM or streams requiring regional broadcast rights.
+# A matching channel name / EPG ID is NOT proof of playable video.
+OPTIONAL_UK_RETRANSMISSIONS = (
+    ("UK retransmissions (+1 / STV+1 candidate)", "https://raw.githubusercontent.com/ExperiencersInternational/tvsetup/main/config.m3u", "United Kingdom"),
+    ("UK alternatives (E4 candidate)", "https://raw.githubusercontent.com/dp247/IPTV/master/playlists/playlist_uk.m3u8", "United Kingdom"),
+)
 # Matching FAST XMLTV listings use the same opaque channel IDs in their M3U
 # tvg-id attributes. Guide files are opt-in URLs; contents are not redistributed.
 # UK Freeview listings and FAST listings are different catalogues.
@@ -80,7 +88,7 @@ CATEGORY_HINTS = {
 
 def source_label(url):
     """Human-readable source name without exposing playlist credentials or query tokens."""
-    for label, preset, _ in (*FREE_PLAYLISTS, *OPTIONAL_FAST_PLAYLISTS):
+    for label, preset, _ in (*FREE_PLAYLISTS, *OPTIONAL_FAST_PLAYLISTS, *OPTIONAL_UK_RETRANSMISSIONS):
         if preset == url:
             return label
     if url in DIRECTORY_META:
