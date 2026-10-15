@@ -96,7 +96,7 @@ class BrowserTests(unittest.TestCase):
         self.assertFalse(confirmed_missing_ids([result('missing'),result('rate-limited')]))
 
     def test_additional_us_and_uk_candidate_presets_exist(self):
-        self.assertEqual(3,len(OPTIONAL_SHOW_LOOP_PLAYLISTS))
+        self.assertEqual(4,len(OPTIONAL_SHOW_LOOP_PLAYLISTS))
         self.assertEqual(2,len(OPTIONAL_UK_RETRANSMISSIONS))
         for name,url,_ in (*OPTIONAL_SHOW_LOOP_PLAYLISTS,*OPTIONAL_UK_RETRANSMISSIONS):
             self.assertTrue(url.startswith('https://'))
