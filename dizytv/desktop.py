@@ -1075,7 +1075,7 @@ class ChannelHealthDialog(QDialog):
         actions=QHBoxLayout()
         extras=QHBoxLayout()
         self.selected_button=QPushButton('Check selected channel')
-        self.selected_button.setEnabled(selected is not None)
+        self.selected_button.setEnabled(True)
         self.selected_button.clicked.connect(self.check_selected)
         actions.addWidget(self.selected_button)
         self.batch_button=QPushButton('Check next 40')
@@ -1117,7 +1117,12 @@ class ChannelHealthDialog(QDialog):
         self.hide_confirmed.setEnabled(False)
 
     def check_selected(self):
-        if self.selected is not None:self.run_batch([self.selected],0,one=True)
+        # This dialog is modeless: the main window's selection can change.
+        current=getattr(self.parent(),'selected',self.selected)
+        if current is None:
+            self.summary.setText('Select a channel in the main window to check.')
+            return
+        self.run_batch([current],0,one=True)
 
     def check_next(self):
         rows=self.filtered()
@@ -1155,6 +1160,8 @@ class ChannelHealthDialog(QDialog):
         if self.running:return
         from .channel_health import check_batch, BATCH_SIZE
         self.running=True
+        # Do not let source changes invalidate an in-flight batch offset.
+        self.source.setEnabled(False)
         self.batch_button.setEnabled(False)
         self.recheck_button.setEnabled(False)
         self.selected_button.setEnabled(False)
@@ -1167,6 +1174,7 @@ class ChannelHealthDialog(QDialog):
         def success(payload):
             entries,end=payload
             self.running=False
+            self.source.setEnabled(True)
             if not one:self.offset=end
             self.results.extend(entries)
             for entry in entries:
@@ -1190,14 +1198,15 @@ class ChannelHealthDialog(QDialog):
                                  'Results are network reachability hints, not playback proof.')
             self.batch_button.setEnabled(self.offset<len(self.filtered()))
             self.batch_button.setText('Check next 40')
-            self.selected_button.setEnabled(self.selected is not None)
+            self.selected_button.setEnabled(True)
             self.health_task=None
         def failure(message):
             self.running=False
+            self.source.setEnabled(True)
             self.summary.setText('Health check failed; retry the batch. '+message[:120])
             self.batch_button.setEnabled(True)
             self.recheck_button.setEnabled(self.last_batch_start is not None)
-            self.selected_button.setEnabled(self.selected is not None)
+            self.selected_button.setEnabled(True)
             self.health_task=None
         task.signals.success.connect(success)
         task.signals.failure.connect(failure)
