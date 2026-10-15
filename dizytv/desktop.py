@@ -1275,6 +1275,10 @@ class ChannelHealthDialog(QDialog):
         self.health_task=task
         def success(payload):
             entries,end=payload
+            checker_busy=any(entry['status']=='checker-busy' for entry in entries)
+            # Capacity is a local scanner state, not a channel observation.
+            # Keep the retry cursor and previous saved channel results intact.
+            entries=[entry for entry in entries if entry['status']!='checker-busy']
             self.running=False
             self.source.setEnabled(True)
             if not one:self.offset=end
@@ -1307,7 +1311,10 @@ class ChannelHealthDialog(QDialog):
                                  (' Previous-result cache could not be saved.' if history_error else ''))
             total=len(self.filtered())
             self.batch_button.setText('Check next 40')
-            if self.scan_all and self.offset<total:
+            if checker_busy:
+                self.scan_all=False
+                self.summary.setText('Paused: stream checker is busy; retry unchecked channels later. '+self.summary.text())
+            elif self.scan_all and self.offset<total:
                 # A provider telling us to slow down is a reason to pause,
                 # not to hammer the rest of its catalogue.
                 if any(x['status']=='rate-limited' for x in entries):

@@ -154,6 +154,43 @@ class HealthLifecycleTests(unittest.TestCase):
         self.assertEqual(0,self.dialog.progress.value())
         self.assertEqual(0,len(self.pool.tasks))
 
+    def test_busy_capacity_pauses_without_saving_false_failure_or_advancing_cursor(self):
+        blocked=self.dialog.rows[2]
+        history=HealthHistory(self.store)
+        history.record([dict(id=blocked['id'],status='manifest-only')])
+        self.dialog.start_progressive_scan()
+        entries=[dict(id=row['id'],name=row['name'],status='unverified',detail='Fixture')
+                 for row in self.dialog.rows[:2]]
+        entries.append(dict(id=blocked['id'],name=blocked['name'],
+                            status='checker-busy',detail='Checker busy; not probed'))
+        self.pool.tasks[-1].signals.success.emit((entries,2))
+        self.app.processEvents()
+        self.assertFalse(self.dialog.scan_all)
+        self.assertEqual(1,len(self.pool.tasks))
+        self.assertEqual(2,self.dialog.offset)
+        self.assertEqual(2,self.dialog.progress.value())
+        self.assertEqual(2,len(self.dialog.results))
+        self.assertIn('busy',self.dialog.summary.text().lower())
+        self.assertEqual('manifest-only',history.read()[blocked['id']]['status'])
+        self.assertTrue(self.dialog.batch_button.isEnabled())
+        self.dialog.batch_button.click()
+        self.assertEqual(2,self.dialog.last_batch_start)
+        self.finish_batch(count=40,start=2)
+        self.assertEqual(42,self.dialog.offset)
+        self.assertEqual(42,len(self.dialog.results))
+
+    def test_fully_busy_batch_does_not_advance_or_replace_saved_results(self):
+        self.dialog.start_progressive_scan()
+        row=self.dialog.rows[0]
+        self.pool.tasks[-1].signals.success.emit(([
+            dict(id=row['id'],name=row['name'],status='checker-busy',detail='Not probed')],0))
+        self.app.processEvents()
+        self.assertFalse(self.dialog.scan_all)
+        self.assertEqual(1,len(self.pool.tasks))
+        self.assertEqual(0,self.dialog.offset)
+        self.assertEqual([],self.dialog.results)
+        self.assertEqual({},HealthHistory(self.store).read())
+
 
 if __name__=='__main__':
     unittest.main()

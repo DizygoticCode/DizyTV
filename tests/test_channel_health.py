@@ -212,22 +212,50 @@ class HealthTests(unittest.TestCase):
 
     def test_timed_out_probes_do_not_create_unbounded_background_connections(self):
         release=threading.Event()
+        entered=threading.Event()
         slots=threading.BoundedSemaphore(1)
         def stalled_probe(*_):
+            entered.set()
             release.wait(.5)
             return ('unverified','Fixture result')
         with patch('dizytv.channel_health._PROBE_SLOTS',slots), \
              patch('dizytv.channel_health._probe_public',side_effect=stalled_probe) as probe:
             try:
                 first=check_channel({'stream':'https://public.example/a'},timeout=.02)
+                self.assertTrue(entered.wait(timeout=1))
                 second=check_channel({'stream':'https://public.example/b'},timeout=.02)
                 self.assertEqual('unreachable',first['status'])
+                self.assertEqual('checker-busy',second['status'])
                 self.assertIn('busy',second['detail'])
                 self.assertEqual(1,probe.call_count)
             finally:
                 release.set()
                 self.assertTrue(slots.acquire(timeout=1))
                 slots.release()
+
+    def test_busy_capacity_stops_batch_without_advancing_unchecked_channel(self):
+        channels=[{'id':str(i),'name':'Channel '+str(i)} for i in range(40)]
+        called=[]
+        def checker(channel):
+            called.append(channel['id'])
+            return dict(status='checker-busy' if channel['id']=='1' else 'unverified',
+                        detail='Fixture result')
+        results,offset=check_batch(channels,workers=1,checker=checker)
+        self.assertEqual(['0','1'],called)
+        self.assertEqual(1,offset)
+        self.assertEqual(['unverified','checker-busy'],[r['status'] for r in results])
+
+    def test_busy_capacity_returns_retry_prefix_when_other_probes_finish(self):
+        channels=[{'id':str(i),'name':'Channel '+str(i)} for i in range(40)]
+        together=threading.Barrier(4)
+        def checker(channel):
+            if int(channel['id'])<4:together.wait(timeout=2)
+            return dict(status='checker-busy' if channel['id']=='1' else 'unverified',
+                        detail='Fixture result')
+        results,offset=check_batch(channels,workers=4,checker=checker)
+        self.assertEqual(1,offset)
+        self.assertEqual(['0','1'],[r['id'] for r in results])
+        self.assertEqual('checker-busy',results[-1]['status'])
 
 
 

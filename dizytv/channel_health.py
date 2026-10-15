@@ -144,7 +144,7 @@ def _bounded_probe(url, timeout):
 
     def worker():
         if not _PROBE_SLOTS.acquire(blocking=False):
-            result.put(('unreachable', 'Stream checker is busy; retry later'))
+            result.put(('checker-busy', 'Stream checker is busy; not probed, retry later'))
             return
         try:
             try:
@@ -219,10 +219,11 @@ def check_channel(channel, timeout=TIMEOUT, opener=None):
 
 
 def check_batch(channels, start=0, batch_size=BATCH_SIZE, workers=MAX_WORKERS, checker=check_channel):
-    """Check a contiguous prefix, pausing unstarted probes on HTTP 429.
+    """Check a contiguous prefix, pausing on HTTP 429 or exhausted capacity.
 
     At most four probes are in flight. Those already started may finish after
-    a rate limit; the returned offset resumes at the first unchecked channel.
+    a pause; the returned offset resumes at the first unchecked channel. A
+    trailing checker-busy entry signals a pause, not a completed observation.
     """
     if not isinstance(start,int) or start<0:
         raise ValueError('Invalid batch offset')
@@ -232,20 +233,20 @@ def check_batch(channels, start=0, batch_size=BATCH_SIZE, workers=MAX_WORKERS, c
         raise ValueError('Invalid worker count')
     portion=list(channels[start:start+batch_size])
     results=[None]*len(portion)
-    rate_limited=threading.Event()
+    paused=threading.Event()
 
     def check_one(channel):
         result=checker(channel)
-        if result['status']=='rate-limited':
+        if result['status'] in ('rate-limited','checker-busy'):
             # Publish from the worker before the coordinator can refill slots.
-            rate_limited.set()
+            paused.set()
         return result
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         next_index=0
         tasks={}
-        while tasks or (next_index<len(portion) and not rate_limited.is_set()):
-            while not rate_limited.is_set() and len(tasks)<workers and next_index<len(portion):
+        while tasks or (next_index<len(portion) and not paused.is_set()):
+            while not paused.is_set() and len(tasks)<workers and next_index<len(portion):
                 tasks[pool.submit(check_one,portion[next_index])]=next_index
                 next_index+=1
             completed,_=wait(tasks,return_when=FIRST_COMPLETED)
@@ -256,4 +257,9 @@ def check_batch(channels, start=0, batch_size=BATCH_SIZE, workers=MAX_WORKERS, c
                 except Exception:result={'status':'unreachable','detail':'Unexpected stream probe failure'}
                 results[i]={'id':portion[i].get('id',''),'name':str(portion[i].get('name',''))[:150],
                             'status':result['status'],'detail':result['detail']}
+    for i,result in enumerate(results[:next_index]):
+        if result['status']=='checker-busy':
+            # Do not skip or cache channels for which no probe could start.
+            # Already-running results after this gap are retried only manually.
+            return results[:i+1],start+i
     return results[:next_index],start+next_index
