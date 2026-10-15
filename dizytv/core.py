@@ -101,10 +101,73 @@ def display_channel_name(name):
     return re.sub(r'\s+', ' ', value).strip() or 'Unnamed channel'
 
 
-def channel_section(channel):
+
+# The 24/7 directory groups only explicitly labelled marathon/loop feeds and
+# recognisable show-based stations. Merely being always live is insufficient:
+# BBC News, Sky Sports, radio and ordinary broadcast TV remain in their genre.
+LOOP_SHOWS = (
+    'south park','rick and morty','family guy','the simpsons','simpsons',
+    'brooklyn nine nine','brooklyn 99','the goldbergs','big bang theory',
+    'young sheldon','friends','futurama','king of the hill','american dad',
+    'frasier','cheers','the office','seinfeld','everybody loves raymond',
+    'modern family','the middle','scrubs','two and a half men',
+    'malcolm in the middle','its always sunny','how i met your mother',
+    'mr bean','taxi','sister sister','corner gas','classic tv comedy',
+    'hit sitcoms','pluto tv sitcoms','pluto tv comedy movies',
+)
+LOOP_TAGS = re.compile(
+    r'(?:\b24\s*/\s*7\b|\b24[- ]hour\b|\b24\s*7\b|'
+    r'\bmarathon\b|\bbinge(?:watch|[- ]watch)?\b|'
+    r'\bnon[- ]stop\b|\bloop(?:s|ing)?\b)', re.I
+)
+LOOP_EXCLUDE = re.compile(
+    r'\b(?:news|sport|sports|football|soccer|golf|cricket|music|radio|'
+    r'weather|traffic|business|financial|live events?)\b', re.I
+)
+
+
+def is_show_loop_channel(channel):
+    if channel_kind(channel)=='Radio':
+        return False
+    name=display_channel_name(channel.get('name','')).casefold()
+    group=str(channel.get('group','')).casefold()
+    if LOOP_EXCLUDE.search(name+' '+group):
+        return False
+    name_plain=re.sub(r'[^a-z0-9 ]+', ' ', name)
+    name_plain=re.sub(r'\s+', ' ', name_plain).strip()
+    show=any(re.search(r'(?<!\w)'+re.escape(title)+r'(?!\w)',name_plain)
+             for title in LOOP_SHOWS)
+    tagged=bool(LOOP_TAGS.search(name+' '+group))
+    group_loop=bool(re.search(r'24\s*/\s*7|tv\s*shows?\s*loops?|'
+                              r'sitcom\s*marathons?',group,re.I))
+    return show or tagged or group_loop
+
+
+CHANNEL_SORT_MODES = ('Name A–Z', 'UK Freeview style', 'Similar names / +1',
+                      'Country → category', 'Category → name', 'Playlist order')
+
+FREEVIEW_UK = {
+    'bbc one':1, 'bbc two':2, 'itv1':3, 'itv':3,
+    'channel 4':4, 'channel 5':5, 'itv2':6, 'bbc three':7,
+    'bbc four':9, 'itv3':10, 'sky mix':11, 'quest':12, 'e4':13,
+    'film4':14, 'really':17, 'more4':18, 'dave':19, 'drama':20,
+    '5usa':21, 'itv4':25, 'yesterday':27, '5star':30,
+    '4seven':47, 'bbc news':231,
+}
+
+
+def _sort_name(name):
+    name=display_channel_name(name).casefold()
+    return re.sub(r'\s+', ' ',re.sub(r'[^a-z0-9+ ]+', ' ',name)).strip()
+
+
+def _sort_base(name):
+    return re.sub(r'\s*\+\s*1
     """Country/category navigator: keep original group-title and IDs intact."""
     if channel_kind(channel)=='Radio':
         return 'Radio'
+    if is_show_loop_channel(channel):
+        return '24/7 Shows & Loops'
     genre=normalise_genre(str(channel.get('genre') or ''))
     sections={'Sport','News','Movies','Classic','Series','Comedy','Kids','Music','Documentary','Entertainment','Education'}
     if genre in sections:
@@ -129,43 +192,15 @@ def channel_section(channel):
     return 'General TV'
 
 
-CHANNEL_SORT_MODES = ('Name A–Z', 'UK Freeview style', 'Similar names / +1',
-                      'Country → category', 'Category → name', 'Playlist order')
-
-# Approximate Freeview England ordering when a playlist lacks tvg-chno.
-# Provider channel numbers take priority; channel numbers can differ by nation.
-FREEVIEW_UK = {
-    'bbc one': 1, 'bbc two': 2, 'itv1': 3, 'itv': 3,
-    'channel 4': 4, 'channel 5': 5, 'itv2': 6, 'bbc three': 7,
-    'bbc four': 9, 'itv3': 10, 'sky mix': 11, 'quest': 12, 'e4': 13,
-    'film4': 14, 'really': 17, 'more4': 18, 'dave': 19, 'drama': 20,
-    '5usa': 21, 'itv4': 25, 'yesterday': 27, '5star': 30,
-    '4seven': 47, 'bbc news': 231,
-}
-
-
-def _normal_channel_name(name):
-    name=display_channel_name(name).casefold()
-    name=re.sub(r'[^a-z0-9+ ]+', ' ', name)
-    return re.sub(r'\\s+', ' ', name).strip()
-
-
-def _channel_plus_one(name):
-    return bool(re.search(r'(?:\\s|^)\\+\\s*1
-    """Return the catalogue without permanently removing disabled channels.
-
-    Default behaviour preserves old callers and recording references; UI
-    consumers opt into the visibility filter explicitly.
-    """
-    overrides = state.get('category_overrides', {})
-    disabled = set(state.get('disabled_channels', ()))
+def catalogue(state, include_disabled=True):
+    overrides=state.get('category_overrides', {})
+    disabled=set(state.get('disabled_channels',[]))
     return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']
             if include_disabled or ch['id'] not in disabled]
 
 
 def visible_channels(state, include_disabled=False):
-    return catalogue(state, include_disabled=include_disabled)
-
+    return catalogue(state,include_disabled=include_disabled)
 
 
 def default_state():
@@ -239,20 +274,6 @@ def stream_url(stream, engine):
         endpoint='/ace/manifest.m3u8' if urlparse(stream).path=='/ace/manifest.m3u8' else '/ace/getstream'
         return http_url(engine).rstrip('/') + endpoint + '?' + urlencode(params)
     return http_url(stream)
-
-
-def stable_channel_key(url):
-    """Avoid rotating public FAST session tokens breaking Plex favourites.
-
-    Only known Plex provider *content identity* paths have this exception.
-    The original full URL (including its token) is always retained for actual
-    playback. Do not strip query strings from generic streams or Ace content.
-    """
-    parsed=urlparse(url)
-    if (parsed.scheme=='https' and parsed.hostname=='epg.provider.plex.tv'
-            and re.fullmatch(r'/library/parts/[0-9a-f-]{8,}/?',parsed.path,re.I)):
-        return parsed._replace(query='',fragment='').geturl()
-    return url
 
 
 def parse_playlist(text):
@@ -497,14 +518,14 @@ def validate_state(state):
     from .auto_captions import LANGUAGE_MODELS
     if settings.get('auto_caption_language','English (bundled)') not in LANGUAGE_MODELS:
         raise ValueError('Invalid offline caption language')
+    if settings.get('channel_sort','Name A–Z') not in CHANNEL_SORT_MODES:
+        raise ValueError('Invalid channel sorting mode')
     for key in ('auto_caption_model_dir','auto_caption_ffmpeg_path'):
         value=settings.get(key,'')
         if not isinstance(value,str) or len(value)>4096:
             raise ValueError('Invalid offline caption component path')
     if 'button_size' in settings and settings['button_size'] not in ('Compact','Normal','Large'):
         raise ValueError('Invalid button size')
-    if settings.get('channel_sort','Name A–Z') not in CHANNEL_SORT_MODES:
-        raise ValueError('Invalid channel sorting mode')
     if 'vlc_decoder' in settings and settings['vlc_decoder'] not in ('Auto','Software'):
         raise ValueError('Invalid VLC video decoding mode')
     if 'engine_executable' in settings and (not isinstance(settings['engine_executable'],str) or len(settings['engine_executable'])>4096):
@@ -548,11 +569,10 @@ def validate_state(state):
             http_url(ch['stream'])
     if any(not isinstance(f, str) or not re.fullmatch('[a-f0-9]{40}', f) for f in state['favourites']):
         raise ValueError('Invalid favourites')
-    # Optional for existing 0.1.x user state and portable backups.
-    disabled=state.get('disabled_channels', [])
+    disabled=state.get('disabled_channels',[])
     if (not isinstance(disabled,list) or len(disabled)>100000 or
-            any(not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid)
-                for cid in disabled) or len(disabled)!=len(set(disabled))):
+            any(not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid) for cid in disabled) or
+            len(disabled)!=len(set(disabled))):
         raise ValueError('Invalid disabled channels')
     if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
         raise ValueError('Invalid guide mappings')
@@ -633,25 +653,41 @@ def restore_backup(payload, now=None):
         if job['status'] not in TERMINAL:
             job['status'] = 'missed' if job['end'] <= now else 'paused'
     return state
-,_normal_channel_name(name)))
+, '',_sort_name(name))
 
 
-def _base_channel_name(name):
-    return re.sub(r'\\s*\\+\\s*1
-    """Return the catalogue without permanently removing disabled channels.
+def _is_plus_one(name):
+    return bool(re.search(r'\s*\+\s*1
+    """Country/category navigator: keep original group-title and IDs intact."""
+    if channel_kind(channel)=='Radio':
+        return 'Radio'
+    genre=normalise_genre(str(channel.get('genre') or ''))
+    sections={'Sport','News','Movies','Classic','Series','Comedy','Kids','Music','Documentary','Entertainment','Education'}
+    if genre in sections:
+        return genre
+    label=' '.join((display_channel_name(channel.get('name','')),str(channel.get('group') or '')))
+    patterns=[
+        ('News',r'\b(?:news|headlines?|weather)\b'),
+        ('Sport',r'\b(?:sports?|football|cricket|racing|nba|nfl|golf)\b'),
+        ('Movies',r'\b(?:movies?|cinema|films?)\b'),
+        ('Classic',r'\bclassic(?:s)?\b'),
+        ('Series',r'\b(?:series|tv shows?)\b'),
+        ('Comedy',r'\b(?:comedy|sitcoms?)\b'),
+        ('Kids',r'\b(?:kids|children|cartoons?|junior)\b'),
+        ('Music',r'\b(?:music|concert)\b'),
+        ('Documentary',r'\b(?:documentar(?:y|ies)|factual|history|nature)\b'),
+        ('Education',r'\b(?:education|learning)\b'),
+        ('Entertainment',r'\b(?:entertainment|comedy|drama)\b'),
+    ]
+    for section,pattern in patterns:
+        if re.search(pattern,label,re.I):
+            return section
+    return 'General TV'
 
-    Default behaviour preserves old callers and recording references; UI
-    consumers opt into the visibility filter explicitly.
-    """
+
+def catalogue(state):
     overrides = state.get('category_overrides', {})
-    disabled = set(state.get('disabled_channels', ()))
-    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']
-            if include_disabled or ch['id'] not in disabled]
-
-
-def visible_channels(state, include_disabled=False):
-    return catalogue(state, include_disabled=include_disabled)
-
+    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']]
 
 
 def default_state():
@@ -669,9 +705,8 @@ def default_state():
                          'subtitles_enabled': True, 'subtitle_size': 28,
                          'subtitle_colour': 'White', 'subtitle_position': 'Bottom',
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
-                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': '',
-                         'auto_caption_language': 'English (bundled)'},
-            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': [], 'disabled_channels': []}
+                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': ''},
+            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
 
 
 def http_url(value):
@@ -726,20 +761,6 @@ def stream_url(stream, engine):
     return http_url(stream)
 
 
-def stable_channel_key(url):
-    """Avoid rotating public FAST session tokens breaking Plex favourites.
-
-    Only known Plex provider *content identity* paths have this exception.
-    The original full URL (including its token) is always retained for actual
-    playback. Do not strip query strings from generic streams or Ace content.
-    """
-    parsed=urlparse(url)
-    if (parsed.scheme=='https' and parsed.hostname=='epg.provider.plex.tv'
-            and re.fullmatch(r'/library/parts/[0-9a-f-]{8,}/?',parsed.path,re.I)):
-        return parsed._replace(query='',fragment='').geturl()
-    return url
-
-
 def parse_playlist(text):
     if len(text.encode('utf-8')) > MAX_FEED:
         raise ValueError('Playlist is too large')
@@ -757,7 +778,7 @@ def parse_playlist(text):
                 except ValueError:
                     attrs, name = {}, ''
                     continue
-            cid = aid or hashlib.sha256(stable_channel_key(line).encode()).hexdigest()[:40]
+            cid = aid or hashlib.sha256(line.encode()).hexdigest()[:40]
             if cid not in seen:
                 seen.add(cid)
                 channels.append({'id': cid, 'name': (name or attrs.get('tvg-name') or cid)[:512],
@@ -943,12 +964,12 @@ def _integer(value, low, high, label):
 
 
 def validate_state(state):
-    if not isinstance(state, dict) or set(default_state()) - {'disabled_channels'} - set(state):
+    if not isinstance(state, dict) or set(default_state()) - set(state):
         raise ValueError('Backup is missing required data')
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -978,9 +999,6 @@ def validate_state(state):
         raise ValueError('Invalid appearance theme')
     from .subtitles import validate_caption_settings
     validate_caption_settings(settings)
-    from .auto_captions import LANGUAGE_MODELS
-    if settings.get('auto_caption_language','English (bundled)') not in LANGUAGE_MODELS:
-        raise ValueError('Invalid offline caption language')
     for key in ('auto_caption_model_dir','auto_caption_ffmpeg_path'):
         value=settings.get(key,'')
         if not isinstance(value,str) or len(value)>4096:
@@ -1028,12 +1046,6 @@ def validate_state(state):
             http_url(ch['stream'])
     if any(not isinstance(f, str) or not re.fullmatch('[a-f0-9]{40}', f) for f in state['favourites']):
         raise ValueError('Invalid favourites')
-    # Optional for existing 0.1.x user state and portable backups.
-    disabled=state.get('disabled_channels', [])
-    if (not isinstance(disabled,list) or len(disabled)>100000 or
-            any(not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid)
-                for cid in disabled) or len(disabled)!=len(set(disabled))):
-        raise ValueError('Invalid disabled channels')
     if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
         raise ValueError('Invalid guide mappings')
     overrides = state.get('category_overrides', {})
@@ -1113,52 +1125,74 @@ def restore_backup(payload, now=None):
         if job['status'] not in TERMINAL:
             job['status'] = 'missed' if job['end'] <= now else 'paused'
     return state
-, '', _normal_channel_name(name))
+,_sort_name(name)))
 
 
 def channel_sort_key(ch,mode,position=0):
-    """Stable sort keys, including +1 pairs and Freeview-like UK LCNs.
-
-    Playlist tvg-chno is preferred over approximate UK numbers. Missing
-    numbers sort after numbered channels and preserve alphabetical fallback.
-    """
-    name=_normal_channel_name(ch.get('name',''))
-    base=_base_channel_name(ch.get('name',''))
-    plus=1 if _channel_plus_one(ch.get('name','')) else 0
-    country=ch.get('country','Unspecified')
-    genre=ch.get('genre','Unspecified')
+    name=_sort_name(ch.get('name',''))
+    base=_sort_base(ch.get('name',''))
+    plus=1 if _is_plus_one(ch.get('name','')) else 0
+    country=str(ch.get('country','Unspecified'))
     section=channel_section(ch)
-    if mode=='Playlist order':return (position,)
-    if mode=='Similar names / +1':return (base,plus,name,position)
-    if mode=='Country → category':return (country!='United Kingdom',country.casefold(),section.casefold(),base,plus,position)
-    if mode=='Category → name':return (section.casefold(),base,plus,position)
+    if mode=='Playlist order':
+        return (position,)
+    if mode=='Similar names / +1':
+        return (base,plus,name,position)
+    if mode=='Country → category':
+        return (country!='United Kingdom',country.casefold(),section.casefold(),base,plus,position)
+    if mode=='Category → name':
+        return (section.casefold(),base,plus,position)
     if mode=='UK Freeview style':
         uk=country=='United Kingdom'
         lcn=str(ch.get('chno','')).strip()
-        channel_no=int(lcn) if re.fullmatch(r'[0-9]{1,4}',lcn) else 0
-        if uk and not channel_no:
-            channel_no=FREEVIEW_UK.get(base,0)
-            if channel_no and plus:channel_no+=1
-        return (not uk,not bool(channel_no) if uk else True,
-                channel_no if channel_no else 100000,base,plus,name,position)
+        number=int(lcn) if re.fullmatch(r'\d{1,4}',lcn) else 0
+        if uk and not number:
+            number=FREEVIEW_UK.get(base,0)
+        return (not uk,not bool(number) if uk else True,
+                number or 100000,base,plus,name,position)
     return (base,plus,name,position)
 
 
-def catalogue(state, include_disabled=True):
-    """Return the catalogue without permanently removing disabled channels.
+def stable_channel_key(url):
+    """Keep Plex channel IDs stable when public FAST signed tokens rotate."""
+    p=urlparse(url)
+    if (p.scheme=='https' and p.hostname=='epg.provider.plex.tv'
+            and re.fullmatch(r'/library/parts/[0-9a-f-]{8,}/?',p.path,re.I)):
+        return p._replace(query='',fragment='').geturl()
+    return url
 
-    Default behaviour preserves old callers and recording references; UI
-    consumers opt into the visibility filter explicitly.
-    """
+
+def channel_section(channel):
+    """Country/category navigator: keep original group-title and IDs intact."""
+    if channel_kind(channel)=='Radio':
+        return 'Radio'
+    genre=normalise_genre(str(channel.get('genre') or ''))
+    sections={'Sport','News','Movies','Classic','Series','Comedy','Kids','Music','Documentary','Entertainment','Education'}
+    if genre in sections:
+        return genre
+    label=' '.join((display_channel_name(channel.get('name','')),str(channel.get('group') or '')))
+    patterns=[
+        ('News',r'\b(?:news|headlines?|weather)\b'),
+        ('Sport',r'\b(?:sports?|football|cricket|racing|nba|nfl|golf)\b'),
+        ('Movies',r'\b(?:movies?|cinema|films?)\b'),
+        ('Classic',r'\bclassic(?:s)?\b'),
+        ('Series',r'\b(?:series|tv shows?)\b'),
+        ('Comedy',r'\b(?:comedy|sitcoms?)\b'),
+        ('Kids',r'\b(?:kids|children|cartoons?|junior)\b'),
+        ('Music',r'\b(?:music|concert)\b'),
+        ('Documentary',r'\b(?:documentar(?:y|ies)|factual|history|nature)\b'),
+        ('Education',r'\b(?:education|learning)\b'),
+        ('Entertainment',r'\b(?:entertainment|comedy|drama)\b'),
+    ]
+    for section,pattern in patterns:
+        if re.search(pattern,label,re.I):
+            return section
+    return 'General TV'
+
+
+def catalogue(state):
     overrides = state.get('category_overrides', {})
-    disabled = set(state.get('disabled_channels', ()))
-    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']
-            if include_disabled or ch['id'] not in disabled]
-
-
-def visible_channels(state, include_disabled=False):
-    return catalogue(state, include_disabled=include_disabled)
-
+    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']]
 
 
 def default_state():
@@ -1176,9 +1210,8 @@ def default_state():
                          'subtitles_enabled': True, 'subtitle_size': 28,
                          'subtitle_colour': 'White', 'subtitle_position': 'Bottom',
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
-                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': '',
-                         'auto_caption_language': 'English (bundled)'},
-            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': [], 'disabled_channels': []}
+                         'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': ''},
+            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
 
 
 def http_url(value):
@@ -1233,20 +1266,6 @@ def stream_url(stream, engine):
     return http_url(stream)
 
 
-def stable_channel_key(url):
-    """Avoid rotating public FAST session tokens breaking Plex favourites.
-
-    Only known Plex provider *content identity* paths have this exception.
-    The original full URL (including its token) is always retained for actual
-    playback. Do not strip query strings from generic streams or Ace content.
-    """
-    parsed=urlparse(url)
-    if (parsed.scheme=='https' and parsed.hostname=='epg.provider.plex.tv'
-            and re.fullmatch(r'/library/parts/[0-9a-f-]{8,}/?',parsed.path,re.I)):
-        return parsed._replace(query='',fragment='').geturl()
-    return url
-
-
 def parse_playlist(text):
     if len(text.encode('utf-8')) > MAX_FEED:
         raise ValueError('Playlist is too large')
@@ -1264,7 +1283,7 @@ def parse_playlist(text):
                 except ValueError:
                     attrs, name = {}, ''
                     continue
-            cid = aid or hashlib.sha256(stable_channel_key(line).encode()).hexdigest()[:40]
+            cid = aid or hashlib.sha256(line.encode()).hexdigest()[:40]
             if cid not in seen:
                 seen.add(cid)
                 channels.append({'id': cid, 'name': (name or attrs.get('tvg-name') or cid)[:512],
@@ -1450,12 +1469,12 @@ def _integer(value, low, high, label):
 
 
 def validate_state(state):
-    if not isinstance(state, dict) or set(default_state()) - {'disabled_channels'} - set(state):
+    if not isinstance(state, dict) or set(default_state()) - set(state):
         raise ValueError('Backup is missing required data')
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -1485,9 +1504,6 @@ def validate_state(state):
         raise ValueError('Invalid appearance theme')
     from .subtitles import validate_caption_settings
     validate_caption_settings(settings)
-    from .auto_captions import LANGUAGE_MODELS
-    if settings.get('auto_caption_language','English (bundled)') not in LANGUAGE_MODELS:
-        raise ValueError('Invalid offline caption language')
     for key in ('auto_caption_model_dir','auto_caption_ffmpeg_path'):
         value=settings.get(key,'')
         if not isinstance(value,str) or len(value)>4096:
@@ -1535,12 +1551,6 @@ def validate_state(state):
             http_url(ch['stream'])
     if any(not isinstance(f, str) or not re.fullmatch('[a-f0-9]{40}', f) for f in state['favourites']):
         raise ValueError('Invalid favourites')
-    # Optional for existing 0.1.x user state and portable backups.
-    disabled=state.get('disabled_channels', [])
-    if (not isinstance(disabled,list) or len(disabled)>100000 or
-            any(not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid)
-                for cid in disabled) or len(disabled)!=len(set(disabled))):
-        raise ValueError('Invalid disabled channels')
     if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
         raise ValueError('Invalid guide mappings')
     overrides = state.get('category_overrides', {})
