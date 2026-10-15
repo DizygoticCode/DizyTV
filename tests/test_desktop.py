@@ -124,6 +124,32 @@ class DesktopTests(unittest.TestCase):
         self.assertLess(grid.minimumWidth(),default)
         self.assertLess(grid.geometry_units()[0],58)
 
+    def test_settings_pair_only_imported_uk_fast_guides_without_duplicates(self):
+        from dizytv.sources import (FREE_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
+                                   DEFAULT_GUIDE_URLS)
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            window=MainWindow(store,start_worker=False)
+            dialog=Settings(store.read(),window)
+            links=[url for name,url,_ in FREE_PLAYLISTS
+                   if name in ('Plex FAST UK · series/24-7',
+                               'Samsung TV Plus FAST UK','Pluto TV FAST UK')]
+            # User who imported only Plex should get only Plex's guide, not
+            # every FAST EPG (which would waste bandwidth).
+            dialog.playlists.setPlainText('\\n'.join(links[:1]))
+            dialog.feeds.setPlainText(DEFAULT_GUIDE_URLS[0])
+            dialog.add_uk_fast_guides()
+            self.assertEqual([DEFAULT_GUIDE_URLS[0],FAST_GUIDE_BY_PLAYLIST[links[0]]],
+                             dialog.values()['xmltv_urls'])
+            dialog.add_uk_fast_guides()
+            self.assertEqual(2,len(dialog.values()['xmltv_urls']))
+            dialog.playlists.setPlainText('\\n'.join(links))
+            dialog.add_uk_fast_guides()
+            self.assertEqual(4,len(dialog.values()['xmltv_urls']))
+            self.assertEqual(3,len(set(dialog.values()['xmltv_urls']) & set(FAST_GUIDE_BY_PLAYLIST.values())))
+            dialog.close()
+            window.close()
+
     def test_complete_iptv_directory_picker_filters_cities_and_imports_only_selected(self):
         from dizytv.desktop import IPTVDirectoryDialog
         with tempfile.TemporaryDirectory() as folder:
