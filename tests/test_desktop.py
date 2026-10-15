@@ -1186,6 +1186,56 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(len(urls),len(set(urls)))
             dialog.close()
 
+    def test_tools_system_usage_page_is_live_and_does_not_send_telemetry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            menu_labels=[action.text() for action in window.tools_button.menu().actions()]
+            self.assertIn('System usage…',menu_labels)
+            window.open_system_usage()
+            self.app.processEvents()
+            dlg=window.usage_dialog
+            self.assertTrue(dlg.isVisible())
+            self.assertIn('DizyTV',dlg.summary.text())
+            self.assertIn('Imported channels:',dlg.details.toPlainText())
+            dlg.close()
+            self.assertFalse(dlg.timer.isActive())
+            window.close()
+
+    def test_direct_http_buffer_setting_does_not_modify_ace_sessions(self):
+        from dizytv.core import default_state, validate_state
+        initial=default_state()
+        self.assertEqual(4000,initial['settings']['http_buffer_ms'])
+        initial['settings']['http_buffer_ms']=8000
+        validate_state(initial)
+        initial['settings']['http_buffer_ms']=90000
+        with self.assertRaisesRegex(ValueError,'HTTP playback buffer'):
+            validate_state(initial)
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            settings=Settings(window.state,window)
+            settings.http_buffer.setValue(8000)
+            self.assertEqual(8000,settings.values()['http_buffer_ms'])
+            settings.close()
+            window.close()
+
+    def test_progressive_health_scan_can_be_stopped_without_resetting_results(self):
+        from dizytv.desktop import ChannelHealthDialog
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            d=ChannelHealthDialog(store,None,Mock())
+            d.rows=[{'id':str(i),'name':'Channel '+str(i),
+                     'stream':'https://example.com/'+str(i)} for i in range(90)]
+            d.reset_filter()
+            self.assertEqual(90,d.progress.maximum())
+            d.start_progressive_scan()
+            self.assertTrue(d.scan_all)
+            self.assertTrue(d.stop_button.isEnabled())
+            d.stop_progressive_scan()
+            self.assertFalse(d.scan_all)
+            self.assertFalse(d.stop_button.isEnabled())
+            d.close()
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
