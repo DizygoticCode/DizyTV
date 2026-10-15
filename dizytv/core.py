@@ -129,9 +129,21 @@ def channel_section(channel):
     return 'General TV'
 
 
-def catalogue(state):
+def catalogue(state, include_disabled=True):
+    """Return the catalogue without permanently removing disabled channels.
+
+    Default behaviour preserves old callers and recording references; UI
+    consumers opt into the visibility filter explicitly.
+    """
     overrides = state.get('category_overrides', {})
-    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']]
+    disabled = set(state.get('disabled_channels', ()))
+    return [{**ch, **overrides.get(ch['id'], {})} for ch in state['channels']
+            if include_disabled or ch['id'] not in disabled]
+
+
+def visible_channels(state, include_disabled=False):
+    return catalogue(state, include_disabled=include_disabled)
+
 
 
 def default_state():
@@ -151,7 +163,7 @@ def default_state():
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
                          'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': '',
                          'auto_caption_language': 'English (bundled)'},
-            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': []}
+            'channels': [], 'favourites': [], 'mappings': {}, 'jobs': [], 'disabled_channels': []}
 
 
 def http_url(value):
@@ -423,7 +435,7 @@ def _integer(value, low, high, label):
 
 
 def validate_state(state):
-    if not isinstance(state, dict) or set(default_state()) - set(state):
+    if not isinstance(state, dict) or set(default_state()) - {'disabled_channels'} - set(state):
         raise ValueError('Backup is missing required data')
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
@@ -508,6 +520,13 @@ def validate_state(state):
             http_url(ch['stream'])
     if any(not isinstance(f, str) or not re.fullmatch('[a-f0-9]{40}', f) for f in state['favourites']):
         raise ValueError('Invalid favourites')
+    # Optional for existing 0.1.x user state and portable backups.
+    disabled=state.get('disabled_channels', [])
+    if (not isinstance(disabled,list) or len(disabled)>100000 or
+            len(disabled)!=len(set(disabled)) or
+            any(not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid)
+                for cid in disabled)):
+        raise ValueError('Invalid disabled channels')
     if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
         raise ValueError('Invalid guide mappings')
     overrides = state.get('category_overrides', {})
