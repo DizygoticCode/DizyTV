@@ -1,8 +1,19 @@
-# DizyTV — earlier alpha release notes and technical details
+# DizyTV alpha release notes and technical details
 
-The archived sections below were moved out of the main README on 15 October 2026 to make the project front page easier to use. They document earlier **0.1.9–0.1.15 alpha** changes and may contain historical guidance superseded by the [current user guide](USER-GUIDE.md). The project's latest publicly released version is [v0.1.15-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.15-alpha); the active [PR #23](https://github.com/DizygoticCode/DizyTV/pull/23) has unreleased improvements.
+For current downloads and instructions, start with the [README](../README.md).
 
-For downloads and current instructions, start with the [README](../README.md).
+## 0.1.16-alpha — native Ubuntu Linux and playback/channel-management improvements
+
+- Adds experimental Ubuntu/Debian x86-64 `.deb` with system VLC 3/libVLC, separately installed Ace Engine support, optional FFmpeg/Vosk transcription and a native desktop launcher.
+- Improves direct HTTP/HLS playback with configurable 1–12-second caching, stalled-video indication, and cancellation/late-result protection for Ace media requests. Does not guarantee every stream decodes or geo/DRM access.
+- Adds progressive on-demand HTTP health scanning, safe pause/retry when all checker workers are occupied, handling for HTTP 429, and conservative duplicate detection with reversible hide/restore.
+- Adds local Tools → System usage stats, one-click UK FAST playlist/guide pairing and large-catalogue search/category optimisations. A synthetic 30,000-channel workload may still block the UI for a few seconds.
+- Validated [223 local Python/PySide6 tests and five native PR CI jobs](https://github.com/DizygoticCode/DizyTV/actions/runs/38815152069) on `9136c93`; physical Windows large-playlist use, actual Ace peer playback, live third-party channel decoding, Linux/Wayland and macOS native-window behaviour still require testing.
+- Five direct native installers (Windows EXE, Android APK, macOS ARM/Intel PKGs, Ubuntu/Debian x64 DEB) and SHA-256 checksums are linked from the [v0.1.16-alpha release](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.16-alpha) when the gated `main` publisher finishes.
+
+## Archived earlier alpha notes (0.1.9–0.1.15)
+
+The sections below were moved from the main README on 15 October 2026. Some older guidance may be superseded by the [current user guide](USER-GUIDE.md).
 
 ---
 
