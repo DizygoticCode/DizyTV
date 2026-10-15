@@ -6,8 +6,8 @@ android {
         applicationId = "dev.dizygotic.dizytv"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.1.14-alpha"
+        versionCode = 16
+        versionName = "0.1.15-alpha"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
