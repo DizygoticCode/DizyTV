@@ -7,11 +7,15 @@ No URLs (including query tokens) or IP addresses are saved in reports.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import http.client
 import ipaddress
+import queue
 import socket
+import threading
+import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.parse import urljoin, urlsplit
+from urllib.request import Request
 
 from .core import ace_request_params, http_url
 
@@ -39,35 +43,122 @@ TIMEOUT = 4
 MAX_RESPONSE = 2048
 
 
-def public_stream_url(url):
-    """Do not use an untrusted playlist to probe the user's LAN or loopback."""
+def _public_endpoint(url):
+    """Resolve once and pin the actual connection to a verified public IP.
+
+    Never do DNS validation with one lookup and then let the HTTP library do
+    a second, potentially private, lookup when opening the socket.
+    """
     url = http_url(url)
     parsed = urlsplit(url)
     hostname = (parsed.hostname or '').lower().rstrip('.')
-    if hostname in ('localhost', 'localhost.localdomain') or hostname.endswith(('.localhost','.local','.internal')):
+    if parsed.username or parsed.password:
+        raise ValueError('Embedded URL credentials are not accepted')
+    if hostname in ('localhost', 'localhost.localdomain') or hostname.endswith(
+            ('.localhost', '.local', '.internal')):
         raise ValueError('Local or private endpoints are not scanned')
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
     try:
-        address = ipaddress.ip_address(hostname)
+        literal = ipaddress.ip_address(hostname)
     except ValueError:
-        # Reject domain names that currently resolve to local/private networks.
-        # Revalidation also applies to all redirects below.
-        addresses = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme=='https' else 80),
-                                        type=socket.SOCK_STREAM)
+        addresses = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
         if not addresses:
             raise ValueError('Unable to resolve host')
-        for record in addresses:
-            address = ipaddress.ip_address(record[4][0])
-            if not address.is_global:
-                raise ValueError('Local or private endpoints are not scanned')
+        ips = [ipaddress.ip_address(entry[4][0]) for entry in addresses]
     else:
-        if not address.is_global:
-            raise ValueError('Local or private endpoints are not scanned')
-    return url
+        ips = [literal]
+    if any(not ip.is_global for ip in ips):
+        raise ValueError('Local or private endpoints are not scanned')
+    return url, parsed, str(ips[0]), port
 
 
-class PublicRedirect(HTTPRedirectHandler):
-    def redirect_request(self,req,fp,code,msg,headers,newurl):
-        return super().redirect_request(req,fp,code,msg,headers,public_stream_url(newurl))
+def public_stream_url(url):
+    """Validate an HTTP stream URL against local/private network access."""
+    return _public_endpoint(url)[0]
+
+
+def _probe_public(url, timeout):
+    """Direct public-IP-only HTTP probe; TLS still verifies the real hostname."""
+    deadline = time.monotonic() + timeout
+    current = url
+    for hop in range(4):
+        clean, parsed, pinned_ip, port = _public_endpoint(current)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Stream probe deadline exceeded')
+        host = parsed.hostname
+        connection_type = (http.client.HTTPSConnection if parsed.scheme == 'https'
+                           else http.client.HTTPConnection)
+        conn = connection_type(host, port, timeout=remaining)
+
+        def create_pinned_connection(_target, connect_timeout=None, source_address=None):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError('Stream probe deadline exceeded')
+            return socket.create_connection((pinned_ip, port), timeout=left,
+                                            source_address=source_address)
+
+        # http.client calls this for the actual socket. For HTTPS it retains
+        # the original host for SNI and certificate hostname verification.
+        conn._create_connection = create_pinned_connection
+        try:
+            target = parsed.path or '/'
+            if parsed.query:
+                target += '?' + parsed.query
+            conn.request('GET', target, headers={
+                'User-Agent': 'Mozilla/5.0 (compatible; DizyTV/0.1)',
+                'Range': 'bytes=0-2047', 'Accept': '*/*',
+            })
+            response = conn.getresponse()
+            status = response.status
+            if status in (301, 302, 303, 307, 308):
+                location = response.getheader('Location')
+                if not location:
+                    return 'unverified', 'Redirect response has no destination'
+                if hop == 3:
+                    return 'unverified', 'Too many stream redirects'
+                # The next iteration revalidates and pins every redirect hop.
+                current = urljoin(clean, location)
+                continue
+            # read1 samples only the first available chunk: read(2048) could
+            # otherwise wait forever for a slow trickle to fill the buffer.
+            data = response.read1(MAX_RESPONSE)
+            return interpret_http(status, response.getheader('Content-Type', ''), data)
+        finally:
+            conn.close()
+    return 'unverified', 'Too many stream redirects'
+
+
+# A per-channel daemon enforces an actual UI deadline even for a hostile slow
+# DNS resolver or HTTP headers trickling below a socket-level timeout. Limit
+# outstanding probes so timed-out daemon threads cannot create unbounded sockets.
+_PROBE_SLOTS = threading.BoundedSemaphore(MAX_WORKERS)
+
+
+def _bounded_probe(url, timeout):
+    result = queue.Queue(maxsize=1)
+
+    def worker():
+        if not _PROBE_SLOTS.acquire(blocking=False):
+            result.put(('unreachable', 'Stream checker is busy; retry later'))
+            return
+        try:
+            try:
+                result.put(_probe_public(url, timeout))
+            except ValueError:
+                result.put(('skipped', 'Private/untrusted stream or invalid address; not probed'))
+            except (URLError, TimeoutError, socket.timeout, OSError, http.client.HTTPException):
+                result.put(('unreachable', 'Stream connection failed or timed out from this network'))
+            except Exception:
+                result.put(('unreachable', 'Unexpected stream probe failure'))
+        finally:
+            _PROBE_SLOTS.release()
+
+    threading.Thread(target=worker, daemon=True, name='dizytv-health-probe').start()
+    try:
+        return result.get(timeout=timeout)
+    except queue.Empty:
+        return 'unreachable', 'Stream check exceeded the overall time limit'
 
 
 def interpret_http(code, content_type='', body=b''):
@@ -94,26 +185,33 @@ def interpret_http(code, content_type='', body=b''):
 
 def check_channel(channel, timeout=TIMEOUT, opener=None):
     """Classify one channel without reading whole streams or exposing its URL."""
-    if ace_request_params(channel.get('stream','')) is not None:
-        return {'status':'engine-required','detail':'Ace peer/session playback must be checked manually (not HTTP scanned)'}
+    if ace_request_params(channel.get('stream', '')) is not None:
+        return {'status': 'engine-required',
+                'detail': 'Ace peer/session playback must be checked manually (not HTTP scanned)'}
     try:
-        stream=public_stream_url(channel['stream'])
-        client=opener if opener is not None else build_opener(PublicRedirect()).open
-        request=Request(stream,headers={'User-Agent':'Mozilla/5.0 (compatible; DizyTV/0.1)',
-                                      'Range':'bytes=0-2047','Accept':'*/*'})
-        with client(request,timeout=timeout) as response:
-            # Some providers redirect to an unrelated private address.
-            public_stream_url(response.geturl())
-            data=response.read(MAX_RESPONSE)
-            status,detail=interpret_http(response.status,response.headers.get('Content-Type',''),data)
-            return {'status':status,'detail':detail}
+        if opener is None:
+            # Production uses pinned sockets rather than urllib's second DNS
+            # lookup, and a strict overall deadline even for slow responders.
+            status, detail = _bounded_probe(channel['stream'], timeout)
+        else:
+            # Optional test-injected opener; never used for live network I/O.
+            stream = public_stream_url(channel['stream'])
+            request = Request(stream, headers={
+                'User-Agent': 'Mozilla/5.0 (compatible; DizyTV/0.1)',
+                'Range': 'bytes=0-2047', 'Accept': '*/*',
+            })
+            with opener(request, timeout=timeout) as response:
+                public_stream_url(response.geturl())
+                data = response.read1(MAX_RESPONSE) if hasattr(response, 'read1') else response.read(MAX_RESPONSE)
+                status, detail = interpret_http(
+                    response.status, response.headers.get('Content-Type', ''), data)
     except HTTPError as exc:
-        status,detail=interpret_http(exc.code)
-    except (ValueError,KeyError) as exc:
-        status,detail='skipped','Private/untrusted stream or invalid address; not probed'
-    except (URLError,TimeoutError,socket.timeout,OSError):
-        status,detail='unreachable','Stream connection failed or timed out from this network'
-    return {'status':status,'detail':detail}
+        status, detail = interpret_http(exc.code)
+    except (ValueError, KeyError):
+        status, detail = 'skipped', 'Private/untrusted stream or invalid address; not probed'
+    except (URLError, TimeoutError, socket.timeout, OSError, http.client.HTTPException):
+        status, detail = 'unreachable', 'Stream connection failed or timed out from this network'
+    return {'status': status, 'detail': detail}
 
 
 def check_batch(channels, start=0, batch_size=BATCH_SIZE, workers=MAX_WORKERS, checker=check_channel):
