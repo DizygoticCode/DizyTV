@@ -29,11 +29,11 @@ class FreeSourceTests(unittest.TestCase):
             url='https://iptv-org.github.io/iptv/categories/'+category+'.m3u'
             self.assertIn(url,DEFAULT_PLAYLIST_URLS)
             self.assertIn('Free ',source_label(url))
-        self.assertEqual(16,len(DEFAULT_PLAYLIST_URLS))
-        self.assertEqual(17,len(FREE_PLAYLISTS))
+        self.assertEqual(19,len(DEFAULT_PLAYLIST_URLS))
+        self.assertEqual(20,len(FREE_PLAYLISTS))
         state=default_state()
         self.assertEqual(DEFAULT_PLAYLIST_URLS,state['settings']['playlist_urls'])
-        self.assertEqual(16,len(configured_playlists(state['settings'])))
+        self.assertEqual(19,len(configured_playlists(state['settings'])))
 
     def test_same_stream_is_searchable_under_region_and_series_feeds(self):
         from dizytv.sources import FREE_PLAYLISTS
@@ -78,6 +78,17 @@ class FreeSourceTests(unittest.TestCase):
         rows,_,_=refresh_catalogue({'playlist_url':series,'playlist_urls':[series]},[],metadata)
         self.assertEqual('Sport',rows[0]['genre'])
         self.assertEqual('Australia',rows[0]['country'])
+
+    def test_free_uk_fast_presets_exist_and_us_fast_is_explicit_opt_in(self):
+        from dizytv.sources import FREE_PLAYLISTS, OPTIONAL_FAST_PLAYLISTS
+        fast={label:url for label,url,_ in FREE_PLAYLISTS}
+        for name in ('Plex FAST UK · series/24-7',
+                     'Samsung TV Plus FAST UK','Pluto TV FAST UK'):
+            self.assertIn(name,fast)
+            self.assertIn(fast[name],DEFAULT_PLAYLIST_URLS)
+        for label,url,_ in OPTIONAL_FAST_PLAYLISTS:
+            self.assertIn('US',label)
+            self.assertNotIn(url,DEFAULT_PLAYLIST_URLS)
 
     def test_default_presets_include_uk_us_and_epg(self):
         state=default_state()
