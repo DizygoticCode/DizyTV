@@ -3,6 +3,8 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import tempfile
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -187,7 +189,12 @@ class PlaybackConfigurationTests(unittest.TestCase):
             window.close()
 
     def test_stats_readers_release_retained_media_on_all_paths(self):
-        with tempfile.TemporaryDirectory() as folder:
+        # Exercise ownership without importing an optional native VLC runtime.
+        # Real libVLC refcount checks are a separate playback integration test.
+        binding = SimpleNamespace(MediaStats=lambda: SimpleNamespace(
+            decoded_audio=0, decoded_video=0, displayed_pictures=0,
+            played_abuffers=0, lost_pictures=0, demux_bitrate=0.0, input_bitrate=0.0))
+        with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, {'vlc': binding}):
             window = MainWindow(Store(folder), start_worker=False)
             usage = SystemUsageDialog(window)
             window.player = Mock()
