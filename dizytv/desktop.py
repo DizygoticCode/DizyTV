@@ -338,8 +338,9 @@ def diagnose_video_output(decoded_audio, decoded_video, displayed_pictures,
         return None
     if decoded_video > 0:
         return ('Audio and video are decoding, but VLC is displaying no video '
-                'frames. Suspect libVLC video rendering / output / hardware '
-                'acceleration on this PC.')
+                'frames. A decoder count does not prove a usable frame or '
+                'keyframe. Check damaged segments, missing keyframes, codec '
+                'support and libVLC video output / hardware acceleration.')
     if video_tracks is not None and video_tracks > 0:
         return ('Audio is playing and a video track exists, but VLC is not '
                 'decoding video frames. Suspect the codec, damaged source, '
@@ -1160,12 +1161,16 @@ class ChannelHealthDialog(QDialog):
     def reset_filter(self,*_):
         # Changing sources cancels any queued continuation.
         self.scan_all=False
+        total=len(self.filtered())
         self.stop_button.setEnabled(False)
-        self.scan_button.setEnabled(not self.running)
+        self.scan_button.setEnabled(not self.running and bool(total))
         self.offset=0
         self.results.clear()
         self.output.clear()
-        self.progress.setMaximum(len(self.filtered()))
+        # A 0..0 range animates as indeterminate even when there is no work.
+        self.progress.setMaximum(max(1,total))
+        self.progress.setFormat('%v / %m channels checked (%p%)' if total
+                                else '0 / 0 channels checked')
         self.progress.setValue(0)
         self.summary.setText(f'{len(self.filtered()):,} channels in this selection. '
                              'Each click probes at most 40 using four network connections.')
@@ -1176,7 +1181,7 @@ class ChannelHealthDialog(QDialog):
         self.hide_confirmed.setEnabled(False)
 
     def start_progressive_scan(self):
-        if self.running:return
+        if self.running or not self.filtered():return
         if self.offset>=len(self.filtered()):
             self.offset=0
             self.results.clear()
@@ -1193,10 +1198,25 @@ class ChannelHealthDialog(QDialog):
         self.scan_all=False
         self.stop_button.setEnabled(False)
         self.scan_button.setEnabled(not self.running)
+        self.batch_button.setEnabled(not self.running and self.offset<len(self.filtered()))
         if self.running:
             self.summary.setText('Stopping after current batch; completed results will be retained.')
         else:
             self.summary.setText(f'Paused after {self.offset:,} / {len(self.filtered()):,} channels.')
+
+    def closeEvent(self,event):
+        self.stop_progressive_scan()
+        super().closeEvent(event)
+
+    def reject(self):
+        # Escape rejects a QDialog without going through closeEvent.
+        self.stop_progressive_scan()
+        super().reject()
+
+    def continue_progressive_scan(self):
+        # Stop/Close/Escape may arrive after a continuation has been queued.
+        if self.scan_all:
+            self.check_next()
 
     def check_selected(self):
         # This dialog is modeless: the main window's selection can change.
@@ -1286,7 +1306,6 @@ class ChannelHealthDialog(QDialog):
                                  'Results are network reachability hints, not playback proof.'+
                                  (' Previous-result cache could not be saved.' if history_error else ''))
             total=len(self.filtered())
-            self.batch_button.setEnabled(self.offset<total and not self.scan_all)
             self.batch_button.setText('Check next 40')
             if self.scan_all and self.offset<total:
                 # A provider telling us to slow down is a reason to pause,
@@ -1295,9 +1314,10 @@ class ChannelHealthDialog(QDialog):
                     self.scan_all=False
                     self.summary.setText('Paused on provider HTTP 429 rate limit. '+self.summary.text())
                 else:
-                    QTimer.singleShot(0,self.check_next)
+                    QTimer.singleShot(0,self.continue_progressive_scan)
             if self.offset>=total:
                 self.scan_all=False
+            self.batch_button.setEnabled(self.offset<total and not self.scan_all)
             self.stop_button.setEnabled(self.scan_all)
             self.scan_button.setEnabled(not self.scan_all)
             self.selected_button.setEnabled(True)
@@ -1308,7 +1328,8 @@ class ChannelHealthDialog(QDialog):
             self.stop_button.setEnabled(False)
             self.scan_button.setEnabled(True)
             self.source.setEnabled(True)
-            self.summary.setText('Health check failed; retry the batch. '+message[:120])
+            # Transport errors can contain signed stream URLs or credentials.
+            self.summary.setText('Health check failed; retry the batch.')
             self.batch_button.setEnabled(True)
             self.recheck_button.setEnabled(self.last_batch_start is not None)
             self.selected_button.setEnabled(True)
@@ -1513,7 +1534,6 @@ class SystemUsageDialog(QDialog):
         self.timer=QTimer(self)
         self.timer.setInterval(1250)
         self.timer.timeout.connect(self.refresh_snapshot)
-        self.timer.start()
         self.refresh_snapshot()
 
     @staticmethod
@@ -1546,6 +1566,7 @@ class SystemUsageDialog(QDialog):
             'Player state: '+(str(owner.player.get_state()) if owner.player else 'Stopped'),
         ]
         if owner.player is not None:
+            media=None
             try:
                 import vlc
                 media=owner.player.get_media()
@@ -1561,7 +1582,17 @@ class SystemUsageDialog(QDialog):
                     ])
             except (AttributeError,RuntimeError,TypeError,OSError):
                 lines.append('VLC playback counters unavailable')
+            finally:
+                if media is not None:media.release()
         self.details.setPlainText('\n'.join(lines))
+
+    def showEvent(self,event):
+        self.timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self,event):
+        self.timer.stop()
+        super().hideEvent(event)
 
     def closeEvent(self,event):
         self.timer.stop()
@@ -1579,6 +1610,7 @@ class MainWindow(QMainWindow):
         self._subtitle_track_signature=()
         self._vlc_subtitle_profile=None
         self._playback_url=''
+        self._play_request_serial=0
         self._auto_caption_worker=None
         self._auto_caption_worker_serial=None
         self._auto_caption_stopping=False
@@ -1592,6 +1624,10 @@ class MainWindow(QMainWindow):
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
         self._video_issue_notified=False
+        self._direct_video_sample=None
+        self._direct_video_progress=0
+        self._direct_video_stalled=False
+        self._active_direct_video=False
         self.detached_controls=None;self.detached_hide_timer=QTimer(self)
         self.detached_hide_timer.setSingleShot(True)
         self.detached_hide_timer.timeout.connect(self.hide_detached_controls)
@@ -1810,7 +1846,7 @@ class MainWindow(QMainWindow):
         bar=self.controls_scroll.horizontalScrollBar()
         bar.rangeChanged.connect(self.sync_player_button_arrows)
         bar.valueChanged.connect(lambda _value:self.sync_player_button_arrows())
-        QTimer.singleShot(0,self.sync_player_button_arrows)
+        QTimer.singleShot(0,self,self.sync_player_button_arrows)
         self.tv_controls=controls
         for item in range(controls.count()):
             widget=controls.itemAt(item).widget()
@@ -2038,7 +2074,7 @@ class MainWindow(QMainWindow):
             finally:
                 self.country_tree.setUpdatesEnabled(True)
             if start+250<len(ordered):
-                QTimer.singleShot(0,lambda:fill(start+250))
+                QTimer.singleShot(0,self.country_tree,lambda:fill(start+250))
         fill()
 
     def country_tree_clicked(self,item,*_):
@@ -2149,15 +2185,20 @@ class MainWindow(QMainWindow):
         genre=self.genre_filter.currentData()
         by_channel,_=self.guide_index()
         resolved={}
+        guide_channels={}
         programmes=[]
         end=self.guide_start+6*3600
         for ch in channels:
             key=self.matched_guide(ch)
             resolved[ch['id']]=key
+            # Alternate streams can share an EPG ID. Index its programmes once
+            # so every row paints one copy, preserving the active genre union.
+            guide_channels[key]=guide_channels.get(key,False) or not genre or ch.get('genre','Unspecified')==genre
+        for key,all_genres in guide_channels.items():
             for p in by_channel.get(key,()):
                 if not (p['start']<end and p['end']>self.guide_start):
                     continue
-                if genre and ch.get('genre','Unspecified')!=genre and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
+                if not all_genres and genre not in {normalise_genre(c) for c in p.get('categories',[])}:
                     continue
                 programmes.append(p)
         self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
@@ -2197,7 +2238,7 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
-        QTimer.singleShot(0,self.sync_player_button_arrows)
+        QTimer.singleShot(0,self,self.sync_player_button_arrows)
 
     def scroll_player_buttons(self,step):
         bar=self.controls_scroll.horizontalScrollBar()
@@ -2225,7 +2266,8 @@ class MainWindow(QMainWindow):
             # Direct HTTP/HLS and Ace playback has no local timeshift watchdog.
             # Do not report an otherwise healthy Playing stream as buffering
             # just because last_good_video was set when playback started.
-            if self.timeshift is None:return 'live'
+            if self.timeshift is None:
+                return 'buffering' if self._direct_video_stalled else 'live'
             return 'live' if time.monotonic()-self.last_good_video<18 else 'buffering'
         return 'buffering'
 
@@ -2266,6 +2308,7 @@ class MainWindow(QMainWindow):
         """Inspect actual video and audio counters without restarting playback."""
         if not self.player or not self.playback_started:
             return None
+        media=None
         try:
             import vlc
             media=self.player.get_media()
@@ -2280,21 +2323,54 @@ class MainWindow(QMainWindow):
                 int(stats.displayed_pictures),tracks if tracks>=0 else None,size)
         except (AttributeError,TypeError,RuntimeError,OSError):
             return None
+        finally:
+            if media is not None:media.release()
 
-    def media_activity(self):
+    def media_activity(self,video_only=False):
         """VLC's decoded picture/audio counters catch freezes with State.Playing.
 
         Older VLC builds may not provide stats; do not guess in that case.
         """
+        media=None
         try:
             import vlc
             media=self.player.get_media()
             if media is None:return None
             stats=vlc.MediaStats()
             if not media.get_stats(stats):return None
+            if video_only:return int(stats.displayed_pictures)
             return int(stats.displayed_pictures)+int(stats.played_abuffers)
         except (AttributeError,TypeError,RuntimeError,OSError):
             return None
+        finally:
+            if media is not None:media.release()
+
+    def check_direct_playback(self,now=None):
+        """Warn about frozen HTTP video without retrying or touching Ace sessions.
+
+        Audio may keep advancing while the last video frame is frozen. Only
+        observe displayed pictures, after this session has displayed a frame;
+        unavailable stats and an intentional pause are not evidence of a stall.
+        """
+        now=time.monotonic() if now is None else now
+        active=(self.player and self.playback_started and self.timeshift is None
+                and self._active_direct_video
+                and str(self.player.get_state()).endswith('.Playing'))
+        frames=self.media_activity(video_only=True) if active else None
+        if frames is None or frames<=0:
+            self._direct_video_sample=None
+            self._direct_video_progress=now
+            self._direct_video_stalled=False
+            return
+        if frames!=self._direct_video_sample:
+            self._direct_video_sample=frames
+            self._direct_video_progress=now
+            self._direct_video_stalled=False
+        elif now-self._direct_video_progress>=18 and not self._direct_video_stalled:
+            self._direct_video_stalled=True
+            self.status.setText('Video frame counter stopped advancing for 18 seconds. '
+                                'The source, segments or video output may be stalled; '
+                                'try another feed or check System usage decoder counters.')
 
     def check_live_timeshift(self,now=None):
         """Recover VLC buffering/errors only if the local cache is still growing.
@@ -2348,6 +2424,7 @@ class MainWindow(QMainWindow):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
         self.check_live_timeshift()
+        self.check_direct_playback()
         self.sync_subtitles()
         if self._auto_caption_overlay is not None and time.monotonic()-self._auto_caption_updated>6:
             self._auto_caption_overlay.hide()
@@ -2864,6 +2941,7 @@ class MainWindow(QMainWindow):
     def play_url(self,url):
         self.stop_auto_captions()
         self._playback_url=url
+        self._active_direct_video=False
         try:
             self.init_player()
             self.player.stop()
@@ -2875,9 +2953,12 @@ class MainWindow(QMainWindow):
                 # Apply only to direct network media, not captured local DVR.
                 # VLC's per-media network caching is preferable to global
                 # decoder/reclock changes, and avoids changing working Ace sessions.
+                from .core import ace_id
                 direct=(self.selected is not None and
-                        not str(self.selected.get('stream','')).startswith(
-                            ('acestream:', 'acestream://')) and self.timeshift is None)
+                        not ace_id(self.selected.get('stream','')) and self.timeshift is None)
+                # Browsing a different channel must not change how we monitor
+                # the media already playing, especially an Ace engine session.
+                self._active_direct_video=bool(direct and channel_kind(self.selected)!='Radio')
                 if direct:
                     media.add_option(':network-caching='+str(
                         self.state['settings'].get('http_buffer_ms',4000)))
@@ -2889,6 +2970,9 @@ class MainWindow(QMainWindow):
             self.playback_started=time.monotonic(); self.playback_reported=False
             self._last_media_activity=None
             self._video_issue_notified=False
+            self._direct_video_sample=None
+            self._direct_video_progress=0
+            self._direct_video_stalled=False
             self.last_good_video=time.monotonic()
             self.source_check_serial+=1
             self.pause_button.setText('⏸ Pause')
@@ -3064,9 +3148,16 @@ class MainWindow(QMainWindow):
         ch=self.selected
         url=stream_url(ch['stream'],self.state['settings']['engine_url'])
         from .core import ace_id
-        if ace_id(ch['stream']):
-            if self.engine_task is not None:
-                self.status.setText('Ace Stream engine startup is already in progress…'); return
+        is_ace=ace_id(ch['stream']) is not None
+        if is_ace and self.engine_task is not None:
+            self.status.setText('Ace Stream engine startup is already in progress…'); return
+        if not is_ace:
+            # Supersede pending Ace preparation when tuning a direct channel.
+            # Its late callbacks must neither start video nor block a new Ace request.
+            self.engine_task=None
+        self._play_request_serial+=1
+        serial=self._play_request_serial
+        if is_ace:
             self.status.setText('Connecting to Ace Engine and preparing channel; waiting for available peers…')
             def prepare():
                 ensure_ready(self.state['settings']['engine_url'],
@@ -3075,10 +3166,12 @@ class MainWindow(QMainWindow):
             task=Task(prepare)
             self.engine_task=task
             def ready(playback_url):
+                if serial!=self._play_request_serial or self.engine_task is not task:return
                 self.engine_task=None
                 if self.selected and self.selected['id']==ch['id']:
                     self.play_stream(playback_url)
             def failed(message):
+                if serial!=self._play_request_serial or self.engine_task is not task:return
                 self.engine_task=None
                 if self.selected and self.selected['id']==ch['id']:
                     self.status.setText('Ace playback failed: '+message)
@@ -3538,6 +3631,9 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def stop_playback(self):
+        self._play_request_serial+=1
+        self.engine_task=None
+        self.source_check_serial+=1
         self.stop_auto_captions()
         if self.player:self.player.stop()
         self.close_timeshift()
@@ -3597,6 +3693,10 @@ class MainWindow(QMainWindow):
             selected,ok=QInputDialog.getItem(self,'Play recording segment','An interrupted recording contains multiple preserved files',paths,0,False)
             if not ok:return
         else:selected=paths[0]
+        # A recording is a new playback request: detach the live capture and
+        # pending engine callback before its watchdog or seek controls can
+        # redirect the file back to LIVE.
+        self.stop_playback()
         self.play_url(str(Path(selected).resolve()))
     def delete_file(self):
         job=self.selected_job()
@@ -3640,6 +3740,12 @@ class MainWindow(QMainWindow):
             self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
+        # Modeless tools may own timers or queued progressive work. Hiding the
+        # main window does not close them, so route shutdown through their
+        # cancellation/cleanup handlers before stopping the player.
+        for name in ('health_dialog','duplicate_dialog','usage_dialog'):
+            dialog=getattr(self,name,None)
+            if dialog is not None:dialog.close()
         for timer in (self.light_timer,self.detached_hide_timer,
                       self.detached_mouse_timer,self.clock,
                       self.refresh_clock,self.guide_clock):

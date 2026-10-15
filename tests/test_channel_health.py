@@ -1,4 +1,5 @@
 import time
+import threading
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -139,6 +140,94 @@ class HealthTests(unittest.TestCase):
             elapsed = time.monotonic() - started
         self.assertEqual('unreachable', result['status'])
         self.assertLess(elapsed, .15)
+
+    def test_rate_limit_headers_are_classified_without_waiting_for_a_body(self):
+        class Response:
+            status=429
+            def getheader(self,name,default=''):
+                return default
+            def read1(self,count):
+                raise TimeoutError('The provider stalls its error body')
+        class Connection:
+            def __init__(self,*args,**kwargs): pass
+            def request(self,*args,**kwargs): pass
+            def getresponse(self): return Response()
+            def close(self): pass
+        with patch('dizytv.channel_health.socket.getaddrinfo',return_value=[
+                (2,1,6,'',('8.8.8.8',80))]), \
+             patch('dizytv.channel_health.http.client.HTTPConnection',Connection):
+            result=check_channel({'stream':'http://public.example/stream'},timeout=2)
+        self.assertEqual('rate-limited',result['status'])
+
+    def test_rate_limit_stops_unstarted_channels_and_returns_checked_prefix(self):
+        channels=[{'id':str(i),'name':'Channel '+str(i)} for i in range(40)]
+        def checker(channel):
+            return {'status':'rate-limited' if channel['id']=='2' else 'unverified',
+                    'detail':'Fixture result'}
+        results,offset=check_batch(channels,workers=1,checker=checker)
+        self.assertEqual(['0','1','2'],[row['id'] for row in results])
+        self.assertEqual(3,offset)
+        resumed,end=check_batch(channels,start=offset,workers=1,
+                               checker=lambda _:dict(status='unverified',detail='Fixture result'))
+        self.assertEqual([str(i) for i in range(3,40)],[row['id'] for row in resumed])
+        self.assertEqual(40,end)
+
+    def test_unexpected_checker_exception_is_safe_and_does_not_skip_following_channels(self):
+        channels=[{'id':str(i),'name':'Channel '+str(i)} for i in range(5)]
+        def checker(channel):
+            if channel['id']=='2':
+                raise RuntimeError('https://user:password@provider.example/live?token=secret')
+            return {'status':'unverified','detail':'Fixture result'}
+        results,offset=check_batch(channels,checker=checker)
+        self.assertEqual(5,offset)
+        self.assertEqual([str(i) for i in range(5)],[row['id'] for row in results])
+        self.assertEqual('unreachable',results[2]['status'])
+        self.assertNotIn('secret',str(results))
+        self.assertNotIn('password',str(results))
+
+    def test_rate_limit_keeps_only_the_already_running_four_channel_prefix(self):
+        channels=[{'id':str(i),'name':'Channel '+str(i)} for i in range(40)]
+        blocked=threading.Event()
+        def checker(channel):
+            if channel['id']=='3':
+                return {'status':'rate-limited','detail':'Fixture rate limit'}
+            blocked.wait(.2)
+            return {'status':'unverified','detail':'Fixture result'}
+        results,offset=check_batch(channels,workers=4,checker=checker)
+        self.assertEqual(4,offset)
+        self.assertEqual(['0','1','2','3'],[row['id'] for row in results])
+        self.assertEqual('rate-limited',results[-1]['status'])
+
+    def test_mixed_public_and_private_dns_answers_are_rejected(self):
+        with patch('dizytv.channel_health.socket.getaddrinfo',return_value=[
+                (2,1,6,'',('8.8.8.8',443)),(2,1,6,'',('10.0.0.1',443))]):
+            with self.assertRaises(ValueError):
+                public_stream_url('https://mixed.example/live?token=secret')
+
+    def test_embedded_credentials_are_rejected_without_a_dns_lookup(self):
+        with patch('dizytv.channel_health.socket.getaddrinfo') as resolve:
+            with self.assertRaises(ValueError):
+                public_stream_url('https://user:password@public.example/live')
+        resolve.assert_not_called()
+
+    def test_timed_out_probes_do_not_create_unbounded_background_connections(self):
+        release=threading.Event()
+        slots=threading.BoundedSemaphore(1)
+        def stalled_probe(*_):
+            release.wait(.5)
+            return ('unverified','Fixture result')
+        with patch('dizytv.channel_health._PROBE_SLOTS',slots), \
+             patch('dizytv.channel_health._probe_public',side_effect=stalled_probe) as probe:
+            try:
+                first=check_channel({'stream':'https://public.example/a'},timeout=.02)
+                second=check_channel({'stream':'https://public.example/b'},timeout=.02)
+                self.assertEqual('unreachable',first['status'])
+                self.assertIn('busy',second['detail'])
+                self.assertEqual(1,probe.call_count)
+            finally:
+                release.set()
+                self.assertTrue(slots.acquire(timeout=1))
+                slots.release()
 
 
 

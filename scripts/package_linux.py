@@ -24,7 +24,7 @@ output=ROOT/'dist'/f'DizyTV-{VERSION}-linux-amd64.deb'
 with tempfile.TemporaryDirectory(prefix='dizytv-deb-') as folder:
     root=Path(folder)
     app=root/'opt'/'dizytv'
-    shutil.copytree(TARGET,app)
+    shutil.copytree(TARGET,app,symlinks=True)
     (app/'DizyTV').chmod(0o755)
     bin_dir=root/'usr'/'bin'
     bin_dir.mkdir(parents=True)
@@ -52,5 +52,13 @@ with tempfile.TemporaryDirectory(prefix='dizytv-deb-') as folder:
         'Description: DizyTV native live television player\n'
         ' Local TV player with XMLTV guides and recordings.\n'
         ' Uses system libVLC and separately installed Ace Stream engine.\n')
+    # The package becomes root-owned: a restrictive build umask must not leave
+    # users unable to read its libraries or traverse its installation paths.
+    root.chmod(0o755)
+    for path in root.rglob('*'):
+        if path.is_symlink():
+            continue
+        executable=path.is_dir() or path.stat().st_mode & 0o111
+        path.chmod(0o755 if executable else 0o644)
     subprocess.run(['dpkg-deb','--build','--root-owner-group',str(root),str(output)],check=True)
 print(output)

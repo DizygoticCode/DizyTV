@@ -37,12 +37,13 @@ class HealthHistory:
             for cid,row in obj.items():
                 if (isinstance(cid,str) and 1<=len(cid)<=128
                     and isinstance(row,dict)
+                    and isinstance(row.get('status'),str)
                     and row.get('status') in KNOWN_STATUSES
                     and type(row.get('checked')) is int
                     and 0<=now-row['checked']<=MAX_AGE_SECONDS):
                     valid[cid]={'status':row['status'],'checked':row['checked']}
             return valid
-        except (OSError,ValueError,TypeError):
+        except (OSError,ValueError,TypeError,RecursionError):
             return {}
 
     def read(self):

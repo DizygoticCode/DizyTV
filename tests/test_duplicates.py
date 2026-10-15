@@ -67,6 +67,26 @@ class DuplicateTests(unittest.TestCase):
             }),encoding='utf-8')
             self.assertEqual(['fresh'],list(h.read()))
 
+    def test_malformed_status_does_not_discard_other_saved_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            h=HealthHistory(Store(tmp))
+            now=int(time.time())
+            Path(tmp,'health-results.json').write_text(json.dumps({
+                'fresh':{'status':'missing','checked':now},
+                'malformed':{'status':['missing'],'checked':now},
+            }),encoding='utf-8')
+            self.assertEqual({'fresh':{'status':'missing','checked':now}},h.read())
+
+    def test_deeply_malformed_cache_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            h=HealthHistory(Store(tmp))
+            Path(tmp,'health-results.json').write_text('['*20000+']'*20000,encoding='utf-8')
+            try:
+                rows=h.read()
+            except RecursionError:
+                self.fail('A corrupt optional health cache must not prevent opening the viewer')
+            self.assertEqual({},rows)
+
 
 if __name__=='__main__':
     unittest.main()

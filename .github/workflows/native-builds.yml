@@ -205,6 +205,10 @@ jobs:
           dpkg-deb --extract dist/DizyTV-0.1.16-alpha-linux-amd64.deb smoke-installed
           test -x smoke-installed/usr/bin/dizytv
           test -f smoke-installed/usr/share/applications/dizytv.desktop
+          if find smoke-installed/opt/dizytv -name 'libvlc*.so*' -print -quit | grep -q .; then
+            echo 'Linux package must use the system libVLC libraries and matching plugins' >&2
+            exit 1
+          fi
           smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
           sha256sum dist/DizyTV-0.1.16-alpha-linux-amd64.deb > dist/DizyTV-0.1.16-alpha-linux-amd64.deb.sha256
       - uses: actions/upload-artifact@v4
