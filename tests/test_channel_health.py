@@ -1,8 +1,10 @@
+import time
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 from dizytv.channel_health import (
-    public_stream_url,interpret_http,check_channel,check_batch,BATCH_SIZE,MAX_WORKERS
+    public_stream_url,interpret_http,check_channel,check_batch,BATCH_SIZE,MAX_WORKERS,
+    _probe_public
 )
 
 
@@ -71,6 +73,73 @@ class HealthTests(unittest.TestCase):
             response=check_channel({'stream':'https://test.example/stream?secret=123'},opener=error)
         self.assertEqual('access-limited',response['status'])
         self.assertNotIn('123',str(response))
+
+
+    def test_dns_rebinding_cannot_change_connection_target_after_validation(self):
+        # A DNS reply turns private on the second lookup. The actual socket
+        # must use the first validated public IP, with no second resolution.
+        class Response:
+            status = 200
+            def getheader(self, key, default=''):
+                return 'video/mp2t' if key == 'Content-Type' else default
+            def read1(self, count):
+                return b'\x47' * 20
+
+        class Connection:
+            def __init__(self, hostname, port, timeout):
+                self.hostname = hostname
+                self.port = port
+                self.timeout = timeout
+            def request(self, *args, **kwargs):
+                self._create_connection((self.hostname, self.port), self.timeout)
+            def getresponse(self):
+                return Response()
+            def close(self):
+                pass
+
+        dns = [(2,1,6,'',('8.8.8.8',80))]
+        with patch('dizytv.channel_health.socket.getaddrinfo', side_effect=[
+                     dns, [(2,1,6,'',('127.0.0.1',80))]]) as resolve, \
+             patch('dizytv.channel_health.socket.create_connection', return_value=object()) as connect, \
+             patch('dizytv.channel_health.http.client.HTTPConnection', Connection):
+            status, _ = _probe_public('http://rebind.example/channel', 2)
+        self.assertEqual('data-response', status)
+        self.assertEqual(1, resolve.call_count)
+        self.assertEqual('8.8.8.8', connect.call_args.args[0][0])
+
+    def test_private_redirect_is_never_connected(self):
+        class Response:
+            status = 302
+            def getheader(self, name, default=''):
+                return 'http://127.0.0.1/admin' if name == 'Location' else default
+        class Connection:
+            def __init__(self, *args, **kwargs):
+                pass
+            def request(self, *args, **kwargs):
+                pass
+            def getresponse(self):
+                return Response()
+            def close(self):
+                pass
+        with patch('dizytv.channel_health.socket.getaddrinfo', return_value=[
+                    (2,1,6,'',('8.8.8.8',80))]), \
+             patch('dizytv.channel_health.http.client.HTTPConnection', Connection), \
+             patch('dizytv.channel_health.socket.create_connection') as connect:
+            with self.assertRaises(ValueError):
+                _probe_public('http://public.example/redirect', 2)
+        connect.assert_not_called()
+
+    def test_health_check_has_overall_deadline_even_when_probe_stalls(self):
+        def never_finishes(*_):
+            time.sleep(.20)
+            return ('manifest-only', 'late')
+        with patch('dizytv.channel_health._probe_public', side_effect=never_finishes):
+            started = time.monotonic()
+            result = check_channel({'stream': 'https://example.com/live'}, timeout=.02)
+            elapsed = time.monotonic() - started
+        self.assertEqual('unreachable', result['status'])
+        self.assertLess(elapsed, .15)
+
 
 
 if __name__=='__main__': unittest.main()
