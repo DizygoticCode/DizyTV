@@ -126,8 +126,8 @@ def refresh_catalogue(settings, old_channels, fetch):
     urls = configured_playlists(settings)
     if not urls:
         raise ValueError("Add at least one channel playlist in Settings")
-    if len(urls) > 24:
-        raise ValueError("Use at most 24 channel playlists")
+    if len(urls) > 32:
+        raise ValueError("Use at most 32 channel playlists")
     existing = {}
     for ch in old_channels:
         # A stream found in two directories must remain cached independently
