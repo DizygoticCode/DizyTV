@@ -21,7 +21,7 @@ from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_jo
 from .network import download
 from .sources import (configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS,
                       DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
-                      source_label)
+                      OPTIONAL_UK_RETRANSMISSIONS, source_label)
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
@@ -736,6 +736,10 @@ class Settings(QDialog):
         add_us.setToolTip('US-origin FAST listings may be unavailable outside supported regions; use only where permitted.')
         add_us.clicked.connect(self.add_optional_fast_playlists)
         form.addRow(add_us)
+        uk_candidates=QPushButton('Add UK retransmission / +1 candidates (unverified)',self)
+        uk_candidates.setToolTip('Optional independent UK sources including E4 and STV+1 candidates. Availability and access vary.')
+        uk_candidates.clicked.connect(self.add_uk_retransmissions)
+        form.addRow(uk_candidates)
         discover=QPushButton('Browse every IPTV-org country, category and language…',self)
         discover.setObjectName('browseIPTVDirectory')
         discover.clicked.connect(self.browse_iptv_directory)
@@ -915,6 +919,15 @@ class Settings(QDialog):
             return
         self.feeds.setPlainText('\n'.join(combined))
 
+    def add_uk_retransmissions(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys(existing+[url for _,url,_ in OPTIONAL_UK_RETRANSMISSIONS]))
+        if len(combined)>24:
+            QMessageBox.warning(self,'DizyTV','At most 24 playlist URLs are supported. '
+                                'Remove unused sources before adding UK retransmissions.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+
     def add_optional_fast_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys(existing + [url for _,url,_ in OPTIONAL_FAST_PLAYLISTS]))
@@ -1009,9 +1022,13 @@ class Settings(QDialog):
 class ChannelHealthDialog(QDialog):
     """Explicit per-device channel checks in manually requested 40-item batches."""
 
-    def __init__(self,state,selected,pool,parent=None):
+    def __init__(self,store,selected,pool,on_change=None,parent=None):
         super().__init__(parent)
         from .sources import configured_playlists, source_label
+        state=store.read()
+        self.store=store
+        self.on_change=on_change
+        self.last_batch_start=None
         self.setWindowTitle('Channel health — this computer')
         self.resize(725,540)
         self.pool=pool
@@ -1024,7 +1041,8 @@ class ChannelHealthDialog(QDialog):
         description=QLabel('Checks run from THIS PC (with its current VPN/network). '
                            'A responding URL does not prove video playback. '
                            'Ace streams require real engine/peer playback. '
-                           'No channels will be removed or hidden.')
+                           'Failed HTTP probes are not playback tests. Channels are never deleted; '
+                           'you can hide confirmed missing streams and restore them later.')
         description.setWordWrap(True)
         layout.addWidget(description)
         self.source=QComboBox()
@@ -1038,6 +1056,9 @@ class ChannelHealthDialog(QDialog):
         layout.addWidget(self.summary)
         self.output=QListWidget()
         layout.addWidget(self.output,1)
+        self.auto_hide=QCheckBox('Automatically hide after two consecutive 404/410 checks (opt-in)')
+        self.auto_hide.setToolTip('Only HTTP 404/410 twice for this exact channel ID. Never auto-hide 403, timeouts, Ace or HLS responses.')
+        layout.addWidget(self.auto_hide)
         actions=QHBoxLayout()
         self.selected_button=QPushButton('Check selected channel')
         self.selected_button.setEnabled(selected is not None)
@@ -1046,6 +1067,14 @@ class ChannelHealthDialog(QDialog):
         self.batch_button=QPushButton('Check next 40')
         self.batch_button.clicked.connect(self.check_next)
         actions.addWidget(self.batch_button)
+        self.recheck_button=QPushButton('Recheck last 40')
+        self.recheck_button.setEnabled(False)
+        self.recheck_button.clicked.connect(self.recheck_last)
+        actions.addWidget(self.recheck_button)
+        self.hide_confirmed=QPushButton('Hide confirmed missing')
+        self.hide_confirmed.setEnabled(False)
+        self.hide_confirmed.clicked.connect(self.hide_confirmed_missing)
+        actions.addWidget(self.hide_confirmed)
         copy=QPushButton('Copy results')
         copy.clicked.connect(self.copy_results)
         actions.addWidget(copy)
@@ -1068,6 +1097,9 @@ class ChannelHealthDialog(QDialog):
                              'Each click probes at most 40 using four network connections.')
         self.batch_button.setEnabled(not self.running and bool(self.filtered()))
         self.batch_button.setText('Check first 40')
+        self.last_batch_start=None
+        self.recheck_button.setEnabled(False)
+        self.hide_confirmed.setEnabled(False)
 
     def check_selected(self):
         if self.selected is not None:self.run_batch([self.selected],0,one=True)
@@ -1079,12 +1111,39 @@ class ChannelHealthDialog(QDialog):
             return
         self.run_batch(rows,self.offset)
 
+    def recheck_last(self):
+        if self.last_batch_start is not None:
+            self.run_batch(self.filtered(),self.last_batch_start)
+
+    def set_hidden(self,ids):
+        requested=set(ids)
+        known={ch['id'] for ch in self.rows}
+        permitted=requested & known
+        if not permitted:return 0
+        def update(state):
+            state.setdefault('disabled_channels',[])
+            state['disabled_channels']=sorted(set(state['disabled_channels'])|permitted)
+        self.store.update(update)
+        if self.on_change:self.on_change()
+        return len(permitted)
+
+    def hide_confirmed_missing(self):
+        from .channel_health import confirmed_missing_ids
+        candidate=confirmed_missing_ids(self.results)
+        count=self.set_hidden(candidate)
+        if count:
+            self.summary.setText(f'{count} confirmed-missing channel(s) hidden from browsing. '
+                                 'Enable Show disabled in the sidebar to restore any of them.')
+        self.hide_confirmed.setEnabled(False)
+
     def run_batch(self,rows,start,one=False):
         if self.running:return
         from .channel_health import check_batch, BATCH_SIZE
         self.running=True
         self.batch_button.setEnabled(False)
+        self.recheck_button.setEnabled(False)
         self.selected_button.setEnabled(False)
+        if not one:self.last_batch_start=start
         count=min(BATCH_SIZE,len(rows)-start)
         self.summary.setText(f'Checking {count} streams from this computer… '
                              'A region/DRM-dependent stream may still fail in VLC.')
@@ -1099,7 +1158,14 @@ class ChannelHealthDialog(QDialog):
                 item=QListWidgetItem(entry['name'][:90]+'  •  '+
                                      entry['status'].replace('-',' ')+
                                      ' — '+entry['detail'])
+                item.setData(Qt.UserRole,entry['id'])
                 self.output.addItem(item)
+            from .channel_health import confirmed_missing_ids
+            confirmed=confirmed_missing_ids(self.results)
+            if confirmed and self.auto_hide.isChecked():
+                self.set_hidden(confirmed)
+            self.hide_confirmed.setEnabled(bool(confirmed) and not self.auto_hide.isChecked())
+            self.recheck_button.setEnabled(self.last_batch_start is not None)
             counts={}
             for entry in self.results:
                 counts[entry['status']]=counts.get(entry['status'],0)+1
@@ -1115,6 +1181,7 @@ class ChannelHealthDialog(QDialog):
             self.running=False
             self.summary.setText('Health check failed; retry the batch. '+message[:120])
             self.batch_button.setEnabled(True)
+            self.recheck_button.setEnabled(self.last_batch_start is not None)
             self.selected_button.setEnabled(self.selected is not None)
             self.health_task=None
         task.signals.success.connect(success)
@@ -1416,7 +1483,7 @@ class MainWindow(QMainWindow):
             dialog.raise_()
             dialog.activateWindow()
             return
-        dialog=ChannelHealthDialog(self.store.read(),self.selected,self.pool,self)
+        dialog=ChannelHealthDialog(self.store,self.selected,self.pool,self.refresh_disabled_channels,self)
         self.health_dialog=dialog
         dialog.show()
 
