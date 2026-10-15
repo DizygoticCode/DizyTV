@@ -523,9 +523,8 @@ def validate_state(state):
     # Optional for existing 0.1.x user state and portable backups.
     disabled=state.get('disabled_channels', [])
     if (not isinstance(disabled,list) or len(disabled)>100000 or
-            len(disabled)!=len(set(disabled)) or
             any(not isinstance(cid,str) or not re.fullmatch('[a-f0-9]{40}',cid)
-                for cid in disabled)):
+                for cid in disabled) or len(disabled)!=len(set(disabled))):
         raise ValueError('Invalid disabled channels')
     if not isinstance(state['mappings'], dict) or len(state['mappings']) > 100000 or any(not isinstance(k,str) or not isinstance(v,str) or len(v)>512 for k,v in state['mappings'].items()):
         raise ValueError('Invalid guide mappings')
