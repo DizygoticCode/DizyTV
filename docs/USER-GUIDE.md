@@ -68,4 +68,4 @@ If importing or playback fails:
 - Check VLC 3 installation and your active stream subtitles/video decoder settings. Direct HLS performance is different from Ace engine peer health.
 - For Windows updater errors, close the visible app and finish recordings first. The installer protects an active recorder worker rather than indiscriminately killing it.
 
-More details: [Linux](LINUX.md) · [Distribution](DISTRIBUTION.md) · [Backup format](BACKUP-FORMAT.md) · [Older release notes](RELEASE-NOTES.md).
+More details: [Linux](https://github.com/DizygoticCode/DizyTV/blob/feat/progressive-health-buffering-linux-0116/docs/LINUX.md) · [Distribution](DISTRIBUTION.md) · [Backup format](BACKUP-FORMAT.md) · [Older release notes](RELEASE-NOTES.md).
