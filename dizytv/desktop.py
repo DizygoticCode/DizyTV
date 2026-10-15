@@ -1322,6 +1322,169 @@ class ChannelHealthDialog(QDialog):
         # Never put URLs, access tokens, full headers or IPs in the clipboard.
         QApplication.clipboard().setText(json.dumps(self.results,indent=2))
 
+class ChannelDuplicatesDialog(QDialog):
+    """Human-reviewed same-name candidates; never delete or auto-hide feeds."""
+
+    PAGE_GROUPS=80
+
+    def __init__(self,store,on_change=None,parent=None):
+        super().__init__(parent)
+        self.store=store
+        self.on_change=on_change
+        self.setWindowTitle('DizyTV — duplicate channel candidates')
+        self.resize(920,630)
+        self.history=HealthHistory(store)
+        self.groups=[]
+        self.matches=[]
+        self.loaded=0
+        self.disabled=set()
+        layout=QVBoxLayout(self)
+        intro=QLabel(
+            'Candidates share a channel name, country and TV/radio type, but may '
+            'be different streams, providers or quality levels. +1 and named regional '
+            'variants are kept distinct. Select individual entries to hide or restore; '
+            'nothing is deleted or hidden automatically. Last HTTP results do NOT '
+            'confirm video playback.')
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        top=QHBoxLayout()
+        self.query=QLineEdit()
+        self.query.setPlaceholderText('Filter duplicate names or providers')
+        self.query.textChanged.connect(self.refilter)
+        top.addWidget(self.query,1)
+        self.status_filter=QComboBox()
+        self.status_filter.addItem('Every previous check status','')
+        self.status_filter.addItem('Includes HTTP 404 / 410 result','missing')
+        self.status_filter.addItem('Has not been checked','unchecked')
+        self.status_filter.addItem('Includes access-limited result','access-limited')
+        self.status_filter.currentIndexChanged.connect(self.refilter)
+        top.addWidget(self.status_filter)
+        layout.addLayout(top)
+        self.tree=QTreeWidget()
+        self.tree.setObjectName('duplicateChannelTree')
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(['Channel / candidate group','Playlist source','Last HTTP result','Visibility'])
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setColumnWidth(0,300)
+        self.tree.setColumnWidth(1,215)
+        self.tree.setColumnWidth(2,205)
+        self.tree.setColumnWidth(3,90)
+        layout.addWidget(self.tree,1)
+        self.count_label=QLabel()
+        layout.addWidget(self.count_label)
+        row=QHBoxLayout()
+        self.hide_button=QPushButton('Hide selected channels')
+        self.hide_button.clicked.connect(lambda:self.update_visibility(True))
+        row.addWidget(self.hide_button)
+        self.restore_button=QPushButton('Restore selected channels')
+        self.restore_button.clicked.connect(lambda:self.update_visibility(False))
+        row.addWidget(self.restore_button)
+        self.more_button=QPushButton('Load 80 more groups')
+        self.more_button.clicked.connect(self.show_more)
+        row.addWidget(self.more_button)
+        self.refresh_button=QPushButton('Refresh last results')
+        self.refresh_button.clicked.connect(self.refresh)
+        row.addWidget(self.refresh_button)
+        close=QPushButton('Close')
+        close.clicked.connect(self.close)
+        row.addWidget(close)
+        layout.addLayout(row)
+        self.refresh()
+
+    def refresh(self):
+        state=self.store.read()
+        self.groups=duplicate_groups(state['channels'])
+        self.disabled=set(state.get('disabled_channels',()))
+        self.latest=self.history.read()
+        self.refilter()
+
+    def refilter(self,*_):
+        query=self.query.text().casefold().strip()
+        check=self.status_filter.currentData()
+        matches=[]
+        for key,rows in self.groups:
+            if query:
+                if query not in key[0] and not any(
+                        query in source_label((r.get('sources') or
+                                  [r.get('source','')])[0]).casefold()
+                        for r in rows):
+                    continue
+            if check and not any(
+                    (r.get('id') not in self.latest if check=='unchecked'
+                     else self.latest.get(r.get('id'),{}).get('status')==check)
+                    for r in rows):
+                continue
+            matches.append((key,rows))
+        self.matches=matches
+        self.loaded=0
+        self.tree.clear()
+        self.show_more()
+
+    def show_more(self):
+        chunk=self.matches[self.loaded:self.loaded+self.PAGE_GROUPS]
+        for key,rows in chunk:
+            label=display_channel_name(rows[0].get('name',''))
+            group=QTreeWidgetItem([f'{label}  ({len(rows)} candidates · {rows[0].get("country") or "Unspecified"})'])
+            group.setFlags(group.flags() & ~Qt.ItemIsSelectable)
+            self.tree.addTopLevelItem(group)
+            for ch in rows:
+                cid=ch['id']
+                sources=ch.get('sources') or [ch.get('source','')]
+                labels=list(dict.fromkeys(source_label(u) for u in sources if u))
+                source=', '.join(labels[:2])+(' + more' if len(labels)>2 else '')
+                result=self.latest.get(cid)
+                health=('Not checked' if result is None else
+                        result['status'].replace('-',' ')+
+                        ' · '+time.strftime('%Y-%m-%d %H:%M',time.localtime(result['checked'])))
+                item=QTreeWidgetItem([
+                    display_channel_name(ch['name'])+'  ['+cid[:8]+']',
+                    source or 'Unknown playlist',health,
+                    'Hidden' if cid in self.disabled else 'Visible',
+                ])
+                item.setData(0,Qt.UserRole,cid)
+                group.addChild(item)
+        self.loaded+=len(chunk)
+        self.more_button.setEnabled(self.loaded<len(self.matches))
+        self.count_label.setText(
+            f'{len(self.groups):,} groups with matching names · '
+            f'{len(self.matches):,} matching groups · '
+            f'{self.loaded:,} displayed. Select channel entries, not group headers.')
+
+    def selected_ids(self):
+        return {item.data(0,Qt.UserRole) for item in self.tree.selectedItems()
+                if item.parent() is not None and item.data(0,Qt.UserRole)}
+
+    def update_visibility(self,hide):
+        ids=self.selected_ids()
+        if not ids:
+            self.count_label.setText('Select individual channel rows first.')
+            return
+        known={ch['id'] for ch in self.store.read()['channels']}
+        ids &= known
+        if not ids:return
+        previous=set(self.disabled)
+        def apply(state):
+            disabled=set(state.get('disabled_channels',[]))
+            if hide:disabled.update(ids)
+            else:disabled.difference_update(ids)
+            state['disabled_channels']=sorted(disabled)
+        self.store.update(apply)
+        if self.on_change:self.on_change()
+        self.disabled=set(self.store.read()['disabled_channels'])
+        for group_idx in range(self.tree.topLevelItemCount()):
+            group=self.tree.topLevelItem(group_idx)
+            for row_idx in range(group.childCount()):
+                item=group.child(row_idx)
+                cid=item.data(0,Qt.UserRole)
+                if cid in ids:
+                    item.setText(3,'Hidden' if cid in self.disabled else 'Visible')
+        changed=len(previous.symmetric_difference(self.disabled))
+        self.count_label.setText(
+            f'{changed} channels '+('hidden' if hide else 'restored')+
+            '. Changes affect the channel browser, guide and global search.')
+
+
 class SystemUsageDialog(QDialog):
     """Read-only resource and VLC diagnostic panel, sampled only while visible."""
 
