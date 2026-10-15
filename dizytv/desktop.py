@@ -21,7 +21,7 @@ from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_jo
 from .network import download
 from .sources import (configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS,
                       DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
-                      OPTIONAL_UK_RETRANSMISSIONS, source_label)
+                      OPTIONAL_UK_RETRANSMISSIONS, OPTIONAL_SHOW_LOOP_PLAYLISTS, source_label)
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
@@ -678,7 +678,7 @@ class IPTVDirectoryDialog(QDialog):
             item.setToolTip(url)
             self.results.addItem(item)
         self.status_label.setText(f'{len(visible):,} matching sources of {len(self.rows):,} published playlists '
-                                  '· select one or several; up to 24 active playlists in Settings')
+                                  '· select one or several; up to 32 active playlists in Settings')
 
     def add_selected(self):
         urls=[item.data(Qt.UserRole) for item in self.results.selectedItems()]
@@ -686,7 +686,7 @@ class IPTVDirectoryDialog(QDialog):
             self.status_label.setText('Select at least one playlist, or choose the worldwide index.')
             return
         combined=list(dict.fromkeys([*self.existing,*urls]))
-        if len(combined)>24:
+        if len(combined)>32:
             self.status_label.setText(f'Cannot activate {len(combined)} feeds at once (24 maximum). '
                                       'Select fewer, or use the single worldwide index.')
             return
@@ -733,6 +733,10 @@ class Settings(QDialog):
         add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
+        add_shows=QPushButton('Add 24/7 show / sitcom channels (US FAST sources)',self)
+        add_shows.setToolTip('Opt-in public Pluto/Plex/Samsung US feeds; find their series channels under 24/7 Shows & Loops.')
+        add_shows.clicked.connect(self.add_show_loop_playlists)
+        form.addRow(add_shows)
         add_us=QPushButton('Add optional US FAST channels (Roku and Tubi)',self)
         add_us.setToolTip('US-origin FAST listings may be unavailable outside supported regions; use only where permitted.')
         add_us.clicked.connect(self.add_optional_fast_playlists)
@@ -899,8 +903,8 @@ class Settings(QDialog):
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys(existing+DEFAULT_PLAYLIST_URLS))
-        if len(combined)>24:
-            QMessageBox.warning(self,'DizyTV','The app allows up to 24 active playlists. '
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 32 active playlists. '
                                 'Remove unused sources first to make room for the UK FAST feeds.')
             return
         self.playlists.setPlainText('\n'.join(combined))
@@ -920,11 +924,19 @@ class Settings(QDialog):
             return
         self.feeds.setPlainText('\n'.join(combined))
 
+    def add_show_loop_playlists(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys(existing+[url for _,url,_ in OPTIONAL_SHOW_LOOP_PLAYLISTS]))
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 32 active playlist sources. Remove unused ones first.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+
     def add_uk_retransmissions(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys(existing+[url for _,url,_ in OPTIONAL_UK_RETRANSMISSIONS]))
-        if len(combined)>24:
-            QMessageBox.warning(self,'DizyTV','At most 24 playlist URLs are supported. '
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','At most 32 playlist URLs are supported. '
                                 'Remove unused sources before adding UK retransmissions.')
             return
         self.playlists.setPlainText('\n'.join(combined))
@@ -932,8 +944,8 @@ class Settings(QDialog):
     def add_optional_fast_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys(existing + [url for _,url,_ in OPTIONAL_FAST_PLAYLISTS]))
-        if len(combined)>24:
-            QMessageBox.warning(self,'DizyTV','The app allows up to 24 active playlist URLs. '
+        if len(combined)>32:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 32 active playlist URLs. '
                                 'Remove duplicate/unused sources before adding the optional US FAST feeds.')
             return
         self.playlists.setPlainText('\n'.join(combined))
