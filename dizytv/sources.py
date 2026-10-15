@@ -27,7 +27,18 @@ FREE_PLAYLISTS = (
     ("Free comedy / sitcom channels", "https://iptv-org.github.io/iptv/categories/comedy.m3u", ""),
     ("Free public sports channels", "https://iptv-org.github.io/iptv/categories/sports.m3u", ""),
     ("Free-TV curated international", "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8", ""),
+    # UK FAST services: published generated channel lists, not guarantees of playback.
+    # 24/7 programme-themed stations typically originate from FAST providers.
+    ("Plex FAST UK · series/24-7", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plex_gb.m3u", "United Kingdom"),
+    ("Samsung TV Plus FAST UK", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/samsungtvplus_gb.m3u", "United Kingdom"),
+    ("Pluto TV FAST UK", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/plutotv_gb.m3u", "United Kingdom"),
     ("IPTV-org worldwide", "https://iptv-org.github.io/iptv/index.m3u", ""),
+)
+# These optional US FAST feeds may be region-restricted and are never
+# enabled automatically on British devices.
+OPTIONAL_FAST_PLAYLISTS = (
+    ("Roku FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/roku_all.m3u", "United States"),
+    ("Tubi FAST US", "https://raw.githubusercontent.com/BuddyChewChew/app-m3u-generator/main/playlists/tubi_all.m3u", "United States"),
 )
 # These guide URLs are opt-in download links; their contents are never redistributed.
 FREE_GUIDES = (
@@ -56,7 +67,7 @@ CATEGORY_HINTS = {
 
 def source_label(url):
     """Human-readable source name without exposing playlist credentials or query tokens."""
-    for label, preset, _ in FREE_PLAYLISTS:
+    for label, preset, _ in (*FREE_PLAYLISTS, *OPTIONAL_FAST_PLAYLISTS):
         if preset == url:
             return label
     if url in DIRECTORY_META:
