@@ -103,7 +103,8 @@ def install_language_model(language, root=None, opener=urlopen):
             for info in infos:
                 name=info.filename.replace('\\','/')
                 parts=name.rstrip('/').split('/')
-                if (len(parts)<2 or parts[0]!=model_name
+                if (parts[0]!=model_name
+                        or (len(parts)==1 and not info.is_dir())
                         or any(part in ('','.','..') for part in parts)
                         or info.flag_bits & 0x1
                         or (info.external_attr>>16)&0o170000==0o120000):
@@ -223,7 +224,12 @@ class LocalCaptionWorker:
                     self.on_caption(result)
                     last=result
             if not self._stop.is_set():
-                reason='Local transcription ended; stream may not provide readable audio.'
+                exit_code=process.poll()
+                if exit_code is not None and exit_code!=0:
+                    reason=('FFmpeg could not decode the selected stream audio '
+                            '(unsupported audio, missing track, expired source or denied access).')
+                else:
+                    reason='Local transcription stopped: audio stream ended or no readable speech.'
         except Exception as exc:
             if not self._stop.is_set():
                 reason='Offline caption engine stopped: '+type(exc).__name__
