@@ -17,11 +17,13 @@
   <a href="ROADMAP.md"><img alt="Read roadmap" src="https://img.shields.io/badge/Read-Roadmap-374151?style=for-the-badge" /></a>
 </p>
 
-<p align="center">Windows · Android · macOS · Linux desktop in development</p>
+<p align="center">Windows · Android · macOS · Linux desktop (.deb in 0.1.16-alpha development)</p>
 
 DizyTV brings M3U/IPTV playlists, XMLTV listings, Ace Stream and ordinary HTTP/HLS channels into a native TV interface. Browse by country, genre and category, find a programme with global search, save favourites and record broadcasts to your own storage.
 
 **Current public build:** [v0.1.15-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.15-alpha). This is a **development release**, not a verified replacement for a licensed TV service. Channels are imported from third parties, may be unavailable or geographically restricted, and may require an external player engine.
+
+**Next build in review:** [0.1.16-alpha (PR #23)](https://github.com/DizygoticCode/DizyTV/pull/23) adds native Linux packaging, playback diagnostics, more robust stream handling and large-playlist improvements. **These changes are not yet in the public downloads below.**
 
 ## Downloads
 
@@ -40,6 +42,7 @@ Direct installer links (no ZIP extraction required):
   <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
   <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
   <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/DizyTV-0.1.15-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/pull/23"><img alt="Linux DEB coming in 0.1.16 alpha" src="https://img.shields.io/badge/Linux-DEB%20Coming%20Soon-f59e0b?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
 </p>
 
 [All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.15-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
@@ -52,7 +55,7 @@ Direct installer links (no ZIP extraction required):
 1. **Install DizyTV** using the download for your device. For Ace Stream, separately install and run the appropriate engine. Direct HTTP/HLS channels do not need an Ace engine.
 2. **Add channels:** Open **Settings → Channel playlists**. Use **Add built-in free playlists** to add presets, or paste M3U links one per line; save and choose **Refresh channels**.
 3. **Add a programme guide:** Open **Settings → XMLTV sources**, save the guide URLs, then choose **Refresh guide**. Use **Map EPG** if a channel does not match its listings.
-4. **Find something to watch:** Choose a channel from the list, filter by **Country / Category / Playlist**, or use **Ctrl+K** to search all channel and programme names. The **24/7 Shows & Loops** category contains matching channel listings when available.
+4. **Find something to watch:** Choose a channel from the list, filter by **Country / Category / Playlist**, or use **Ctrl+K** to search all channel and programme names. The **24/7 Shows & Loops** category is available when matching channels are imported.
 5. **Watch:** Double-click a channel or press **Play**. Use **CC Subtitles**, **Cinema**, **Screen**, **Pop out** and **LIVE** as needed. Pause and rewind depend on source seekability or optional compatible timeshift.
 6. **Save favourites or record:** Select **★ Add / remove favourite**. For recordings, first select a storage folder under Settings, then click **Record** or schedule from the guide.
 7. **Maintain your lists:** Use **Tools → Check channel health** for a manual HTTP reachability check, and **Show disabled → Hide / restore selected** for reversible cleanup. Save your configuration with **Tools → Save local backup**.
@@ -70,9 +73,18 @@ Direct installer links (no ZIP extraction required):
 
 DizyTV **does not bundle paid IPTV subscriptions, provide DRM circumvention or guarantee any individual stream**. It can list a channel for which the broadcaster has no playable video on your network. Public links are not a substitute for authorised access.
 
-## Work in progress
+## Coming in 0.1.16-alpha (under review)
 
-[PR #23](https://github.com/DizygoticCode/DizyTV/pull/23) is adding a **native Linux .deb**, adjustable HTTP/HLS VLC buffering, **Tools → System usage**, an opt-in **progressive channel health scan**, manually reviewed **Find duplicate channels**, and a simpler UK FAST playlist/guide setup. These updates are **not in the 0.1.15 download above** until reviewed, tested and released.
+[PR #23](https://github.com/DizygoticCode/DizyTV/pull/23) contains the following **implemented but not yet released** updates to the desktop app:
+
+- **Linux x86-64:** native Ubuntu/Debian `.deb` packaging with PySide6 and installed VLC 3; optional separately installed Ace Stream Engine or an already running remote engine. Linux can use an installed FFmpeg and an optional Vosk language model for captions. [Linux setup guide](https://github.com/DizygoticCode/DizyTV/blob/feat/progressive-health-buffering-linux-0116/docs/LINUX.md).
+- **Playback diagnostics and handling:** adjustable 1–12-second HTTP/HLS network buffer (4 seconds by default); passive warning for stalled video frames while audio continues; safer cancellation of delayed Ace playback requests; direct HTTP-form Ace stream cache guard.
+- **Large catalogues:** more efficient category and search updates; lazy country-tree population. Synthetic 30,000-channel benchmarks improved substantially, but some large views may still block the UI briefly.
+- **Channel maintenance:** opt-in progressive HTTP/HLS health checks in batches of 40, cancellation on close or app shutdown, stop after batch and pause on HTTP 429; saved check history; conservative duplicate-channel grouping with reversible hide/restore.
+- **Tools → System usage:** local-only CPU, memory, disk, catalogue-size and available VLC decoder statistics.
+- **UK FAST sources:** Settings action to add public Plex, Samsung TV Plus and Pluto TV playlists with matching XMLTV guide presets, without overwriting existing sources.
+
+**Testing status:** Codex reported 219 local Python/PySide6 tests passing, 26 local Android Kotlin/JVM tests and native Linux packaging/playback-fixture checks. GitHub's [five-platform CI](https://github.com/DizygoticCode/DizyTV/actions/workflows/native-builds.yml) is still the release gate. HTTP status alone cannot establish successful decoding; real Windows catalogue performance, live third-party channels, Ace Stream sessions and physical-device playback need manual testing. **Do not treat these features as part of the published 0.1.15 installers.**
 
 ## Development and documents
 
