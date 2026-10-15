@@ -67,8 +67,12 @@ class EngineTests(unittest.TestCase):
              patch.object(engine.subprocess,'Popen') as spawn:
             self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
             spawn.assert_called_once()
-            self.assertEqual(['/opt/acestream/start-engine','--client-console'],spawn.call_args.args[0])
-            self.assertEqual('/opt/acestream',spawn.call_args.kwargs['cwd'])
+            from pathlib import Path
+            self.assertEqual('/opt/acestream/start-engine',
+                             Path(spawn.call_args.args[0][0]).as_posix())
+            self.assertEqual('--client-console',spawn.call_args.args[0][1])
+            self.assertEqual('/opt/acestream',
+                             Path(spawn.call_args.kwargs['cwd']).as_posix())
 
     def test_linux_remote_engine_is_connect_only(self):
         with patch.object(engine.sys,'platform','linux'), \
