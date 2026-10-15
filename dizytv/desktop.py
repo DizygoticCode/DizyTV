@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
 from .network import download
-from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, source_label
+from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, source_label
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
@@ -730,6 +730,10 @@ class Settings(QDialog):
         add_presets=QPushButton('Add built-in free playlists (keep existing URLs)')
         add_presets.clicked.connect(self.add_free_playlists)
         form.addRow(add_presets)
+        add_us=QPushButton('Add optional US FAST channels (Roku and Tubi)',self)
+        add_us.setToolTip('US-origin FAST listings may be unavailable outside supported regions; use only where permitted.')
+        add_us.clicked.connect(self.add_optional_fast_playlists)
+        form.addRow(add_us)
         discover=QPushButton('Browse every IPTV-org country, category and language…',self)
         discover.setObjectName('browseIPTVDirectory')
         discover.clicked.connect(self.browse_iptv_directory)
@@ -884,6 +888,15 @@ class Settings(QDialog):
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
+
+    def add_optional_fast_playlists(self):
+        existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys(existing + [url for _,url,_ in OPTIONAL_FAST_PLAYLISTS]))
+        if len(combined)>24:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 24 active playlist URLs. '
+                                'Remove duplicate/unused sources before adding the optional US FAST feeds.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
 
     def browse_iptv_directory(self):
         active=list(dict.fromkeys(u.strip() for u in self.playlists.toPlainText().splitlines()
