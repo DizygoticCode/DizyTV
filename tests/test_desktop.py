@@ -150,6 +150,56 @@ class DesktopTests(unittest.TestCase):
             dialog.close()
             window.close()
 
+    def test_24_7_filter_and_hidden_restore_apply_to_guide_and_search(self):
+        from dizytv.core import parse_playlist
+        from dizytv.global_search import GlobalSearch
+        playlist=('#EXTM3U\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Comedy",South Park\n'
+                  'https://example.com/southpark.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="News",BBC News 24/7\n'
+                  'https://example.com/news.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Entertainment",E4\n'
+                  'https://example.com/e4.m3u8\n'
+                  '#EXTINF:-1 tvg-country="GB" group-title="Entertainment",E4 +1\n'
+                  'https://example.com/e4plus.m3u8\n')
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda st:st.update(channels=parse_playlist(playlist)))
+            window=MainWindow(store,start_worker=False)
+            self.assertIsNotNone(window.sort_picker)
+            self.assertIsNotNone(window.show_disabled)
+            window.loop_filter_button.click()
+            self.assertEqual('24/7 Shows & Loops',window.section_filter.currentData())
+            self.assertEqual(1,window.channels.count())
+            self.assertEqual('South Park',window.grid.rows[0]['name'])
+            window.section_filter.setCurrentIndex(0)
+            window.sort_picker.setCurrentText('Similar names / +1')
+            names=[window.channels.item(i).data(Qt.UserRole)['name']
+                   for i in range(window.channels.count())]
+            self.assertEqual(names.index('E4')+1,names.index('E4 +1'))
+            e4=next(ch for ch in store.read()['channels'] if ch['name']=='E4')
+            target=next(window.channels.item(i) for i in range(window.channels.count())
+                        if window.channels.item(i).data(Qt.UserRole)['id']==e4['id'])
+            window.channels.setCurrentItem(target)
+            window.toggle_channel_visibility()
+            self.assertIn(e4['id'],store.read()['disabled_channels'])
+            self.assertNotIn(e4['id'],[ch['id'] for ch in window.grid.rows])
+            self.assertNotIn(e4['id'],[window.channels.item(i).data(Qt.UserRole)['id']
+                                      for i in range(window.channels.count())])
+            search=GlobalSearch(window)
+            search.query.setText('e4')
+            search.search()
+            self.assertNotIn(e4['id'],[ch['id'] for _,ch,_ in search.entries])
+            search.close()
+            window.show_disabled.setChecked(True)
+            target=next(window.channels.item(i) for i in range(window.channels.count())
+                        if window.channels.item(i).data(Qt.UserRole)['id']==e4['id'])
+            self.assertIn('⛔',target.text())
+            window.channels.setCurrentItem(target)
+            window.toggle_channel_visibility()
+            self.assertNotIn(e4['id'],store.read()['disabled_channels'])
+            window.close()
+
     def test_complete_iptv_directory_picker_filters_cities_and_imports_only_selected(self):
         from dizytv.desktop import IPTVDirectoryDialog
         with tempfile.TemporaryDirectory() as folder:
