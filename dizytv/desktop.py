@@ -19,7 +19,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
 from .network import download
-from .sources import configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS, DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, source_label
+from .sources import (configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS,
+                      DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
+                      source_label)
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
@@ -846,6 +848,10 @@ class Settings(QDialog):
                          'off by default, no cloud speech service or microphone.')
         generated.setWordWrap(True);form.addRow(generated)
         self.feeds=QPlainTextEdit('\n'.join(self.original['xmltv_urls'])); self.feeds.setPlaceholderText('One XMLTV URL per line'); self.feeds.setMaximumHeight(95); form.addRow('XMLTV sources',self.feeds)
+        fast_epg=QPushButton('Add matching UK FAST programme guides')
+        fast_epg.setToolTip('Add only the Plex/Samsung/Pluto UK XMLTV sources for playlists currently selected above.')
+        fast_epg.clicked.connect(self.add_uk_fast_guides)
+        form.addRow(fast_epg)
         self.zone=QComboBox(); self.zone.addItem('Automatic — '+detected_zone(),'auto')
         for z in sorted(available_timezones()): self.zone.addItem(z,z)
         self.zone.setCurrentIndex(max(0,self.zone.findData(self.original['timezone']))); form.addRow('Timezone',self.zone)
@@ -887,7 +893,27 @@ class Settings(QDialog):
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
-        self.playlists.setPlainText('\n'.join(dict.fromkeys(existing + DEFAULT_PLAYLIST_URLS)))
+        combined=list(dict.fromkeys(existing+DEFAULT_PLAYLIST_URLS))
+        if len(combined)>24:
+            QMessageBox.warning(self,'DizyTV','The app allows up to 24 active playlists. '
+                                'Remove unused sources first to make room for the UK FAST feeds.')
+            return
+        self.playlists.setPlainText('\n'.join(combined))
+        self.add_uk_fast_guides(silent=True)
+
+    def add_uk_fast_guides(self,silent=False):
+        active={u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()}
+        matched=[url for playlist,url in FAST_GUIDE_BY_PLAYLIST.items() if playlist in active]
+        if not matched:
+            if not silent:QMessageBox.information(self,'DizyTV','Add a UK FAST playlist (Plex, Samsung TV Plus or Pluto TV) first.')
+            return
+        existing=[u.strip() for u in self.feeds.toPlainText().splitlines() if u.strip()]
+        combined=list(dict.fromkeys([*existing,*matched]))
+        if len(combined)>20:
+            QMessageBox.warning(self,'DizyTV','You already have 20 XMLTV guide URLs. '
+                                'Remove unused guide sources to add the matching UK FAST guides.')
+            return
+        self.feeds.setPlainText('\n'.join(combined))
 
     def add_optional_fast_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
