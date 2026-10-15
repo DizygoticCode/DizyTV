@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 ROOT=Path(__file__).resolve().parent.parent
-VERSION="0.1.15-alpha"
+VERSION="0.1.16-alpha"
 TARGET=ROOT/'dist'/'DizyTV'
 if os.name!='posix' or not TARGET.is_dir() or not (TARGET/'DizyTV').is_file():
     raise SystemExit('Run after scripts/build_desktop.py on a Linux amd64 host')
