@@ -1,4 +1,4 @@
-import time
+import queue
 import threading
 import unittest
 from unittest.mock import patch
@@ -131,15 +131,51 @@ class HealthTests(unittest.TestCase):
         connect.assert_not_called()
 
     def test_health_check_has_overall_deadline_even_when_probe_stalls(self):
-        def never_finishes(*_):
-            time.sleep(.20)
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        returned = threading.Event()
+        slots = threading.BoundedSemaphore(1)
+        result_queue = queue.Queue(maxsize=1)
+        results, errors = [], []
+
+        def stalled_probe(*_):
+            entered.set()
+            release.wait()
+            finished.set()
             return ('manifest-only', 'late')
-        with patch('dizytv.channel_health._probe_public', side_effect=never_finishes):
-            started = time.monotonic()
-            result = check_channel({'stream': 'https://example.com/live'}, timeout=.02)
-            elapsed = time.monotonic() - started
-        self.assertEqual('unreachable', result['status'])
-        self.assertLess(elapsed, .15)
+
+        def check():
+            try:
+                results.append(check_channel({'stream': 'https://example.com/live'}, timeout=.02))
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                returned.set()
+
+        with patch('dizytv.channel_health._probe_public', side_effect=stalled_probe), \
+             patch('dizytv.channel_health._PROBE_SLOTS', slots), \
+             patch('dizytv.channel_health.queue.Queue', return_value=result_queue), \
+             patch.object(result_queue, 'get', wraps=result_queue.get) as get:
+            caller = threading.Thread(target=check, daemon=True)
+            caller.start()
+            try:
+                # These waits are harness watchdogs, not elapsed-time assertions:
+                # runner scheduling must not change the production deadline.
+                self.assertTrue(entered.wait(timeout=2), 'Probe did not start')
+                self.assertTrue(returned.wait(timeout=2), 'Check waited for the stalled probe')
+                self.assertFalse(finished.is_set())
+                self.assertEqual([], errors)
+                self.assertEqual('unreachable', results[0]['status'])
+                self.assertIn('overall time limit', results[0]['detail'])
+                get.assert_called_once_with(timeout=.02)
+            finally:
+                release.set()
+                caller.join(timeout=2)
+                self.assertFalse(caller.is_alive())
+                # Ensure the probe has released its slot before restoring mocks.
+                self.assertTrue(slots.acquire(timeout=2))
+                slots.release()
 
     def test_rate_limit_headers_are_classified_without_waiting_for_a_body(self):
         class Response:
