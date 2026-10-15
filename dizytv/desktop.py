@@ -34,6 +34,7 @@ from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
 from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
                             LANGUAGE_MODELS, installed_language_model, install_language_model)
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
+from .caption_sync import CaptionDelayQueue
 from .health_history import HealthHistory
 from .duplicates import duplicate_groups
 from .system_usage import SystemSampler
@@ -835,6 +836,20 @@ class Settings(QDialog):
         self.caption_language.addItems(list(LANGUAGE_MODELS))
         self.caption_language.setCurrentText(self.original.get('auto_caption_language','English (bundled)'))
         form.addRow('Speech transcription language',self.caption_language)
+        self.caption_delay=QSpinBox()
+        self.caption_delay.setObjectName('autoCaptionDelayMs')
+        self.caption_delay.setRange(0,10000)
+        self.caption_delay.setSingleStep(250)
+        self.caption_delay.setSuffix(' ms')
+        self.caption_delay.setValue(self.original.get('auto_caption_delay_ms',0))
+        self.caption_delay.setToolTip('0 = show Vosk text as soon as recognised. Positive values delay it to match slower video playback.')
+        form.addRow('Vosk subtitle delay',self.caption_delay)
+        delay_note=QLabel('For captions appearing BEFORE the spoken words, increase the delay. '
+                          'For captions appearing AFTER the words, reduce toward 0 ms. '
+                          'Vosk cannot show text before recognising the audio; automatic sync '
+                          'across separate IPTV stream connections is not reliable.')
+        delay_note.setWordWrap(True)
+        form.addRow(delay_note)
         model_actions=QWidget()
         model_actions_layout=QHBoxLayout(model_actions)
         model_actions_layout.setContentsMargins(0,0,0,0)
@@ -1067,6 +1082,7 @@ class Settings(QDialog):
                     auto_caption_model_dir=self.auto_model_path.text(),
                     auto_caption_ffmpeg_path=self.auto_ffmpeg_path.text(),
                     auto_caption_language=self.caption_language.currentText(),
+                    auto_caption_delay_ms=self.caption_delay.value(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
@@ -1627,6 +1643,10 @@ class MainWindow(QMainWindow):
         self._auto_caption_text=''
         self._auto_caption_updated=0
         self._auto_caption_started_at=0
+        self._auto_caption_queue=CaptionDelayQueue()
+        self._auto_caption_timer=QTimer(self)
+        self._auto_caption_timer.setInterval(80)
+        self._auto_caption_timer.timeout.connect(self.poll_auto_caption_queue)
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
@@ -2716,6 +2736,17 @@ class MainWindow(QMainWindow):
         if serial!=self._auto_caption_seq or self._auto_caption_worker is None:return
         text=caption_text(text)
         if not text:return
+        self._auto_caption_queue.push(text,round(time.monotonic()*1000))
+        self.poll_auto_caption_queue()
+
+    def poll_auto_caption_queue(self):
+        if self._auto_caption_worker is None or self._auto_caption_stopping:return
+        delay=self.state['settings'].get('auto_caption_delay_ms',0)
+        text=self._auto_caption_queue.pop_due(round(time.monotonic()*1000),delay)
+        if text is not None:
+            self.show_auto_caption_text(text)
+
+    def show_auto_caption_text(self,text):
         self._auto_caption_text=text
         self._auto_caption_updated=time.monotonic()
         self.create_auto_caption_overlay()
@@ -2729,6 +2760,16 @@ class MainWindow(QMainWindow):
                 and self.detached_controls.isVisible()):
             self.detached_controls.raise_()
 
+    def change_auto_caption_delay(self,change_ms=None):
+        """Live adjustment of Vosk text ONLY; VLC broadcast captions stay untouched."""
+        old=self.store.read()['settings'].get('auto_caption_delay_ms',0)
+        delay=0 if change_ms is None else max(0,min(10000,old+change_ms))
+        self.state=self.store.update(lambda s:s['settings'].update(auto_caption_delay_ms=delay))
+        self.poll_auto_caption_queue()
+        self.status.setText('Local Vosk subtitle delay: '+str(delay)+' ms. '
+                            '0 ms shows recognised words immediately. '
+                            'A separate speech connection cannot anticipate audio.')
+
     def auto_caption_finished(self,serial,reason):
         # Cancellation invalidates the UI caption serial immediately, but
         # retain the worker until its (possibly slow) model load really ends.
@@ -2738,11 +2779,15 @@ class MainWindow(QMainWindow):
         self._auto_caption_worker_serial=None
         self._auto_caption_stopping=False
         self._auto_caption_signals=None
+        self._auto_caption_timer.stop()
+        self._auto_caption_queue.clear()
         self.destroy_auto_caption_overlay()
         if reason and not was_stopping:self.status.setText(reason)
 
     def stop_auto_captions(self):
         self._auto_caption_seq+=1
+        self._auto_caption_timer.stop()
+        self._auto_caption_queue.clear()
         worker=self._auto_caption_worker
         if worker is not None:
             self._auto_caption_stopping=True
@@ -2801,6 +2846,8 @@ class MainWindow(QMainWindow):
                             'Listening for speech; captions may take several seconds. '
                             'Second source connection; no microphone or cloud speech.')
         self._auto_caption_started_at=time.monotonic()
+        self._auto_caption_queue.clear()
+        self._auto_caption_timer.start()
         # Show a visible acknowledgment that auto CC was selected. Only actual
         # recognition results replace this text; it is not fabricated dialogue.
         self.create_auto_caption_overlay()
@@ -2924,6 +2971,19 @@ class MainWindow(QMainWindow):
                                   else 'Generate live subtitles (offline Vosk + FFmpeg)'))
         auto.setEnabled(not self._auto_caption_stopping)
         auto.triggered.connect(self.toggle_auto_captions)
+        menu.addSection('Vosk text timing (not embedded subtitles)')
+        delay=self.state['settings'].get('auto_caption_delay_ms',0)
+        current=menu.addAction('Current added delay: '+str(delay)+' ms')
+        current.setEnabled(False)
+        earlier=menu.addAction('Less delay (−250 ms)')
+        earlier.setEnabled(delay>0)
+        earlier.triggered.connect(lambda:self.change_auto_caption_delay(-250))
+        later=menu.addAction('More delay (+250 ms)')
+        later.setEnabled(delay<10000)
+        later.triggered.connect(lambda:self.change_auto_caption_delay(250))
+        reset=menu.addAction('Reset Vosk delay to 0 ms')
+        reset.setEnabled(delay!=0)
+        reset.triggered.connect(lambda:self.change_auto_caption_delay())
         menu.exec(QCursor.pos())
 
     def init_player(self):
