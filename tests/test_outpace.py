@@ -110,9 +110,9 @@ class OutpaceTests(unittest.TestCase):
             current={'channels':[{'id':'a'*40,'stream':'acestream://'+'b'*40}],
                      'jobs':[{'status':'recording','channel_id':'a'*40,
                               'start':100,'end':9999999999}]}
-            with patch.object(outpace,'_process_identity',return_value='b'*64), \\
-                 patch('dizytv.storage.Store') as store, \\
-                 patch.object(outpace,'urlopen',return_value=Response()), \\
+            with patch.object(outpace,'_process_identity',return_value='b'*64), \
+                 patch('dizytv.storage.Store') as store, \
+                 patch.object(outpace,'urlopen',return_value=Response()), \
                  patch.object(outpace.os,'kill') as terminate:
                 store.return_value.try_read.return_value=current
                 self.assertFalse(outpace.reap_handed_off_daemon(folder))
@@ -135,16 +135,16 @@ class OutpaceTests(unittest.TestCase):
             marker=Path(folder)/'outpace-handoff.json'
             marker.write_text(json.dumps({'pid':24321,'binary':'/private/outpace',
                                           'identity':'b'*64}))
-            with patch.object(outpace,'_process_identity',return_value='c'*64), \\
+            with patch.object(outpace,'_process_identity',return_value='c'*64), \
                  patch.object(outpace.os,'kill') as terminate:
                 self.assertFalse(outpace.reap_handed_off_daemon(folder))
                 terminate.assert_not_called()
                 self.assertFalse(marker.exists())
             marker.write_text(json.dumps({'pid':24321,'binary':'/private/outpace',
                                           'identity':'b'*64}))
-            with patch.object(outpace,'_process_identity',return_value='b'*64), \\
-                 patch('dizytv.storage.Store') as store, \\
-                 patch.object(outpace,'urlopen',return_value=Response()), \\
+            with patch.object(outpace,'_process_identity',return_value='b'*64), \
+                 patch('dizytv.storage.Store') as store, \
+                 patch.object(outpace,'urlopen',return_value=Response()), \
                  patch.object(outpace.os,'kill') as terminate:
                 store.return_value.try_read.return_value={'jobs':[],'channels':[]}
                 self.assertFalse(outpace.reap_handed_off_daemon(folder))
