@@ -225,6 +225,32 @@ class DesktopTests(unittest.TestCase):
             w.playback_started=0
             w.close()
 
+    def test_cc_all_off_stays_off_after_same_session_buffered_retune(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.player.play.return_value=0
+            w.vlc_instance=Mock()
+            w.playback_started=1
+            w.disable_all_subtitles()
+            self.assertTrue(w._subtitle_session_all_off)
+            w.play_url('https://example.com/reconnected-channel.ts',
+                       preserve_captions=True)
+            self.assertEqual(-1,w._subtitle_manual_track)
+            w.player.video_set_spu.assert_called_with(-1)
+            # Selecting an embedded track explicitly restores VLC subtitles.
+            w.player.video_get_spu_description.return_value=[(2,'English')]
+            w.player.video_set_spu.return_value=0
+            w.choose_subtitle_track(2)
+            self.assertFalse(w._subtitle_session_all_off)
+            w.play_url('https://example.com/reconnected-channel.ts',
+                       preserve_captions=True)
+            self.assertIsNone(w._subtitle_manual_track)
+            w.player=None
+            w.playback_started=0
+            w.close()
+
     def test_vosk_worker_ends_cleanly_and_one_click_can_restart_it(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
