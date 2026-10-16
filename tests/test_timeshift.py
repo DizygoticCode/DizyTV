@@ -110,11 +110,31 @@ class TestTimeshift(unittest.TestCase):
                                      session_id='holdback-start')
             try:
                 with patch.object(session,'start',return_value='http://127.0.0.1/live.m3u8') as start, \
-                     patch.object(session.window,'latest_seconds',return_value=20), \
+                     patch.object(session.window,'holdback_entries',return_value=[object()]*3), \
                      patch.object(session,'holdback_url',return_value='http://127.0.0.1/holdback.m3u8') as held:
                     self.assertEqual('http://127.0.0.1/holdback.m3u8',session.start_delayed(5))
                     start.assert_called_once()
                     held.assert_called_once_with(5)
+            finally:
+                session.close()
+
+    def test_holdback_requires_real_playable_fragments_for_long_segments(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='long-segment-holdback')
+            # One 10s segment is > 1s desired holdback, but it is removed
+            # wholesale from the live edge: there is NO playable video yet.
+            session.window.append(PACKET*10,10)
+            self.assertEqual([],session.window.holdback_entries(1))
+            session.window.append(PACKET*10,10)
+            self.assertEqual(1,len(session.window.holdback_entries(1)))
+            session.window.append(PACKET*10,10)
+            self.assertEqual(2,len(session.window.holdback_entries(1)))
+            session.window.append(PACKET*10,10)
+            self.assertEqual(3,len(session.window.holdback_entries(1)))
+            try:
+                with patch.object(session,'start',return_value='http://127.0.0.1/live.m3u8'):
+                    self.assertIn('holdback.m3u8',session.start_delayed(1))
             finally:
                 session.close()
 
