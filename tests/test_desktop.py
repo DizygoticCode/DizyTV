@@ -600,6 +600,48 @@ class DesktopTests(unittest.TestCase):
             self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
             s.close();window.close()
 
+    def test_saved_80_percent_normal_buttons_do_not_clip_at_startup_or_resize(self):
+        from PySide6.QtWidgets import QComboBox, QCheckBox, QLabel
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda state:state['settings'].update(
+                ui_scale=80,button_size='Normal'))
+            w=MainWindow(store,start_worker=False)
+            w.resize(890,460)
+            w.show()
+            for _ in range(3):
+                self.app.processEvents()
+            self.assertEqual(80,w.state['settings']['ui_scale'])
+            self.assertEqual('Normal',w.state['settings']['button_size'])
+            # A first show must already have the same control geometry as the
+            # old workaround of entering Settings and pressing OK.
+            self.assertGreaterEqual(w.header_scroll.height(),w.header_logo.height())
+            self.assertGreaterEqual(w.header_scroll.height(),w.tools_button.sizeHint().height())
+            self.assertGreaterEqual(w.controls_scroll.height(),
+                                    w.subtitle_button.sizeHint().height())
+            for control in w.sidebar.findChildren(QComboBox):
+                with self.subTest(text=control.currentText()):
+                    self.assertGreaterEqual(control.height(),control.sizeHint().height())
+            for widget in w.sidebar.findChildren(QLabel)+w.sidebar.findChildren(QCheckBox):
+                with self.subTest(widget=widget.text()):
+                    self.assertGreaterEqual(widget.height(),widget.sizeHint().height())
+            # When there isn't enough vertical space the sidebar must scroll,
+            # not compress the five category selectors and action buttons.
+            scroll=w.sidebar_scroll.verticalScrollBar()
+            self.assertGreater(scroll.maximum(),0)
+            scroll.setValue(scroll.maximum())
+            self.app.processEvents()
+            self.assertEqual(scroll.value(),scroll.maximum())
+            w.resize(1100,780)
+            for _ in range(2):
+                self.app.processEvents()
+            for control in w.sidebar.findChildren(QComboBox):
+                self.assertGreaterEqual(control.height(),control.sizeHint().height())
+            # Merely displaying/resizing never overwrites saved scale choices.
+            self.assertEqual((80,'Normal'),(store.read()['settings']['ui_scale'],
+                                           store.read()['settings']['button_size']))
+            w.close()
+
     def test_modern_streaming_skin_removes_slider_backgrounds_and_keeps_small_window(self):
         from dizytv.desktop import desktop_style
         for theme in ('Green','Dark','Light'):
