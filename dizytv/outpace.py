@@ -44,7 +44,7 @@ def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
     The detached recording worker can release *its own* helper with
     allow_restart=True so that later queued jobs can start it again.
     """
-    global _OWNED_PROCESS, _OWNED_IDENTITY, _OWNED_BINARY, _SHUTTING_DOWN
+    global _OWNED_PROCESS, _OWNED_IDENTITY, _OWNED_BINARY, _OWNED_IDLE_SINCE, _SHUTTING_DOWN
     with _PROCESS_LOCK:
         if not allow_restart:
             _SHUTTING_DOWN = True
@@ -54,6 +54,7 @@ def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
         _OWNED_PROCESS = None
         _OWNED_IDENTITY = None
         _OWNED_BINARY = None
+        _OWNED_IDLE_SINCE = None
     try:
         if process.poll() is None:
             process.terminate()  # sends SIGTERM; do not block in wait()
@@ -225,7 +226,7 @@ def reap_handed_off_daemon(directory, address='http://127.0.0.1:6878'):
         return False
 
 
-def stop_idle_owned_daemon(address='http://127.0.0.1:6878'):
+def stop_idle_owned_daemon(address='http://127.0.0.1:6878', directory=None):
     """Release only our own helper after all shared media sessions end.
 
     The detached recorder and GUI can use the same native Outpace daemon.
@@ -233,8 +234,9 @@ def stop_idle_owned_daemon(address='http://127.0.0.1:6878'):
     Fail closed when the API is unavailable, malformed, or reports any
     active stream; /streams is explicitly a status-only API.
     """
+    global _OWNED_IDLE_SINCE
     with _PROCESS_LOCK:
-        if _OWNED_PROCESS is None:
+        if _OWNED_PROCESS is None or directory is None:
             return False
     try:
         base=local_api_address(address)
@@ -245,11 +247,32 @@ def stop_idle_owned_daemon(address='http://127.0.0.1:6878'):
         if len(payload)>32768:
             return False
         sessions=json.loads(payload).get('streams')
-        if not isinstance(sessions,list) or sessions:
+        if not isinstance(sessions,list):
             return False
+        if sessions:
+            with _PROCESS_LOCK:
+                _OWNED_IDLE_SINCE = None
+            return False
+        now = time.monotonic()
+        with _PROCESS_LOCK:
+            if _OWNED_IDLE_SINCE is None:
+                _OWNED_IDLE_SINCE = now
+                return False
+            if now - _OWNED_IDLE_SINCE < IDLE_GRACE_SECONDS:
+                return False
+        from .storage import file_lock
+        with file_lock(Path(directory) / 'outpace-attach.lock'):
+            if _playback_intent_pending(directory):
+                return False
+            with urlopen(base+'/streams',timeout=0.75) as check:
+                if check.status!=200:
+                    return False
+                latest=check.read(32769)
+            if len(latest)>32768 or json.loads(latest).get('streams') != []:
+                return False
+            return stop_owned_daemon(allow_restart=True)
     except (URLError,HTTPError,OSError,ValueError,TypeError,AttributeError,TimeoutError):
         return False
-    return stop_owned_daemon(allow_restart=True)
 
 
 def packaged_binary():
@@ -316,7 +339,7 @@ def playback_url(stream, address):
 
 
 def ensure_ready(address, startup_seconds=25):
-    global _OWNED_PROCESS, _OWNED_IDENTITY, _OWNED_BINARY
+    global _OWNED_PROCESS, _OWNED_IDENTITY, _OWNED_BINARY, _OWNED_IDLE_SINCE
     base = local_api_address(address)
     with _PROCESS_LOCK:
         if _SHUTTING_DOWN:
@@ -364,6 +387,7 @@ def ensure_ready(address, startup_seconds=25):
                 if _OWNED_PROCESS is process:
                     _OWNED_IDENTITY = identity
                     _OWNED_BINARY = str(binary)
+                    _OWNED_IDLE_SINCE = None
             return 'started'
         if process.poll() is not None:
             with _PROCESS_LOCK:
@@ -382,6 +406,7 @@ def ensure_ready(address, startup_seconds=25):
             _OWNED_PROCESS = None
             _OWNED_IDENTITY = None
             _OWNED_BINARY = None
+        _OWNED_IDLE_SINCE = None
     try:
         process.wait(timeout=3)
     except subprocess.TimeoutExpired:
