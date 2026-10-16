@@ -141,6 +141,14 @@ def stage_macos_dmg(archive, destination):
             # do not import nested VLC.app GUI executables or frameworks.
             shutil.copytree(library, destination / "lib", symlinks=False)
             shutil.copytree(plugins, destination / "plugins", symlinks=False)
+            # The VLC GUI notification/interface modules require Sparkle
+            # or Growl frameworks which belong to VLC.app and are neither
+            # media decoders nor dependencies of DizyTV's Qt interface.
+            # Never package broken optional GUI plugins that ask dyld to
+            # load GUI frameworks intentionally excluded from DizyTV.app.
+            for ui_only in ("libmacosx_plugin.dylib", "libosx_notifications_plugin.dylib"):
+                for candidate in (destination / "plugins").rglob(ui_only):
+                    candidate.unlink()
             if (macos / "share").is_dir():
                 shutil.copytree(macos / "share", destination / "share", symlinks=False)
             source_notices = original / "Resources"
@@ -152,8 +160,9 @@ def stage_macos_dmg(archive, destination):
                             ("copying", "license", "licence", "authors")):
                         shutil.copy2(notice, legal / notice.name)
             (legal / "UPSTREAM.txt").write_text(
-                "Original unmodified playback libraries and plugins from "
-                "VideoLAN VLC " + VERSION + " official universal macOS DMG. "
+                "Original unmodified media libraries and codec/stream plugins from "
+                "VideoLAN VLC " + VERSION + " official universal macOS DMG; "
+                "GUI-only Sparkle/Growl-dependent plugins excluded. "
                 "Licences and corresponding source: "
                 "https://www.videolan.org/vlc/ and "
                 "https://download.videolan.org/pub/videolan/vlc/" + VERSION + "/\\n",

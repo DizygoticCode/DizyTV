@@ -225,6 +225,9 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
+          # Vosk upstream uses the unusual libvosk.dyld extension, which
+          # must be explicitly collected as a native binary on both Macs.
+          test -s dist/DizyTV.app/Contents/Frameworks/vosk/libvosk.dyld
           dist/DizyTV.app/Contents/MacOS/DizyTV --verify-native-components
           # Check private playback-only libVLC, not a nested full VLC.app.
           test -s dist/DizyTV.app/Contents/Frameworks/vlc/lib/libvlc.dylib || \

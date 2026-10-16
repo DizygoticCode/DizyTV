@@ -83,6 +83,24 @@ if sys.platform=='darwin':
     if not (speech/'ffmpeg').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir():
         raise RuntimeError('Mac FFmpeg/English Vosk resources are missing')
     args += ['--add-data',str(speech)+os.pathsep+'speech']
+    # The Vosk 0.3.40 binding loads a nonstandard .dyld filename using
+    # cffi.dlopen() at import time. PyInstaller's --collect-binaries vosk
+    # does not discover this nonstandard extension by itself. Stage the
+    # untouched, official wheel file explicitly alongside vosk/__init__.py.
+    import importlib.util
+    vosk_spec=importlib.util.find_spec('vosk')
+    if vosk_spec is None or not vosk_spec.submodule_search_locations:
+        raise RuntimeError('Installed Vosk 0.3.40 wheel cannot be located')
+    vosk_dir=Path(next(iter(vosk_spec.submodule_search_locations)))
+    vosk_dyld=vosk_dir/'libvosk.dyld'
+    if not vosk_dyld.is_file():
+        raise RuntimeError('Original Vosk macOS libvosk.dyld missing from the pinned wheel')
+    architectures=subprocess.run(
+        ['lipo','-archs',str(vosk_dyld)],
+        check=True,capture_output=True,text=True).stdout.split()
+    if platform.machine() not in architectures:
+        raise RuntimeError('Vosk native wheel lacks '+platform.machine()+' architecture')
+    args += ['--add-binary',str(vosk_dyld)+os.pathsep+'vosk']
     # A distinct AGPL-licensed helper compiled from a pinned upstream commit.
     outpace=ROOT/'vendor'/'outpace'
     helper=outpace/'outpace'
