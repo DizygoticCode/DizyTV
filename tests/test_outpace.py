@@ -190,10 +190,10 @@ class OutpaceTests(unittest.TestCase):
     def test_native_playback_links_only_for_recognised_content(self):
         url=outpace.playback_url('acestream://'+CID,'http://127.0.0.1:6878')
         self.assertEqual('http://127.0.0.1:6878/streams/ace/cid:'+CID,url)
-        with self.assertRaisesRegex(RuntimeError,'infohash'):
-            outpace.playback_url('acestream:?infohash='+CID,'http://127.0.0.1:6878')
-        # Preserve a legitimate selector for separately installed proprietary
-        # Ace engines; only the bundled Outpace native path rejects it.
+        # Pinned Outpace 0.2.0 accepts bare infohash selectors for live
+        # playback, unlike later upstream API revisions. Test both routes.
+        alt=outpace.playback_url('acestream:?infohash='+CID,'http://127.0.0.1:6878')
+        self.assertEqual('http://127.0.0.1:6878/streams/ace/'+CID,alt)
         self.assertEqual('http://127.0.0.1:6878/ace/getstream?infohash='+CID,
                          core.stream_url('acestream:?infohash='+CID,'http://127.0.0.1:6878'))
         with self.assertRaises(RuntimeError):
