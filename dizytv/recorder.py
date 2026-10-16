@@ -145,8 +145,8 @@ def recording_playback_url(channel, settings):
 def release_recorder_outpace():
     """Stop only an Outpace child this *worker* started, not external engines."""
     if sys.platform=='darwin' or sys.platform.startswith('linux'):
-        from .outpace import stop_owned_daemon
-        stop_owned_daemon(allow_restart=True)
+        from .outpace import stop_idle_owned_daemon
+        stop_idle_owned_daemon()
 
 
 def worker(directory=None):
@@ -182,6 +182,11 @@ def worker(directory=None):
                         if ace_request_params(channel['stream']) is not None:
                             release_recorder_outpace()
                     finish_job(store,job['id'],result)
+                # If a previous timer started Outpace, do not kill it
+                # while the UI or another client is still watching. Once
+                # the native API has no active media sessions, free only
+                # this worker's own child and allow future timers to start.
+                release_recorder_outpace()
                 time.sleep(1)
     except (BlockingIOError, PermissionError):
         return

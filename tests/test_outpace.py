@@ -50,6 +50,34 @@ class OutpaceTests(unittest.TestCase):
         self.assertFalse(outpace._SHUTTING_DOWN)
         self.assertIsNone(outpace._OWNED_PROCESS)
 
+    def test_native_sessions_prevent_killing_worker_owned_helper(self):
+        class Response:
+            status=200
+            def __init__(self,body):
+                self.content=io.BytesIO(body)
+            def __enter__(self): return self
+            def __exit__(self,*args): return None
+            def read(self,n): return self.content.read(n)
+        process=Mock()
+        process.poll.return_value=None
+        outpace._OWNED_PROCESS=process
+        # A currently playing user/recording means the helper stays alive.
+        with patch.object(outpace,'urlopen',return_value=Response(
+                b'{"streams":[{"network":"ace","id":"cid:abc","clients":1}]}')):
+            self.assertFalse(outpace.stop_idle_owned_daemon())
+            process.terminate.assert_not_called()
+        # An unavailable API is not proof it is safe to kill a daemon.
+        with patch.object(outpace,'urlopen',side_effect=OSError('not reachable')):
+            self.assertFalse(outpace.stop_idle_owned_daemon())
+            process.terminate.assert_not_called()
+        # Once all shared streams are released, this process may release
+        # its own child without preventing the next queued timer restart.
+        with patch.object(outpace,'urlopen',return_value=Response(b'{"streams":[]}')):
+            self.assertTrue(outpace.stop_idle_owned_daemon())
+        process.terminate.assert_called_once()
+        self.assertIsNone(outpace._OWNED_PROCESS)
+        self.assertFalse(outpace._SHUTTING_DOWN)
+
     def test_mac_packaged_path_only_and_original_name(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

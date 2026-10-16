@@ -57,9 +57,9 @@ class RecorderTests(unittest.TestCase):
     def test_recording_worker_releases_only_owned_helper(self):
         from dizytv import outpace
         with patch.object(recorder.sys,'platform','linux'), \
-             patch.object(outpace,'stop_owned_daemon') as stop:
+             patch.object(outpace,'stop_idle_owned_daemon') as stop:
             release_recorder_outpace()
-            stop.assert_called_once_with(allow_restart=True)
+            stop.assert_called_once_with()
 
     def test_atomic_claim_respects_cancellation_and_removal(self):
         now=2000000000

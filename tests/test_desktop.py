@@ -1308,10 +1308,13 @@ class DesktopTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             store=Store(folder)
             original=dict(id='a'*40,name='Example News',stream='https://example.com/one.ts',
-                          group='News',genre='News',country='United Kingdom',kind='TV',
-                          transport='HTTP',source='Original source',sources=['Original source'])
+                          group='News',tvg_id='example-news',genre='News',
+                          country='United Kingdom',kind='TV',transport='HTTP',
+                          source='https://example.com/a.m3u',
+                          sources=['https://example.com/a.m3u'])
             alternative=dict(original,id='b'*40,stream='https://example.com/two.ts',
-                             source='Another source',sources=['Another source'])
+                             source='https://example.org/b.m3u',
+                             sources=['https://example.org/b.m3u'])
             store.update(lambda state:state.update(channels=[original,alternative]))
             window=MainWindow(store,start_worker=False)
             window.selected=original

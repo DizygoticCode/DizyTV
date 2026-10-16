@@ -54,6 +54,33 @@ def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
     return False
 
 
+def stop_idle_owned_daemon(address='http://127.0.0.1:6878'):
+    """Release only our own helper after all shared media sessions end.
+
+    The detached recorder and GUI can use the same native Outpace daemon.
+    Terminating it as soon as one timer ends would interrupt a second viewer.
+    Fail closed when the API is unavailable, malformed, or reports any
+    active stream; /streams is explicitly a status-only API.
+    """
+    with _PROCESS_LOCK:
+        if _OWNED_PROCESS is None:
+            return False
+    try:
+        base=local_api_address(address)
+        with urlopen(base+'/streams',timeout=0.75) as response:
+            if response.status!=200:
+                return False
+            payload=response.read(32769)
+        if len(payload)>32768:
+            return False
+        sessions=json.loads(payload).get('streams')
+        if not isinstance(sessions,list) or sessions:
+            return False
+    except (URLError,HTTPError,OSError,ValueError,TypeError,AttributeError,TimeoutError):
+        return False
+    return stop_owned_daemon(allow_restart=True)
+
+
 def packaged_binary():
     """Only trust the compiled application's own private Outpace binary."""
     if sys.platform != 'darwin' and not sys.platform.startswith('linux'):
