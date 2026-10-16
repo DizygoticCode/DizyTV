@@ -436,8 +436,14 @@ class RollingTimeshift:
             raise RuntimeError('Timeshift already running')
         self._opened = True
         try:
-            server = ThreadingHTTPServer(('127.0.0.1',0), self._handler())
-            self._server = server
+            # A channel may be cancelled while the OS is creating the socket.
+            # Serialize socket creation/publication with close(): otherwise a
+            # late server can escape cleanup after _closed has been set.
+            with self._close_lock:
+                if self.stop_event.is_set() or self._closed:
+                    raise RuntimeError('Timeshift cancelled before server startup')
+                server = ThreadingHTTPServer(('127.0.0.1',0), self._handler())
+                self._server = server
             if self.stop_event.is_set():
                 raise RuntimeError('Timeshift cancelled during server startup')
             self._server_thread = threading.Thread(
