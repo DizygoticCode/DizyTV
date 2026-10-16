@@ -39,6 +39,204 @@ class TestTimeshift(unittest.TestCase):
             self.assertEqual(12,manifest.count('#EXTINF:'))
             w.close()
 
+    def test_moving_holdback_excludes_new_segments_and_catches_up_continuously(self):
+        with tempfile.TemporaryDirectory() as root:
+            window=RollingWindow(root,free=lambda:1024**4)
+            for _ in range(5):
+                window.append(PACKET*10,4)
+            held=window.playlist(holdback_seconds=5)
+            self.assertIn('s/2.ts',held)
+            self.assertNotIn('s/3.ts',held)
+            self.assertNotIn('s/4.ts',held)
+            self.assertEqual(3,held.count('#EXTINF:'))
+            window.append(PACKET*10,4)
+            # A new cached segment advances the held-back edge by one piece:
+            # it doesn't accidentally rewind from an old fixed seq.
+            later=window.playlist(holdback_seconds=5)
+            self.assertIn('s/3.ts',later)
+            self.assertNotIn('s/4.ts',later)
+            self.assertNotIn('s/5.ts',later)
+            self.assertEqual('',window.playlist(holdback_seconds=30))
+            with self.assertRaises(ValueError):
+                window.playlist(holdback_seconds=-1)
+            window.close()
+
+    def test_holdback_has_stable_playable_segments_during_short_origin_stall(self):
+        # Broadcaster temporarily stops publishing new HLS segments. The local
+        # playlist must keep advertising already-cached ones, not expose the
+        # still-newest (possibly unavailable) source edge or become empty.
+        with tempfile.TemporaryDirectory() as root:
+            window=RollingWindow(root,free=lambda:1024**4)
+            for _ in range(6):
+                window.append(PACKET*10,4)
+            initial=window.playlist(holdback_seconds=8)
+            self.assertEqual(4,initial.count('#EXTINF:'))
+            self.assertNotIn('s/4.ts',initial)
+            self.assertNotIn('s/5.ts',initial)
+            self.assertEqual(initial,window.playlist(holdback_seconds=8))
+            window.append(PACKET*10,4)  # Origin resumes after short stall.
+            resumed=window.playlist(holdback_seconds=8)
+            self.assertIn('s/4.ts',resumed)
+            self.assertNotIn('s/5.ts',resumed)
+            self.assertNotIn('s/6.ts',resumed)
+            window.close()
+
+    def test_holdback_loopback_url_enforces_bounded_delay_and_no_public_access(self):
+        from http.server import ThreadingHTTPServer
+        from threading import Thread
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='holdback-token')
+            for _ in range(6):
+                session.window.append(PACKET*10,4)
+            session._server=ThreadingHTTPServer(('127.0.0.1',0),session._handler())
+            Thread(target=session._server.serve_forever,daemon=True).start()
+            try:
+                with urlopen(session.holdback_url(5)) as response:
+                    manifest=response.read().decode()
+                self.assertIn('s/3.ts',manifest)
+                self.assertNotIn('s/4.ts',manifest)
+                with self.assertRaises(Exception):
+                    urlopen(session.base_url+'holdback.m3u8?ms=50001')
+                with self.assertRaises(ValueError):
+                    session.holdback_url(31)
+            finally:
+                session.close()
+
+    def test_start_delayed_uses_reused_buffer_not_second_capture_engine(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='holdback-start')
+            try:
+                with patch.object(session,'start',return_value='http://127.0.0.1/live.m3u8') as start, \
+                     patch.object(session.window,'holdback_entries',return_value=[object()]*3), \
+                     patch.object(session,'holdback_url',return_value='http://127.0.0.1/holdback.m3u8') as held:
+                    self.assertEqual('http://127.0.0.1/holdback.m3u8',session.start_delayed(5))
+                    start.assert_called_once()
+                    held.assert_called_once_with(5)
+            finally:
+                session.close()
+
+    def test_holdback_requires_real_playable_fragments_for_long_segments(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='long-segment-holdback')
+            # One 10s segment is > 1s desired holdback, but it is removed
+            # wholesale from the live edge: there is NO playable video yet.
+            session.window.append(PACKET*10,10)
+            self.assertEqual([],session.window.holdback_entries(1))
+            session.window.append(PACKET*10,10)
+            self.assertEqual(1,len(session.window.holdback_entries(1)))
+            session.window.append(PACKET*10,10)
+            self.assertEqual(2,len(session.window.holdback_entries(1)))
+            session.window.append(PACKET*10,10)
+            self.assertEqual(3,len(session.window.holdback_entries(1)))
+            try:
+                with patch.object(session,'start',return_value='http://127.0.0.1/live.m3u8'), \
+                     patch.object(session,'holdback_url',
+                                  return_value='http://127.0.0.1/holdback.m3u8?ms=1000') as holdback:
+                    self.assertIn('holdback.m3u8',session.start_delayed(1))
+                    holdback.assert_called_once_with(1)
+            finally:
+                session.close()
+
+    def test_timeshift_cleanup_does_not_wait_on_gui_thread(self):
+        from threading import Event
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='async-shutdown')
+            cleanup_entered=Event()
+            allow_cleanup=Event()
+            cleanup_finished=Event()
+            original_close=session.close
+            def slow_cleanup():
+                cleanup_entered.set()
+                allow_cleanup.wait(2)
+                try:
+                    original_close()
+                finally:
+                    cleanup_finished.set()
+            with patch.object(session,'close',side_effect=slow_cleanup):
+                try:
+                    session.close_async()  # Must return before background IO ends.
+                    self.assertTrue(session.stop_event.is_set())
+                    self.assertTrue(session.ready.is_set())
+                    self.assertTrue(cleanup_entered.wait(1))
+                    self.assertFalse(allow_cleanup.is_set())
+                finally:
+                    allow_cleanup.set()
+            self.assertTrue(cleanup_finished.wait(3))
+            # The normal cleanup entry point remains safe/idempotent.
+            original_close()
+            self.assertFalse(session.window.directory.exists())
+
+    def test_closing_server_before_serving_never_calls_shutdown_deadlock(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='pre-server-thread')
+            server=Mock()
+            session._server=server
+            session._server_thread=None  # Startup interrupted pre-serve_forever.
+            session.close()
+            server.server_close.assert_called_once()
+            server.shutdown.assert_not_called()
+            session.close()  # Concurrent/late cleanup is harmless.
+            self.assertTrue(session.stop_event.is_set())
+
+    def test_socket_created_during_close_is_not_leaked(self):
+        """A rapid channel switch can cancel HTTP server construction itself."""
+        import time
+        from threading import Event, Thread
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/live.ts',root,
+                                     session_id='concurrent-socket-close')
+            creating=Event()
+            allow_create=Event()
+            server=Mock()
+            errors=[]
+            def slow_server(*args,**kwargs):
+                creating.set()
+                if not allow_create.wait(3):
+                    raise RuntimeError('socket creation test timed out')
+                return server
+            def start():
+                try:session.start(timeout=0.1)
+                except RuntimeError as exc:errors.append(str(exc))
+            try:
+                with patch('dizytv.timeshift.ThreadingHTTPServer',side_effect=slow_server):
+                    starter=Thread(target=start,daemon=True)
+                    starter.start()
+                    self.assertTrue(creating.wait(2))
+                    session.close_async()
+                    self.assertTrue(session.stop_event.is_set())
+                    allow_create.set()
+                    starter.join(timeout=3)
+                    self.assertFalse(starter.is_alive())
+                # Cleanup runs on a separate thread, but is guaranteed to
+                # close the socket created after cancellation, never leak it.
+                limit=time.monotonic()+3
+                while server.server_close.call_count==0 and time.monotonic()<limit:
+                    time.sleep(.02)
+                server.server_close.assert_called_once_with()
+                self.assertTrue(errors)
+                self.assertFalse(session._capture_thread is not None and
+                                 session._capture_thread.is_alive())
+            finally:
+                allow_create.set()
+                session.close()
+
+    def test_closed_timeshift_rejects_late_capture_start(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='preclosed')
+            session.close()
+            with self.assertRaisesRegex(RuntimeError,'already closed'):
+                session.start(timeout=0.1)
+
     def test_free_space_reserve_blocks_more_data(self):
         with tempfile.TemporaryDirectory() as path:
             w=RollingWindow(path, free=lambda:1024, reserve_bytes=1024**3)

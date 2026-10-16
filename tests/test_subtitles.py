@@ -15,7 +15,7 @@ class SubtitleContractTests(unittest.TestCase):
     def test_default_subtitles_and_legacy_backup_are_preserved(self):
         state=default_state()
         self.assertTrue(state['settings']['subtitles_enabled'])
-        self.assertIn('--freetype-fontsize=28',vlc_subtitle_options(state['settings']))
+        self.assertIn('--freetype-fontsize=20',vlc_subtitle_options(state['settings']))
         restored=restore_backup(export_backup(state))
         self.assertEqual(state['settings']['subtitle_colour'],
                          restored['settings']['subtitle_colour'])

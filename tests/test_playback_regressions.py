@@ -130,7 +130,8 @@ class PlaybackConfigurationTests(unittest.TestCase):
                     patch.object(window, 'play_stream') as live:
                 window.play_file()
                 self.assertIsNone(window.timeshift)
-                session.close.assert_called_once()
+                session.close_async.assert_called_once()
+                session.close.assert_not_called()
                 play.assert_called_once_with(str(fixture.resolve()))
                 pending.signals.success.emit('http://127.0.0.1:6878/fixture')
                 live.assert_not_called()

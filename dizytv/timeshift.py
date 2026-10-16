@@ -116,8 +116,25 @@ class RollingWindow:
                 return item.seq
         return entries[0].seq
 
-    def playlist(self, from_seq=None):
-        entries = self.snapshot()
+    def holdback_entries(self, holdback_seconds):
+        """Full moving video/A/V holdback, counting actual fragment durations."""
+        if (not isinstance(holdback_seconds,(float,int)) or isinstance(holdback_seconds,bool)
+                or not 0 <= holdback_seconds <= 30):
+            raise ValueError('Invalid local video holdback')
+        entries=self.snapshot()
+        if holdback_seconds:
+            cut=len(entries)
+            excluded=0.0
+            # Round UP in complete fragments, never show data newer than target.
+            while cut and excluded < holdback_seconds:
+                cut-=1
+                excluded+=entries[cut].duration
+            entries=entries[:cut]
+        return entries
+
+    def playlist(self, from_seq=None, holdback_seconds=0):
+        """A moving live playlist can intentionally omit the newest segments."""
+        entries = self.holdback_entries(holdback_seconds)
         if from_seq is None:
             # Join near live; use a replay URL to start farther back.
             # A 3-fragment live playlist gives VLC almost no margin when
@@ -216,6 +233,8 @@ class RollingTimeshift:
         self._server = None
         self._server_thread = None
         self._capture_thread = None
+        self._closed = False
+        self._close_lock = threading.Lock()
         self._opened = False
         self._http = build_opener(SafeRedirect)
 
@@ -324,15 +343,22 @@ class RollingTimeshift:
                     self.send_error(404)
                     return
                 path = parsed.path[len(prefix):]
-                if path in ('live.m3u8', 'replay.m3u8'):
+                if path in ('live.m3u8', 'replay.m3u8', 'holdback.m3u8'):
                     since = None
+                    delay=0.0
+                    if path == 'holdback.m3u8':
+                        raw = parse_qs(parsed.query).get('ms', [])
+                        if len(raw) != 1 or not raw[0].isdigit() or not 1 <= int(raw[0]) <= 30000:
+                            self.send_error(400)
+                            return
+                        delay = int(raw[0]) / 1000.0
                     if path == 'replay.m3u8':
                         raw = parse_qs(parsed.query).get('seq', [])
                         if len(raw) != 1 or not raw[0].isdigit():
                             self.send_error(400)
                             return
                         since = int(raw[0])
-                    playlist = session.window.playlist(since)
+                    playlist = session.window.playlist(since,holdback_seconds=delay)
                     if not playlist:
                         self.send_error(503)
                         return
@@ -379,11 +405,29 @@ class RollingTimeshift:
     def live_url(self):
         return self.base_url + 'live.m3u8'
 
+    def holdback_url(self, seconds_back):
+        if not isinstance(seconds_back,(float,int)) or isinstance(seconds_back,bool) or not 0 < seconds_back <= 30:
+            raise ValueError('Video holdback must be between 0 and 30 seconds')
+        return self.base_url + 'holdback.m3u8?ms=' + str(round(seconds_back*1000))
+
     def replay_url(self, seconds_back):
         seq = self.window.starting_seq(seconds_back)
         if seq is None:
             raise RuntimeError('No cached programmes are ready for rewind')
         return self.base_url + f'replay.m3u8?seq={seq}'
+
+    def _serve_until_stopped(self, server):
+        """Use bounded request polling instead of shutdown() cross-thread waits.
+
+        ThreadingHTTPServer.shutdown() can deadlock if called before its
+        serve_forever thread has entered the loop (a channel-switch race).
+        """
+        server.timeout = 0.25
+        while not self.stop_event.is_set():
+            try:
+                server.handle_request()
+            except (OSError, ValueError):
+                break  # Closed socket after cancellation.
 
     def start(self, timeout=18):
         if self.stop_event.is_set():
@@ -392,24 +436,82 @@ class RollingTimeshift:
             raise RuntimeError('Timeshift already running')
         self._opened = True
         try:
-            self._server = ThreadingHTTPServer(('127.0.0.1',0), self._handler())
-            self._server_thread = threading.Thread(target=self._server.serve_forever,daemon=True)
+            # A channel may be cancelled while the OS is creating the socket.
+            # Serialize socket creation/publication with close(): otherwise a
+            # late server can escape cleanup after _closed has been set.
+            with self._close_lock:
+                if self.stop_event.is_set() or self._closed:
+                    raise RuntimeError('Timeshift cancelled before server startup')
+                server = ThreadingHTTPServer(('127.0.0.1',0), self._handler())
+                self._server = server
+            if self.stop_event.is_set():
+                raise RuntimeError('Timeshift cancelled during server startup')
+            self._server_thread = threading.Thread(
+                target=self._serve_until_stopped, args=(server,),
+                name='dizytv-timeshift-http', daemon=True)
             self._server_thread.start()
+            if self.stop_event.is_set():
+                raise RuntimeError('Timeshift cancelled before capture started')
             self._capture_thread = threading.Thread(target=self._capture,daemon=True)
             self._capture_thread.start()
-            if not self.ready.wait(timeout) or not self.window.snapshot():
+            if not self.ready.wait(timeout) or self.stop_event.is_set() or not self.window.snapshot():
                 raise RuntimeError(self.error or 'This channel did not provide usable MPEG-TS/HLS segments')
             return self.live_url()
         except Exception:
             self.close()
             raise
 
+    def start_delayed(self, seconds_back=0, timeout=18):
+        """Start local DVR, optionally let it fill before exposing replay video.
+
+        The delay keeps audio+video together. Network/Vosk recognition may still
+        have a different live-edge position, so this is manual calibration, not
+        claimed media-PTS automatic synchronization.
+        """
+        if not isinstance(seconds_back,(int,float)) or isinstance(seconds_back,bool) or not 0 <= seconds_back <= 30:
+            raise ValueError('Caption video delay must be 0–30 seconds')
+        url=self.start(timeout=timeout)
+        if seconds_back==0:
+            return url
+        deadline=time.monotonic()+min(80,max(30,seconds_back+45))
+        # Total seconds alone are insufficient: a single 10s segment with a
+        # 1s holdback produces an EMPTY manifest. Check the actual number of
+        # playable fragments AFTER removing the newest delayed segments.
+        while len(self.window.holdback_entries(seconds_back))<3 and not self.stop_event.is_set():
+            if time.monotonic()>=deadline:
+                break
+            self.stop_event.wait(0.25)
+        if self.stop_event.is_set():
+            raise RuntimeError('Timeshift was cancelled before delayed playback')
+        if len(self.window.holdback_entries(seconds_back))<3:
+            raise RuntimeError('Not enough playable DVR segments for Vosk video delay; try live playback')
+        return self.holdback_url(seconds_back)
+
+    def close_async(self):
+        """Cancel immediately; never wait for IO/server cleanup in the Qt GUI."""
+        self.stop_event.set()
+        self.ready.set()
+        threading.Thread(target=self.close,
+                         name='dizytv-timeshift-cleanup',
+                         daemon=True).start()
+
     def close(self):
         self.stop_event.set()
-        if self._server:
-            self._server.shutdown()
-            self._server.server_close()
+        self.ready.set()  # Unblock an in-flight start(timeout=18).
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            server = self._server
             self._server = None
-        if self._capture_thread and self._capture_thread is not threading.current_thread():
-            self._capture_thread.join(timeout=1)
-        self.window.close()
+            # No serve_forever(), so shutdown() is neither needed nor safe.
+            # The request loop exits after <= 250ms even if no clients call it.
+            if server is not None:
+                server.server_close()
+            server_thread = self._server_thread
+            if server_thread is not None and server_thread is not threading.current_thread():
+                server_thread.join(timeout=1)
+            capture_thread = self._capture_thread
+            if capture_thread is not None and capture_thread is not threading.current_thread():
+                capture_thread.join(timeout=1)
+            self.window.close()

@@ -124,6 +124,245 @@ class DesktopTests(unittest.TestCase):
         self.assertLess(grid.minimumWidth(),default)
         self.assertLess(grid.geometry_units()[0],58)
 
+    def test_vosk_caption_delay_is_saved_and_adjustable_while_watching(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            window=MainWindow(store,start_worker=False)
+            dialog=Settings(window.state,window)
+            self.assertEqual(0,dialog.caption_delay.value())
+            dialog.caption_delay.setValue(750)
+            self.assertEqual(750,dialog.values()['auto_caption_delay_ms'])
+            dialog.close()
+            window.change_auto_caption_delay(500)
+            self.assertEqual(500,store.read()['settings']['auto_caption_delay_ms'])
+            window.change_auto_caption_delay(50000)
+            self.assertEqual(10000,store.read()['settings']['auto_caption_delay_ms'])
+            window.change_auto_caption_delay(-9750)
+            self.assertEqual(250,store.read()['settings']['auto_caption_delay_ms'])
+            window._auto_caption_worker=Mock()
+            window._auto_caption_seq=123
+            window.receive_auto_caption(122,'Wrong channel')
+            self.assertEqual(0,len(window._auto_caption_queue))
+            window.receive_auto_caption(123,'Recognised voice')
+            self.assertEqual(1,len(window._auto_caption_queue))
+            with patch.object(window,'show_auto_caption_text') as display:
+                window.change_auto_caption_delay()
+                display.assert_called_once_with('Recognised voice')
+            self.assertEqual(0,len(window._auto_caption_queue))
+            window.stop_auto_captions()
+            self.assertEqual(0,len(window._auto_caption_queue))
+            window._auto_caption_worker=None
+            window.close()
+
+    def test_recommended_vosk_preset_is_explicit_editable_and_does_not_overwrite_old_settings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            window=MainWindow(store,start_worker=False)
+            self.assertFalse(store.read()['settings']['timeshift_enabled'])
+            dialog=Settings(store.read(),window)
+            self.assertEqual(20,dialog.cc_size.value())
+            self.assertEqual(0,dialog.caption_delay.value())
+            self.assertEqual(0,dialog.caption_video_delay.value())
+            action=dialog.findChild(QPushButton,'applyRecommendedVoskBuffer')
+            self.assertIsNotNone(action)
+            # Opening Settings alone must not enable disk buffering.
+            self.assertFalse(dialog.timeshift_enabled.isChecked())
+            action.click()
+            values=dialog.values()
+            self.assertEqual(20,values['subtitle_size'])
+            self.assertEqual(0,values['auto_caption_delay_ms'])
+            self.assertEqual(5000,values['auto_caption_video_delay_ms'])
+            self.assertTrue(values['timeshift_enabled'])
+            self.assertEqual(4000,values['http_buffer_ms'])  # Preset does not change this.
+            self.assertFalse(store.read()['settings']['timeshift_enabled'])
+            # All recommendations are user-editable before Save.
+            dialog.cc_size.setValue(22)
+            dialog.caption_delay.setValue(250)
+            dialog.caption_video_delay.setValue(7000)
+            overrides=dialog.values()
+            self.assertEqual((22,250,7000),
+                             (overrides['subtitle_size'],overrides['auto_caption_delay_ms'],
+                              overrides['auto_caption_video_delay_ms']))
+            dialog.close()
+            # A later app upgrade / Settings visit must retain preferences.
+            store.update(lambda s:s.update(settings=overrides))
+            later=Settings(store.read(),window)
+            self.assertEqual(22,later.cc_size.value())
+            self.assertEqual(250,later.caption_delay.value())
+            self.assertEqual(7000,later.caption_video_delay.value())
+            self.assertTrue(later.timeshift_enabled.isChecked())
+            later.close()
+            window.close()
+
+    def test_cc_off_stops_broadcast_and_local_vosk_immediately(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            speech=Mock()
+            player=Mock()
+            w.player=player
+            w.playback_started=1
+            w._auto_caption_worker=speech
+            w._auto_caption_seq=21
+            w._auto_caption_worker_serial=21
+            w.show_auto_caption_text('Old South Park dialogue')
+            self.assertIsNotNone(w._auto_caption_overlay)
+            w.disable_all_subtitles()
+            speech.stop.assert_called_once()
+            player.video_set_spu.assert_called_once_with(-1)
+            self.assertIsNone(w._auto_caption_overlay)
+            self.assertEqual('',w._auto_caption_text)
+            self.assertTrue(w._auto_caption_stopping)
+            self.assertEqual(-1,w._subtitle_manual_track)
+            # Background recogniser signals queued before Off cannot reappear.
+            w.receive_auto_caption(21,'old audio arrives late')
+            self.assertEqual(0,len(w._auto_caption_queue))
+            self.assertIsNone(w._auto_caption_overlay)
+            w.auto_caption_finished(21,'')
+            self.assertIsNone(w._auto_caption_worker)
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_cc_all_off_stays_off_after_same_session_buffered_retune(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.player.play.return_value=0
+            w.vlc_instance=Mock()
+            w.playback_started=1
+            w.disable_all_subtitles()
+            self.assertTrue(w._subtitle_session_all_off)
+            w.play_url('https://example.com/reconnected-channel.ts',
+                       preserve_captions=True)
+            self.assertEqual(-1,w._subtitle_manual_track)
+            w.player.video_set_spu.assert_called_with(-1)
+            # Selecting an embedded track explicitly restores VLC subtitles.
+            w.player.video_get_spu_description.return_value=[(2,'English')]
+            w.player.video_set_spu.return_value=0
+            w.choose_subtitle_track(2)
+            self.assertFalse(w._subtitle_session_all_off)
+            w.play_url('https://example.com/reconnected-channel.ts',
+                       preserve_captions=True)
+            self.assertIsNone(w._subtitle_manual_track)
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_vosk_worker_ends_cleanly_and_one_click_can_restart_it(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.player.get_state.return_value='State.Playing'
+            w.playback_started=1
+            w._playback_url='https://example.com/southpark.ts'
+            first=Mock()
+            w._auto_caption_worker=first
+            w._auto_caption_worker_serial=33
+            w._auto_caption_seq=33
+            w._auto_caption_retry_budget=0
+            w.show_auto_caption_text('old subtitles')
+            w.auto_caption_finished(33,'FFmpeg source ended')
+            self.assertIsNone(w._auto_caption_overlay)
+            self.assertIsNone(w._auto_caption_worker)
+            # No first click needed to stop an already-dead speech worker.
+            replacement=Mock()
+            with patch('dizytv.desktop.verify_caption_engine',return_value=('ffmpeg','model')), \
+                 patch('dizytv.desktop.LocalCaptionWorker',return_value=replacement):
+                w.toggle_auto_captions()
+            replacement.start.assert_called_once()
+            self.assertIs(w._auto_caption_worker,replacement)
+            w.stop_auto_captions()
+            replacement.stop.assert_called_once()
+            self.assertIsNone(w._auto_caption_overlay)
+            w.auto_caption_finished(w._auto_caption_worker_serial,'')
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_terminal_video_stops_vosk_without_leaving_ghost_overlay(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            worker=Mock()
+            w._auto_caption_worker=worker
+            w._auto_caption_worker_serial=55
+            w._auto_caption_seq=55
+            w.player=Mock()
+            w.player.get_state.return_value='State.Ended'
+            w.playback_started=1
+            w.show_auto_caption_text('No longer playing')
+            w.stop_caption_on_terminal_playback()
+            worker.stop.assert_called_once()
+            self.assertIsNone(w._auto_caption_overlay)
+            self.assertFalse(w._auto_caption_restart_requested)
+            w.auto_caption_finished(55,'')
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_closing_timeshift_uses_nonblocking_background_cleanup(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            session=Mock()
+            w.timeshift=session
+            w.close_timeshift()
+            session.close_async.assert_called_once_with()
+            session.close.assert_not_called()
+            self.assertIsNone(w.timeshift)
+            self.assertIsNone(w.timeshift_task)
+            w.close()
+
+    def test_holdback_changes_blocked_while_next_channel_is_still_loading(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            w.timeshift=Mock()
+            w.timeshift_task=Mock()   # new buffer has not begun serving yet
+            w.player=Mock()           # still reflects PREVIOUS channel
+            w.playback_started=1
+            with patch.object(w,'play_url') as start:
+                w.change_auto_caption_video_delay(1000)
+                start.assert_not_called()
+            self.assertEqual(0,store.read()['settings']['auto_caption_video_delay_ms'])
+            w.timeshift=None
+            w.timeshift_task=None
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_recover_held_back_playback_without_dropping_sync(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.timeshift=Mock()
+            w.timeshift.window.snapshot.return_value=[Mock(seq=100)]
+            w.timeshift.window.holdback_entries.return_value=[object()]*4
+            w.timeshift.holdback_url.return_value='http://127.0.0.1/holdback.m3u8?ms=5000'
+            w.player=Mock()
+            w.player.get_state.return_value='State.Buffering'
+            w.playback_started=1
+            w._active_holdback_ms=5000
+            w.timeshift_lag=0
+            w.last_live_recovery=0
+            w.last_good_video=0
+            w.last_capture_progress=0
+            with patch.object(w,'play_url') as reconnect:
+                w.check_live_timeshift(now=110)
+                reconnect.assert_called_once_with(
+                    'http://127.0.0.1/holdback.m3u8?ms=5000',preserve_captions=False)
+            w.timeshift.holdback_url.assert_called_once_with(5)
+            w.timeshift.live_url.assert_not_called()
+            w.timeshift=None
+            w.player=None
+            w.playback_started=0
+            w.close()
+
     def test_settings_pair_only_imported_uk_fast_guides_without_duplicates(self):
         from dizytv.sources import (FREE_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
                                    DEFAULT_GUIDE_URLS)
@@ -360,6 +599,69 @@ class DesktopTests(unittest.TestCase):
             self.assertLessEqual(window.width(),720)
             self.assertIsNotNone(window.controls_scroll.horizontalScrollBar())
             s.close();window.close()
+
+    def test_saved_80_percent_normal_buttons_do_not_clip_at_startup_or_resize(self):
+        from PySide6.QtWidgets import QComboBox, QCheckBox, QLabel
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda state:state['settings'].update(
+                ui_scale=80,button_size='Normal'))
+            w=MainWindow(store,start_worker=False)
+            w.resize(890,460)
+            w.show()
+            for _ in range(3):
+                self.app.processEvents()
+            self.assertEqual(80,w.state['settings']['ui_scale'])
+            self.assertEqual('Normal',w.state['settings']['button_size'])
+            # A first show must already have the same control geometry as the
+            # old workaround of entering Settings and pressing OK.
+            self.assertGreaterEqual(w.header_scroll.height(),w.header_logo.height())
+            self.assertGreaterEqual(w.header_scroll.height(),w.tools_button.sizeHint().height())
+            self.assertGreaterEqual(w.controls_scroll.height(),
+                                    w.subtitle_button.sizeHint().height())
+            for control in w.sidebar.findChildren(QComboBox):
+                with self.subTest(text=control.currentText()):
+                    self.assertGreaterEqual(control.height(),control.sizeHint().height())
+            for widget in w.sidebar.findChildren(QLabel)+w.sidebar.findChildren(QCheckBox):
+                with self.subTest(widget=widget.text()):
+                    self.assertGreaterEqual(widget.height(),widget.sizeHint().height())
+            # When there isn't enough vertical space the sidebar must scroll,
+            # not compress the five category selectors and action buttons.
+            scroll=w.sidebar_scroll.verticalScrollBar()
+            self.assertGreater(scroll.maximum(),0)
+            scroll.setValue(scroll.maximum())
+            self.app.processEvents()
+            self.assertEqual(scroll.value(),scroll.maximum())
+            w.resize(1100,780)
+            for _ in range(2):
+                self.app.processEvents()
+            for control in w.sidebar.findChildren(QComboBox):
+                self.assertGreaterEqual(control.height(),control.sizeHint().height())
+            # Merely displaying/resizing never overwrites saved scale choices.
+            self.assertEqual((80,'Normal'),(store.read()['settings']['ui_scale'],
+                                           store.read()['settings']['button_size']))
+            w.close()
+
+    def test_sidebar_heights_shrink_after_switch_from_large_to_compact(self):
+        from PySide6.QtWidgets import QComboBox
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda state:state['settings'].update(
+                ui_scale=150,button_size='Large'))
+            w=MainWindow(store,start_worker=False)
+            w.resize(950,600)
+            w.show()
+            for _ in range(3):self.app.processEvents()
+            large=[x.minimumHeight() for x in w.sidebar.findChildren(QComboBox)]
+            self.assertTrue(large)
+            w.state['settings'].update(ui_scale=80,button_size='Compact')
+            w.apply_interface_scale()
+            for _ in range(3):self.app.processEvents()
+            compact=[x.minimumHeight() for x in w.sidebar.findChildren(QComboBox)]
+            self.assertEqual(len(large),len(compact))
+            self.assertTrue(all(smaller<=bigger for smaller,bigger in zip(compact,large)))
+            self.assertTrue(any(smaller<bigger for smaller,bigger in zip(compact,large)))
+            w.close()
 
     def test_modern_streaming_skin_removes_slider_backgrounds_and_keeps_small_window(self):
         from dizytv.desktop import desktop_style
@@ -743,6 +1045,8 @@ class DesktopTests(unittest.TestCase):
             w=MainWindow(store,start_worker=False)
             w.player=Mock()
             w.playback_started=1
+            w.player.video_get_spu_description.return_value=[(3,'English')]
+            w.player.video_get_spu.side_effect=[3,3,-1]
             w.player.video_set_spu.side_effect=[-1,0]
             w.sync_subtitles()
             self.assertFalse(w._subtitle_auto_applied)

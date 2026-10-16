@@ -14,7 +14,7 @@ from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServi
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
-    QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
+    QDialog, QDialogButtonBox, QFormLayout, QLayout, QComboBox, QSpinBox, QDoubleSpinBox,
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
@@ -36,9 +36,11 @@ from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_t
                             LANGUAGE_MODELS, installed_language_model, install_language_model, remove_language_model,
                             managed_language_model)
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
+from .caption_sync import CaptionDelayQueue
 from .health_history import HealthHistory
 from .duplicates import duplicate_groups
 from .system_usage import SystemSampler
+from .ui_diagnostics import UiHangMonitor
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -817,7 +819,7 @@ class Settings(QDialog):
         self.cc_size.setObjectName('subtitleSize')
         self.cc_size.setRange(12,64)
         self.cc_size.setSuffix(' px')
-        self.cc_size.setValue(self.original.get('subtitle_size',28))
+        self.cc_size.setValue(self.original.get('subtitle_size',20))
         form.addRow('Subtitle text size',self.cc_size)
         self.cc_colour=QComboBox()
         self.cc_colour.setObjectName('subtitleColour')
@@ -838,6 +840,46 @@ class Settings(QDialog):
         self.caption_language.addItems(list(LANGUAGE_MODELS))
         self.caption_language.setCurrentText(self.original.get('auto_caption_language','English (bundled)'))
         form.addRow('Speech transcription language',self.caption_language)
+        self.caption_delay=QSpinBox()
+        self.caption_delay.setObjectName('autoCaptionDelayMs')
+        self.caption_delay.setRange(0,10000)
+        self.caption_delay.setSingleStep(250)
+        self.caption_delay.setSuffix(' ms')
+        self.caption_delay.setValue(self.original.get('auto_caption_delay_ms',0))
+        self.caption_delay.setToolTip('0 = show Vosk text as soon as recognised. Positive values delay it to match slower video playback.')
+        form.addRow('Vosk subtitle delay',self.caption_delay)
+        self.caption_video_delay=QSpinBox()
+        self.caption_video_delay.setObjectName('autoCaptionVideoDelayMs')
+        self.caption_video_delay.setRange(0,30000)
+        self.caption_video_delay.setSingleStep(1000)
+        self.caption_video_delay.setSuffix(' ms')
+        self.caption_video_delay.setValue(self.original.get('auto_caption_video_delay_ms',0))
+        self.caption_video_delay.setToolTip('Delay live VIDEO and AUDIO together via the optional local rolling timeshift buffer.')
+        form.addRow('Video delay for Vosk',self.caption_video_delay)
+        video_note=QLabel('When recognition appears late, delay the VIDEO and AUDIO together; '
+                          'requires “Keep a temporary on-device rolling buffer” below. '
+                          'Changes made here take effect on the next channel start; '
+                          'for live adjustments use the CC menu. Not supported by all streams.')
+        video_note.setWordWrap(True)
+        form.addRow(video_note)
+        delay_note=QLabel('For captions appearing BEFORE the spoken words, increase the delay. '
+                          'For captions appearing AFTER the words, reduce toward 0 ms. '
+                          'Vosk cannot show text before recognising the audio; automatic sync '
+                          'across separate IPTV stream connections is not reliable.')
+        delay_note.setWordWrap(True)
+        form.addRow(delay_note)
+        preset=QPushButton('Apply recommended Vosk + IPTV buffer settings')
+        preset.setObjectName('applyRecommendedVoskBuffer')
+        preset.setToolTip('Opt in to a temporary on-device DVR buffer, 5-second video/audio holdback and 20 px captions. Save to keep; all values remain editable.')
+        preset.clicked.connect(self.apply_recommended_vosk_settings)
+        form.addRow('Recommended profile',preset)
+        preset_note=QLabel('Suggested starting point: 20 px subtitle text, 0 ms additional Vosk text delay '
+                           'and 5000 ms video/audio delay. This enables the optional rolling on-device '
+                           'timeshift buffer (which uses disk space). Your changes are only saved when '
+                           'you click Save. Vosk transcription still starts only when requested. '
+                           'Not all streams support buffered playback.')
+        preset_note.setWordWrap(True)
+        form.addRow(preset_note)
         model_actions=QWidget()
         model_actions_layout=QHBoxLayout(model_actions)
         model_actions_layout.setContentsMargins(0,0,0,0)
@@ -934,6 +976,15 @@ class Settings(QDialog):
         form.addRow(warning)
         note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nLinux uses an installed native Ace start-engine script and system libVLC. Mac playback can connect to a reachable engine.'); note.setWordWrap(True); form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
+    def apply_recommended_vosk_settings(self):
+        """Explicit, editable Vosk synchronisation preset; no writes until Save."""
+        self.cc_size.setValue(20)
+        self.caption_delay.setValue(0)
+        self.caption_video_delay.setValue(5000)
+        # The 5s video delay requires a device-local rolling DVR; this is
+        # opt-in only via the labelled button, never silently on upgrade.
+        self.timeshift_enabled.setChecked(True)
+
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys(existing+DEFAULT_PLAYLIST_URLS))
@@ -1139,6 +1190,8 @@ class Settings(QDialog):
                     auto_caption_model_dir=self.auto_model_path.text(),
                     auto_caption_ffmpeg_path=self.auto_ffmpeg_path.text(),
                     auto_caption_language=self.caption_language.currentText(),
+                    auto_caption_delay_ms=self.caption_delay.value(),
+                    auto_caption_video_delay_ms=self.caption_video_delay.value(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
@@ -1686,6 +1739,7 @@ class MainWindow(QMainWindow):
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
         self._subtitle_auto_applied=False
         self._subtitle_manual_track=None
+        self._subtitle_session_all_off=False
         self._subtitle_track_signature=()
         self._vlc_subtitle_profile=None
         self._playback_url=''
@@ -1699,6 +1753,13 @@ class MainWindow(QMainWindow):
         self._auto_caption_text=''
         self._auto_caption_updated=0
         self._auto_caption_started_at=0
+        self._auto_caption_restart_requested=False
+        self._auto_caption_retry_budget=0
+        self._active_holdback_ms=0
+        self._auto_caption_queue=CaptionDelayQueue()
+        self._auto_caption_timer=QTimer(self)
+        self._auto_caption_timer.setInterval(80)
+        self._auto_caption_timer.timeout.connect(self.poll_auto_caption_queue)
         self.last_capture_progress=time.monotonic();self.last_capture_seq=-1
         self.source_check=None;self.source_check_serial=0
         self._last_media_activity=None
@@ -1719,12 +1780,23 @@ class MainWindow(QMainWindow):
         self.light_timer=QTimer(self)
         self.light_timer.setInterval(850)
         self.light_timer.timeout.connect(self.pulse_live_light)
+        self._startup_layout_pending=True
+        self._ui_hang_monitor=None
+        self._ui_heartbeat_timer=QTimer(self)
+        self._ui_heartbeat_timer.setInterval(1000)
+        self._ui_heartbeat_timer.timeout.connect(self.heartbeat_ui)
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget();root.setObjectName('appShell');self.setCentralWidget(root);layout=QVBoxLayout(root);layout.setContentsMargins(9,8,9,8);layout.setSpacing(8)
         topbar=QWidget();topbar.setObjectName('appHeader');top=QHBoxLayout(topbar);top.setContentsMargins(4,4,4,4);top.setSpacing(8)
-        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(54,54,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
+        logo=QLabel(); logo.setObjectName('dizytvLogo')
+        logo.setFixedSize(54,54)
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(54,54,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        top.addWidget(logo)
+        self.header_logo=logo
+        self.header_topbar=topbar
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand)
         theme_label=QLabel('Theme')
         theme_label.setObjectName('filterTitle')
@@ -1750,11 +1822,17 @@ class MainWindow(QMainWindow):
         tools_menu.addAction('Check channel health…',self.open_channel_health)
         tools_menu.addAction('Find duplicate channels…',self.open_duplicate_channels)
         tools_menu.addAction('System usage…',self.open_system_usage)
+        tools_menu.addSeparator()
+        self.ui_diagnostics_action=tools_menu.addAction('Log UI hangs locally (opt-in)')
+        self.ui_diagnostics_action.setCheckable(True)
+        self.ui_diagnostics_action.toggled.connect(self.toggle_ui_diagnostics)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
         self.header_scroll.setObjectName('toolbarScroll')
         self.header_scroll.setWidgetResizable(False)
+        # Keep each header button at its full text width. On narrow windows,
+        # make the overflow accessible instead of shrinking/cropping labels.
         self.header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.header_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
@@ -1765,7 +1843,11 @@ class MainWindow(QMainWindow):
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
-        sidebar=QWidget();sidebar.setObjectName('appSidebar');side=QVBoxLayout(sidebar);side.setContentsMargins(10,10,10,10);side.setSpacing(7);self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
+        sidebar=QWidget();sidebar.setObjectName('appSidebar');side=QVBoxLayout(sidebar);side.setContentsMargins(10,10,10,10);side.setSpacing(7)
+        # Keep each filter/checkbox/button at its full vertical size. When
+        # space runs out, the sidebar scrolls instead of crushing text rows.
+        side.setSizeConstraint(QLayout.SetMinimumSize)
+        self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox()
         self.kind_filter=QComboBox(); self.source_filter=QComboBox()
         self.section_filter=QComboBox()
@@ -1801,6 +1883,7 @@ class MainWindow(QMainWindow):
         side.addWidget(order)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
+        self.country_tree.setMinimumHeight(86)
         self.country_tree.setMaximumHeight(240)
         self.country_tree.itemClicked.connect(self.country_tree_clicked)
         self.country_tree.itemDoubleClicked.connect(self.country_tree_double_clicked)
@@ -1818,15 +1901,33 @@ class MainWindow(QMainWindow):
         self.show_disabled.toggled.connect(self.refresh_disabled_channels)
         selector_row.addWidget(self.show_disabled)
         side.addWidget(selectors)
-        self.channels=QListWidget(); self.channels.currentItemChanged.connect(self.choose_channel); self.channels.itemDoubleClicked.connect(lambda:self.play()); side.addWidget(self.channels,1)
+        self.channels=QListWidget()
+        self.channels.setMinimumHeight(86)
+        self.channels.currentItemChanged.connect(self.choose_channel)
+        self.channels.itemDoubleClicked.connect(lambda:self.play())
+        side.addWidget(self.channels,1)
         for label,handler in [('★ Add / remove favourite',self.favourite),
                               ('Hide / restore selected',self.toggle_channel_visibility),
                               ('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
             b=QPushButton(label); b.clicked.connect(handler); side.addWidget(b)
         self.sidebar=sidebar
-        sidebar.setMinimumWidth(0)
+        self.sidebar_scroll=QScrollArea()
+        self.sidebar_scroll.setObjectName('sidebarScroll')
+        self.sidebar_scroll.setWidgetResizable(True)
+        self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.sidebar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.sidebar_scroll.setFrameShape(QFrame.NoFrame)
+        self.sidebar_scroll.setMinimumWidth(0)
+        self.sidebar_scroll.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
         sidebar.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
-        split.addWidget(sidebar); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
+        # The panel will NEVER squeeze its buttons/labels shorter than their
+        # full text. At extremely narrow widths its own scrollbar takes over.
+        self.sidebar_scroll.setWidget(sidebar)
+        self.country_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.country_tree.setTextElideMode(Qt.ElideNone)
+        self.channels.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.channels.setTextElideMode(Qt.ElideNone)
+        split.addWidget(self.sidebar_scroll); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
         self.tabs.setObjectName('mainTabs')
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setExpanding(False)
@@ -1976,6 +2077,8 @@ class MainWindow(QMainWindow):
         self.status=QLabel('Ready  •  Configure sources and recording storage in Settings');self.status.setObjectName('appStatus');layout.addWidget(self.status)
         self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
+        if os.environ.get('DIZYTV_UI_DIAGNOSTICS')=='1':
+            self.ui_diagnostics_action.setChecked(True)
         self.light_timer.start()
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
@@ -1985,6 +2088,109 @@ class MainWindow(QMainWindow):
             # Previously cached Ace channels hid newly configured public feeds.
             # Always refresh on startup, retaining cached channels until success.
             QTimer.singleShot(200,self.refresh_channels)
+    def heartbeat_ui(self):
+        if self._ui_hang_monitor is not None:
+            self._ui_hang_monitor.heartbeat()
+
+    def toggle_ui_diagnostics(self,enabled):
+        """Log a Python main-thread stack when the Qt loop stops responding."""
+        if enabled:
+            if self._ui_hang_monitor is not None:
+                return
+            self._ui_hang_monitor=UiHangMonitor(self.store.directory/'diagnostics')
+            self._ui_hang_monitor.start()
+            self._ui_heartbeat_timer.start()
+            self.status.setText('UI hang logging enabled locally: '+
+                                str(self._ui_hang_monitor.path)+
+                                ' — inspect stack paths before sharing.')
+        else:
+            self._ui_heartbeat_timer.stop()
+            if self._ui_hang_monitor is not None:
+                self._ui_hang_monitor.stop()
+                self._ui_hang_monitor=None
+            self.status.setText('UI hang logging disabled. Existing local logs are retained.')
+
+    def showEvent(self,event):
+        super().showEvent(event)
+        if self._startup_layout_pending:
+            self._startup_layout_pending=False
+            # Qt computes stylesheet-driven QPushButton hints only once the
+            # real platform window is shown. The initial pre-show QScrollArea
+            # dimensions can therefore clip the logo and header controls.
+            QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
+
+    def settle_startup_toolbar_layout(self):
+        """Polish shared Windows/macOS/Linux controls after the real Qt layout.
+
+        Qt calculates platform-specific text/DPI size hints only after the
+        window is shown and the saved stylesheet has been applied. The content
+        area is never allowed to shrink a label; overflow remains scrollable.
+        """
+        if not hasattr(self,'header_scroll'):
+            return
+        sidebar=self.sidebar
+        sidebar.ensurePolished()
+        # Never let QSplitter/QScrollArea compress a category label, filter,
+        # dropdown, favourite checkbox or action button below its styled
+        # text height.  The panel scrolls VERTICALLY when the window is short.
+        # Remember each widget's real pre-policy minimum. Qt style size hints
+        # change on 80%/100%/150% and Compact/Normal/Large transitions; minima
+        # imposed by an earlier layout must be cleared BEFORE recomputing them.
+        original=getattr(self,'_sidebar_original_min_heights',None)
+        if original is None:
+            original={}
+            self._sidebar_original_min_heights=original
+        for widget in sidebar.findChildren(QWidget):
+            if not isinstance(widget,(QLabel,QPushButton,QComboBox,
+                                      QCheckBox,QLineEdit)):
+                continue
+            initial=original.setdefault(widget,widget.minimumHeight())
+            widget.setMinimumHeight(initial)
+            widget.ensurePolished()
+            hint=widget.sizeHint().height()
+            if hint>0:
+                widget.setMinimumHeight(max(initial,hint))
+        sidebar.setMinimumHeight(0)
+        sidebar.layout().invalidate()
+        sidebar.layout().activate()
+        required_height=sidebar.layout().minimumSize().height()
+        sidebar.setMinimumHeight(required_height)
+        self.sidebar_scroll.updateGeometry()
+        for widget in (self.country_filter,self.genre_filter,self.kind_filter,
+                       self.source_filter,self.section_filter,self.sort_picker):
+            widget.ensurePolished()
+        # Keep the viewer's selected splitter width. The side panel scrolls
+        # vertically if the window is too short, without consuming extra video
+        # space merely because category labels have wide text.
+        self.sidebar_scroll.updateGeometry()
+        for area in (self.header_scroll,self.controls_scroll):
+            child=area.widget()
+            if child is None:
+                continue
+            child.ensurePolished()
+            for widget in child.findChildren(QWidget):
+                widget.ensurePolished()
+            child_layout=child.layout()
+            if child_layout:
+                child_layout.invalidate()
+                child_layout.activate()
+            child.adjustSize()
+            base_height=child.sizeHint().height()
+            if area is self.header_scroll:
+                base_height=max(base_height,self.header_logo.height()+8)
+                child.setMinimumWidth(child.sizeHint().width())
+            scrollbar=area.horizontalScrollBar()
+            # The header has a visible scrollbar when needed; the playback
+            # strip uses its existing chevrons and no native scrollbar.
+            extra=(scrollbar.sizeHint().height()
+                   if area is self.header_scroll and scrollbar.maximum()>scrollbar.minimum()
+                   else 0)
+            desired=base_height+(12 if area is self.header_scroll else 6)+extra
+            if area.height()!=desired:
+                area.setFixedHeight(desired)
+            area.updateGeometry()
+        self.sync_player_button_arrows()
+
     def error(self,message):
         self.status.setText(message); QMessageBox.warning(self,'DizyTV',message)
     def load_guide(self):
@@ -2317,7 +2523,7 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
-        QTimer.singleShot(0,self,self.sync_player_button_arrows)
+        QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
 
     def scroll_player_buttons(self,step):
         bar=self.controls_scroll.horizontalScrollBar()
@@ -2456,7 +2662,8 @@ class MainWindow(QMainWindow):
 
         Never interrupt user pause, replay, or a scheduled recording.
         """
-        if self.timeshift is None or self.player is None or not self.playback_started:
+        if (self.timeshift is None or self.timeshift_task is not None
+                or self.player is None or not self.playback_started):
             return
         now=time.monotonic() if now is None else now
         entries=self.timeshift.window.snapshot()
@@ -2485,14 +2692,60 @@ class MainWindow(QMainWindow):
                 and now-self.last_live_recovery>=45
                 and (playing or status.endswith('.Buffering') or status.endswith('.Error')
                      or status.endswith('.Ended'))):
+            # Reconnecting the player does not stop or erase the capture ring.
+            # A moving Vosk holdback remains held back after recovery; never
+            # silently switch a synced viewer to the unbuffered LIVE endpoint.
+            if self._active_holdback_ms:
+                if len(self.timeshift.window.holdback_entries(
+                        self._active_holdback_ms/1000))<3:
+                    self.seek_notice.setText('Vosk video buffer refilling; waiting for playable fragments.')
+                    return
+                target=self.timeshift.holdback_url(self._active_holdback_ms/1000)
+            else:
+                target=self.timeshift.live_url()
             self.last_live_recovery=now
             self.last_good_video=now
-            # Reconnecting the player does not stop or erase the capture ring.
-            self.play_url(self.timeshift.live_url())
-            self.status.setText('Recovered stalled timeshift playback to LIVE automatically.')
+            self.play_url(target,preserve_captions=self._auto_caption_worker is not None)
+            if not self.playback_started:
+                self.stop_auto_captions()
+                return
+            self.status.setText('Recovered stalled buffered TV playback'+
+                                (' while preserving Vosk video delay.' if self._active_holdback_ms
+                                 else ' to LIVE.'))
+
+    def stop_caption_on_terminal_playback(self):
+        """Hide stale Vosk text if the current source has actually ended.
+
+        Never interfere with recoverable timeshift buffering: the DVR watchdog
+        can reconnect a held-back stream as long as new fragments arrive.
+        """
+        if self._auto_caption_worker is None or self._auto_caption_stopping:
+            return
+        if not self.player or not self.playback_started:
+            self.stop_auto_captions()
+            return
+        try:status=str(self.player.get_state())
+        except (AttributeError,OSError,RuntimeError):return
+        terminal=(status.endswith('.Ended') or status.endswith('.Error')
+                  or status.endswith('.Stopped'))
+        if not terminal:
+            return
+        if (self.timeshift is not None and self.timeshift_task is None
+                and self.timeshift_lag==0):
+            if time.monotonic()-self.last_capture_progress<=25:
+                return  # Moving holdback or live DVR watchdog can recover.
+        # Fixed replay does not have an automatic reconnect path; stop Vosk
+        # rather than reading ahead on an ended or failed video.
+        self.stop_auto_captions()
+        self.status.setText('Stream playback ended; offline speech captions stopped.')
 
     def tick(self):
-        self.state=self.store.read(); zone=self.state['settings']['timezone']
+        # Detached recording workers hold a cross-process state lock while
+        # writing. The five-second Qt timer must not wait behind that lock.
+        snapshot=self.store.try_read()
+        if snapshot is not None:
+            self.state=snapshot
+        zone=self.state['settings']['timezone']
         label=('Auto: '+detected_zone() if zone=='auto' else zone); local=format_time(time.time(),zone,False,detected_zone()); key=label+' '+local.rsplit(' ',1)[-1]
         self.timezone_label.setText(label+' • '+local)
         if key!=self.displayed_zone:self.displayed_zone=key; self.render_guide()
@@ -2505,6 +2758,7 @@ class MainWindow(QMainWindow):
         self.check_live_timeshift()
         self.check_direct_playback()
         self.sync_subtitles()
+        self.stop_caption_on_terminal_playback()
         if self._auto_caption_overlay is not None and time.monotonic()-self._auto_caption_updated>6:
             self._auto_caption_overlay.hide()
         if self.player and self.playback_started:
@@ -2753,7 +3007,7 @@ class MainWindow(QMainWindow):
         backdrop='rgba(255,255,255,222)' if colour=='#000000' else 'rgba(0,0,0,190)'
         font={'Sans':'Arial','Serif':'Georgia','Monospace':'Consolas'}.get(
             settings.get('subtitle_font','Sans'),'Arial')
-        size=settings.get('subtitle_size',28)
+        size=settings.get('subtitle_size',20)
         label.setStyleSheet(
             'QLabel#autoCaptionText {font-family:"'+font+'";font-size:'+str(size)+'px;'
             'font-weight:700;color:'+colour+';background:'+backdrop+';'
@@ -2763,7 +3017,7 @@ class MainWindow(QMainWindow):
     def position_auto_caption_overlay(self):
         overlay=self._auto_caption_overlay
         if overlay is None or self.video.width()<1 or self.video.height()<1:return
-        size=self.state['settings'].get('subtitle_size',28)
+        size=self.state['settings'].get('subtitle_size',20)
         width=max(100,int(self.video.width()*.86))
         height=max(64,min(self.video.height()//2,size*3+26))
         margin=POSITIONS.get(self.state['settings'].get('subtitle_position','Bottom'),16)
@@ -2788,6 +3042,17 @@ class MainWindow(QMainWindow):
         if serial!=self._auto_caption_seq or self._auto_caption_worker is None:return
         text=caption_text(text)
         if not text:return
+        self._auto_caption_queue.push(text,round(time.monotonic()*1000))
+        self.poll_auto_caption_queue()
+
+    def poll_auto_caption_queue(self):
+        if self._auto_caption_worker is None or self._auto_caption_stopping:return
+        delay=self.state['settings'].get('auto_caption_delay_ms',0)
+        text=self._auto_caption_queue.pop_due(round(time.monotonic()*1000),delay)
+        if text is not None:
+            self.show_auto_caption_text(text)
+
+    def show_auto_caption_text(self,text):
         self._auto_caption_text=text
         self._auto_caption_updated=time.monotonic()
         self.create_auto_caption_overlay()
@@ -2801,20 +3066,59 @@ class MainWindow(QMainWindow):
                 and self.detached_controls.isVisible()):
             self.detached_controls.raise_()
 
+    def change_auto_caption_delay(self,change_ms=None):
+        """Live adjustment of Vosk text ONLY; VLC broadcast captions stay untouched."""
+        old=self.store.read()['settings'].get('auto_caption_delay_ms',0)
+        delay=0 if change_ms is None else max(0,min(10000,old+change_ms))
+        self.state=self.store.update(lambda s:s['settings'].update(auto_caption_delay_ms=delay))
+        self.poll_auto_caption_queue()
+        self.status.setText('Local Vosk subtitle delay: '+str(delay)+' ms. '
+                            '0 ms shows recognised words immediately. '
+                            'A separate speech connection cannot anticipate audio.')
+
     def auto_caption_finished(self,serial,reason):
-        # Cancellation invalidates the UI caption serial immediately, but
-        # retain the worker until its (possibly slow) model load really ends.
+        # Invalidate old Qt signals immediately; this also removes the overlay
+        # even if FFmpeg exits spontaneously after a source stops.
         if serial!=self._auto_caption_worker_serial:return
         was_stopping=self._auto_caption_stopping
+        queued_restart=self._auto_caption_restart_requested
+        current=(serial==self._auto_caption_seq)
         self._auto_caption_worker=None
         self._auto_caption_worker_serial=None
         self._auto_caption_stopping=False
+        self._auto_caption_restart_requested=False
         self._auto_caption_signals=None
+        self._auto_caption_timer.stop()
+        self._auto_caption_queue.clear()
+        self._auto_caption_text=''
         self.destroy_auto_caption_overlay()
-        if reason and not was_stopping:self.status.setText(reason)
+        if queued_restart and not current and self.player and self.playback_started:
+            QTimer.singleShot(0,self.toggle_auto_captions)
+        elif current and not was_stopping and self._auto_caption_retry_budget>0:
+            # Unexpected FFmpeg loss: bounded retries, never infinite reconnect
+            # loops. The retry checks the same session and requires live video.
+            QTimer.singleShot(2500,lambda:self.retry_auto_captions(serial))
+            if reason:self.status.setText(reason+' Retrying Vosk if video is still playing…')
+        elif reason and not was_stopping:self.status.setText(reason)
+
+    def retry_auto_captions(self,serial):
+        if (serial!=self._auto_caption_seq or self._auto_caption_worker is not None
+                or not self.player or not self.playback_started
+                or self._auto_caption_retry_budget<=0):
+            return
+        try:state=str(self.player.get_state())
+        except (AttributeError,OSError,RuntimeError):return
+        if not state.endswith('.Playing'):
+            return
+        self._auto_caption_retry_budget-=1
+        self.toggle_auto_captions(automated=True)
 
     def stop_auto_captions(self):
+        self._auto_caption_restart_requested=False
+        self._auto_caption_retry_budget=0
         self._auto_caption_seq+=1
+        self._auto_caption_timer.stop()
+        self._auto_caption_queue.clear()
         worker=self._auto_caption_worker
         if worker is not None:
             self._auto_caption_stopping=True
@@ -2822,16 +3126,22 @@ class MainWindow(QMainWindow):
         self._auto_caption_text=''
         self.destroy_auto_caption_overlay()
 
-    def toggle_auto_captions(self):
+    def toggle_auto_captions(self, automated=False):
         if self._auto_caption_worker is not None:
             if self._auto_caption_stopping:
-                self.status.setText('Previous offline caption model is still shutting down. Please wait.')
+                self._auto_caption_restart_requested=True
+                self.status.setText('Restarting Vosk automatically when the previous speech worker finishes cleanup…')
                 return
             self.stop_auto_captions()
             self.status.setText('Stopping local speech captions; waiting for speech model cleanup…')
             return
         if not self.player or not self.playback_started or not self._playback_url:
             self.status.setText('Play a live channel before starting local speech captions.')
+            return
+        try:play_state=str(self.player.get_state())
+        except (AttributeError,OSError,RuntimeError):play_state=''
+        if play_state.endswith(('.Stopped','.Ended','.Error')):
+            self.status.setText('The stream is stopped; restart playback before generating Vosk captions.')
             return
         settings=self.state['settings']
         language=settings.get('auto_caption_language','English (bundled)')
@@ -2853,6 +3163,8 @@ class MainWindow(QMainWindow):
             self.status.setText('Local captions unavailable: '+str(exc)+
                                 ' Open Settings to check optional model/FFmpeg overrides.')
             return
+        if not automated:
+            self._auto_caption_retry_budget=2
         self._auto_caption_seq+=1
         serial=self._auto_caption_seq
         signals=CaptionSignals(self)
@@ -2873,6 +3185,8 @@ class MainWindow(QMainWindow):
                             'Listening for speech; captions may take several seconds. '
                             'Second source connection; no microphone or cloud speech.')
         self._auto_caption_started_at=time.monotonic()
+        self._auto_caption_queue.clear()
+        self._auto_caption_timer.start()
         # Show a visible acknowledgment that auto CC was selected. Only actual
         # recognition results replace this text; it is not fabricated dialogue.
         self.create_auto_caption_overlay()
@@ -2902,16 +3216,25 @@ class MainWindow(QMainWindow):
         so a cheap periodic scan is safer than a one-shot lookup on Play.
         """
         if not self.player or not self.playback_started:return
-        # Turning captions off does not require enumerating decoder tracks.
-        # Some streams also expose the track list only after startup.
-        if not self.state['settings'].get('subtitles_enabled',True):
-            if not self._subtitle_auto_applied:
-                try:
-                    # VLC may list a stream before its subtitle decoder is
-                    # ready. Retry until it actually accepts the Off request.
-                    if self.player.video_set_spu(-1)==0:
-                        self._subtitle_auto_applied=True
-                except (AttributeError,OSError,RuntimeError):pass
+        # The VLC decoder may re-enable an embedded caption track AFTER a
+        # buffered retune starts, even if video_set_spu(-1) succeeded earlier.
+        # Keep Off pending until tracks are available, and retry when the
+        # decoder's selection or track signature changes.
+        if (self._subtitle_session_all_off or self._subtitle_manual_track==-1 or
+                not self.state['settings'].get('subtitles_enabled',True)):
+            tracks=subtitle_tracks(self.player)
+            signature=tuple(tracks)
+            try:
+                current=self.player.video_get_spu()
+                if (current!=-1 or not self._subtitle_auto_applied or
+                        signature!=self._subtitle_track_signature):
+                    accepted=self.player.video_set_spu(-1)==0
+                    # A decoder without published tracks is not yet ready;
+                    # check again on the next timer, even if it returned 0.
+                    self._subtitle_auto_applied=accepted and bool(tracks)
+                    self._subtitle_track_signature=signature
+            except (AttributeError,OSError,RuntimeError):
+                self._subtitle_auto_applied=False
             return
         if self._subtitle_manual_track is not None:
             return
@@ -2930,6 +3253,18 @@ class MainWindow(QMainWindow):
             self._subtitle_track_signature=signature
         except (AttributeError,OSError,RuntimeError):pass
 
+    def disable_all_subtitles(self):
+        """CC Off disables both independent caption engines immediately."""
+        self._subtitle_session_all_off=True
+        self.stop_auto_captions()
+        self._subtitle_manual_track=-1
+        self._subtitle_auto_applied=False  # force Off retry after track parsing
+        self._subtitle_track_signature=()
+        if self.player and self.playback_started:
+            try:self.player.video_set_spu(-1)
+            except (AttributeError,OSError,RuntimeError):pass
+        self.status.setText('All subtitles off (broadcast + offline Vosk).')
+
     def choose_subtitle_track(self,track):
         if not self.player or not self.playback_started:return
         if track!=-1 and track not in {key for key,_ in subtitle_tracks(self.player)}:return
@@ -2940,8 +3275,11 @@ class MainWindow(QMainWindow):
         except (AttributeError,OSError,RuntimeError):
             self.status.setText('Subtitle selection is not available from this VLC build.')
             return
+        if track!=-1:
+            self._subtitle_session_all_off=False
         self._subtitle_manual_track=track
-        self._subtitle_auto_applied=True
+        self._subtitle_auto_applied=track!=-1
+        self._subtitle_track_signature=()
         self.status.setText('Subtitles off' if track==-1 else 'Subtitle track '+str(track)+' selected')
 
     def load_subtitle_file(self):
@@ -2971,8 +3309,10 @@ class MainWindow(QMainWindow):
         tracks=subtitle_tracks(self.player)
         menu.addSection('Broadcast subtitle tracks')
         if self.player and self.playback_started:
-            action=menu.addAction('Off')
-            action.triggered.connect(lambda:self.choose_subtitle_track(-1))
+            action=menu.addAction('Off — all subtitles (including Vosk)')
+            action.triggered.connect(self.disable_all_subtitles)
+            embedded_only=menu.addAction('Off — broadcast captions only')
+            embedded_only.triggered.connect(lambda:self.choose_subtitle_track(-1))
             for key,name in tracks:
                 action=menu.addAction('CC  '+name)
                 action.setCheckable(True)
@@ -2991,11 +3331,43 @@ class MainWindow(QMainWindow):
         appearance=menu.addAction('Subtitle size, font, colour, position…')
         appearance.triggered.connect(self.settings)
         menu.addSection('Speech-generated captions')
-        auto=menu.addAction('Stopping local speech captions…' if self._auto_caption_stopping
-                            else ('Stop local speech captions' if self._auto_caption_worker
-                                  else 'Generate live subtitles (offline Vosk + FFmpeg)'))
-        auto.setEnabled(not self._auto_caption_stopping)
+        auto=menu.addAction('Restart Vosk when cleanup finishes'
+                            if self._auto_caption_stopping else
+                            ('Stop local speech captions' if self._auto_caption_worker
+                             else 'Generate live subtitles (offline Vosk + FFmpeg)'))
+        auto.setEnabled(not self._auto_caption_stopping or not self._auto_caption_restart_requested)
         auto.triggered.connect(self.toggle_auto_captions)
+        menu.addSection('Vosk text timing (not embedded subtitles)')
+        delay=self.state['settings'].get('auto_caption_delay_ms',0)
+        current=menu.addAction('Current added delay: '+str(delay)+' ms')
+        current.setEnabled(False)
+        earlier=menu.addAction('Less delay (−250 ms)')
+        earlier.setEnabled(delay>0)
+        earlier.triggered.connect(lambda:self.change_auto_caption_delay(-250))
+        later=menu.addAction('More delay (+250 ms)')
+        later.setEnabled(delay<10000)
+        later.triggered.connect(lambda:self.change_auto_caption_delay(250))
+        reset=menu.addAction('Reset Vosk delay to 0 ms')
+        reset.setEnabled(delay!=0)
+        reset.triggered.connect(lambda:self.change_auto_caption_delay())
+        menu.addSection('Video/audio holdback via local timeshift')
+        video_delay=self.state['settings'].get('auto_caption_video_delay_ms',0)
+        local_ready=(self.timeshift is not None and self.timeshift_task is None
+                     and self.player is not None and bool(self.playback_started))
+        current_video=menu.addAction('Target video delay: '+str(video_delay)+' ms')
+        current_video.setEnabled(False)
+        advance=menu.addAction('Less VIDEO delay (−1 second)')
+        advance.setEnabled(local_ready and video_delay>0)
+        advance.triggered.connect(lambda:self.change_auto_caption_video_delay(-1000))
+        hold=menu.addAction('More VIDEO delay (+1 second)')
+        hold.setEnabled(local_ready and video_delay<30000)
+        hold.triggered.connect(lambda:self.change_auto_caption_video_delay(1000))
+        video_reset=menu.addAction('Reset VIDEO delay to live')
+        video_reset.setEnabled(local_ready and video_delay>0)
+        video_reset.triggered.connect(lambda:self.change_auto_caption_video_delay())
+        if not local_ready:
+            notice=menu.addAction('Enable on-device timeshift in Settings to delay video')
+            notice.setEnabled(False)
         menu.exec(QCursor.pos())
 
     def init_player(self):
@@ -3017,8 +3389,11 @@ class MainWindow(QMainWindow):
         if sys.platform=='darwin':self.player.set_nsobject(win)
         elif os.name=='nt':self.player.set_hwnd(win)
         else:self.player.set_xwindow(win)
-    def play_url(self,url):
-        self.stop_auto_captions()
+    def play_url(self,url,preserve_captions=False):
+        # Only the in-place DVR caption-sync controls use preserve_captions;
+        # channel tuning, record recovery and ordinary seeks retain old reset.
+        if not preserve_captions:
+            self.stop_auto_captions()
         self._playback_url=url
         self._active_direct_video=False
         try:
@@ -3043,9 +3418,12 @@ class MainWindow(QMainWindow):
                         self.state['settings'].get('http_buffer_ms',4000)))
             self.player.set_media(media); media.release()
             self._subtitle_auto_applied=False
-            self._subtitle_manual_track=None
+            self._subtitle_manual_track=(-1 if self._subtitle_session_all_off else None)
             self._subtitle_track_signature=()
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
+            if self._subtitle_session_all_off:
+                try:self.player.video_set_spu(-1)
+                except (AttributeError,OSError,RuntimeError):pass
             self.playback_started=time.monotonic(); self.playback_reported=False
             self._last_media_activity=None
             self._video_issue_notified=False
@@ -3067,6 +3445,7 @@ class MainWindow(QMainWindow):
             self.status.setText('Connecting to stream…')
         except Exception as exc:
             self.playback_started=0
+            self.stop_auto_captions()
             self.error('Playback could not start. Check that VLC 3 is installed and the stream is available. '+str(exc))
     def detected_timezone(self):
         return detected_zone()
@@ -3167,6 +3546,7 @@ class MainWindow(QMainWindow):
         self.pool.start(diagnostic)
 
     def close_timeshift(self):
+        self._active_holdback_ms=0
         prior=self.timeshift
         self.timeshift=None
         self.timeshift_task=None
@@ -3175,9 +3555,14 @@ class MainWindow(QMainWindow):
         self.last_capture_progress=time.monotonic()
         self.last_good_video=time.monotonic()
         if prior:
-            prior.close()
+            # Buffer/server cleanup may involve disk IO or socket timeouts.
+            # Never block the Qt event loop, including window shutdown.
+            prior.close_async()
 
     def play_stream(self,url):
+        # The new stream may wait many seconds for the DVR: old subtitles must
+        # disappear at channel-switch REQUEST time, not after the new buffer.
+        self.stop_auto_captions()
         # Capture/loopback starts off the GUI thread; unsupported sources fail
         # open to ordinary live video. No cache is created unless opted in.
         self.close_timeshift()
@@ -3200,25 +3585,76 @@ class MainWindow(QMainWindow):
         self.last_capture_progress=time.monotonic()
         self.last_good_video=time.monotonic()
         self.status.setText('Preparing temporary local timeshift buffer…')
-        job=Task(session.start)
+        requested_delay_ms=(settings.get('auto_caption_video_delay_ms',0)
+                            if settings.get('timeshift_enabled',False) else 0)
+        job=Task(lambda:session.start_delayed(requested_delay_ms/1000))
         self.timeshift_task=job
         def ready(local_url):
             if self.timeshift is not session:
-                session.close()
+                session.close_async()
                 return
             self.timeshift_task=None
             self.play_url(local_url)
-            self.seek_notice.setText('Temporary on-device timeshift is recording; up to '+str(session.window.minutes)+' minutes')
+            self._active_holdback_ms=requested_delay_ms
+            self.timeshift_lag=0  # Fixed replay lag; moving live holdback is separate.
+            self.seek_notice.setText('Temporary on-device timeshift is recording; up to '+str(session.window.minutes)+
+                                     ' minutes'+(' • video ~'+str(round(self.timeshift_lag,1))+'s behind LIVE for Vosk sync'
+                                                 if self.timeshift_lag>0 else ''))
         def failed(message):
             if self.timeshift is not session:return
             self.timeshift=None
             self.timeshift_task=None
-            session.close()
+            session.close_async()
             self.play_url(url)
             self.seek_notice.setText('Timeshift unavailable ('+message+'); playing original stream')
         job.signals.success.connect(ready)
         job.signals.failure.connect(failed)
         self.pool.start(job)
+
+    def change_auto_caption_video_delay(self,change_ms=None):
+        """Move the complete A/V playback behind live, using existing local DVR.
+
+        A separate source-based FFmpeg recognition worker is intentionally kept
+        alive across this *same-source* replay so its timeline isn't restarted.
+        This cannot guarantee media-clock sync for providers serving mismatched
+        live edges, but gives users a real picture+sound holdback control.
+        """
+        old=self.store.read()['settings'].get('auto_caption_video_delay_ms',0)
+        target=0 if change_ms is None else max(0,min(30000,old+change_ms))
+        if (self.timeshift is None or self.timeshift_task is not None
+                or self.player is None or not self.playback_started):
+            self.status.setText('Video holdback needs fully started local timeshift playback. '
+                                'Enable “Keep a temporary on-device rolling buffer” in Settings, '
+                                'then restart the channel. No stream was interrupted.')
+            return
+        # Readiness is about PLAYABLE fragments after filtering, not total
+        # buffered seconds (long 10-second segments may leave zero video).
+        playable=len(self.timeshift.window.holdback_entries(target/1000))
+        if target>0 and playable<3:
+            self.status.setText('Waiting for buffered playback: '+str(playable)+
+                                ' playable segments; at least 3 required.')
+            return
+        actual=target/1000 if target>0 else 0.0
+        try:
+            target_url=(self.timeshift.holdback_url(actual) if actual>0 else
+                        self.timeshift.live_url())
+            # Do not stop Vosk while retuning ONLY the current DVR replay URL.
+            self.play_url(target_url,preserve_captions=True)
+            if not self.playback_started:
+                self.stop_auto_captions()
+                return
+        except (OSError,RuntimeError,ValueError) as exc:
+            self.status.setText('Could not adjust video delay: '+str(exc)[:160])
+            return
+        self._active_holdback_ms=target
+        self.timeshift_lag=0
+        self.state=self.store.update(lambda s:s['settings'].update(auto_caption_video_delay_ms=target))
+        self.seek_notice.setText('DVR video/audio ~'+str(round(actual,1))+
+                                 's behind live; selected target '+str(target)+' ms. '
+                                 'Existing Vosk subtitle delay stays separate.')
+        self.status.setText('Video/audio holdback '+str(target)+' ms. '
+                            'Matching stream positions is approximate; '
+                            'network source clocks may differ.')
 
     def play(self):
         if not self.selected:return
@@ -3230,6 +3666,9 @@ class MainWindow(QMainWindow):
         is_ace=ace_id(ch['stream']) is not None
         if is_ace and self.engine_task is not None:
             self.status.setText('Ace Stream engine startup is already in progress…'); return
+        # The viewer has requested a new channel NOW. Remove old Vosk words
+        # before an Ace engine/TV source may spend seconds connecting.
+        self.stop_auto_captions()
         if not is_ace:
             # Supersede pending Ace preparation when tuning a direct channel.
             # Its late callbacks must neither start video nor block a new Ace request.
@@ -3819,6 +4258,10 @@ class MainWindow(QMainWindow):
             self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
+        self._ui_heartbeat_timer.stop()
+        if self._ui_hang_monitor is not None:
+            self._ui_hang_monitor.stop()
+            self._ui_hang_monitor=None
         # Modeless tools may own timers or queued progressive work. Hiding the
         # main window does not close them, so route shutdown through their
         # cancellation/cleanup handlers before stopping the player.
