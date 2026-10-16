@@ -125,7 +125,7 @@ def finish_job(store,job_id,result):
     store.update(change)
 
 
-def recording_playback_url(channel, settings):
+def recording_playback_url(channel, settings, directory=None):
     """Prepare a direct recorder URL using the *selected* local engine API.
 
     Outpace deliberately disables Ace's experimental /ace/getstream endpoint.
@@ -138,15 +138,15 @@ def recording_playback_url(channel, settings):
         return stream_url(source,settings['engine_url'])
     from .engine import ensure_ready, start_playback_session
     address=settings['engine_url']
-    ensure_ready(address,executable_path=settings.get('engine_executable',''))
-    return start_playback_session(source,address)
+    ensure_ready(address,executable_path=settings.get('engine_executable',''),directory=directory)
+    return start_playback_session(source,address,directory=directory)
 
 
 def release_recorder_outpace(directory=None):
     """Stop only an Outpace child this *worker* started, not external engines."""
     if sys.platform=='darwin' or sys.platform.startswith('linux'):
         from .outpace import stop_idle_owned_daemon, reap_handed_off_daemon
-        stop_idle_owned_daemon()
+        stop_idle_owned_daemon(directory=directory)
         if directory is not None:
             reap_handed_off_daemon(directory)
 
@@ -169,7 +169,7 @@ def worker(directory=None):
                     def cancelled():
                         return not any(j['id']==job['id'] and j['status']=='recording' for j in store.read()['jobs'])
                     try:
-                        target=recording_playback_url(channel,state['settings'])
+                        target=recording_playback_url(channel,state['settings'],directory=store.directory)
                         result = record_stream(
                             target,state['settings']['recording_dir'],job['title'],job['end'],
                             state['settings']['reserve_bytes'],cancelled,
