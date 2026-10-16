@@ -179,9 +179,9 @@ class OutpaceTests(unittest.TestCase):
                 'pid':24321,'binary':'/private/outpace','identity':'b'*64,
                 'idle_since':outpace.time.time()-outpace.IDLE_GRACE_SECONDS-2}))
             outpace.register_playback_intent(folder)
-            with patch.object(outpace,'_process_identity',return_value='b'*64), \\
-                 patch('dizytv.storage.Store') as store, \\
-                 patch.object(outpace,'urlopen',return_value=Response()), \\
+            with patch.object(outpace,'_process_identity',return_value='b'*64), \
+                 patch('dizytv.storage.Store') as store, \
+                 patch.object(outpace,'urlopen',return_value=Response()), \
                  patch.object(outpace.os,'kill') as terminate:
                 store.return_value.try_read.return_value={'jobs':[],'channels':[]}
                 self.assertFalse(outpace.reap_handed_off_daemon(folder))
