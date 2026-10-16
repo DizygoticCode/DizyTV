@@ -138,6 +138,54 @@ class TestTimeshift(unittest.TestCase):
             finally:
                 session.close()
 
+    def test_timeshift_cleanup_does_not_wait_on_gui_thread(self):
+        from threading import Event
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='async-shutdown')
+            cleanup_entered=Event()
+            allow_cleanup=Event()
+            original_close=session.close
+            def slow_cleanup():
+                cleanup_entered.set()
+                allow_cleanup.wait(2)
+                original_close()
+            with patch.object(session,'close',side_effect=slow_cleanup):
+                try:
+                    session.close_async()  # Must return before background IO ends.
+                    self.assertTrue(session.stop_event.is_set())
+                    self.assertTrue(session.ready.is_set())
+                    self.assertTrue(cleanup_entered.wait(1))
+                    self.assertFalse(allow_cleanup.is_set())
+                finally:
+                    allow_cleanup.set()
+            # The normal cleanup entry point remains safe/idempotent.
+            original_close()
+            self.assertFalse(session.window.directory.exists())
+
+    def test_closing_server_before_serving_never_calls_shutdown_deadlock(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='pre-server-thread')
+            server=Mock()
+            session._server=server
+            session._server_thread=None  # Startup interrupted pre-serve_forever.
+            session.close()
+            server.server_close.assert_called_once()
+            server.shutdown.assert_not_called()
+            session.close()  # Concurrent/late cleanup is harmless.
+            self.assertTrue(session.stop_event.is_set())
+
+    def test_closed_timeshift_rejects_late_capture_start(self):
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='preclosed')
+            session.close()
+            with self.assertRaisesRegex(RuntimeError,'already closed'):
+                session.start(timeout=0.1)
+
     def test_free_space_reserve_blocks_more_data(self):
         with tempfile.TemporaryDirectory() as path:
             w=RollingWindow(path, free=lambda:1024, reserve_bytes=1024**3)
