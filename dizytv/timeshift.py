@@ -116,8 +116,20 @@ class RollingWindow:
                 return item.seq
         return entries[0].seq
 
-    def playlist(self, from_seq=None):
+    def playlist(self, from_seq=None, holdback_seconds=0):
+        """A moving live playlist can intentionally omit the newest segments."""
+        if not isinstance(holdback_seconds,(float,int)) or isinstance(holdback_seconds,bool) or not 0<=holdback_seconds<=30:
+            raise ValueError('Invalid local video holdback')
         entries = self.snapshot()
+        if holdback_seconds:
+            cut=len(entries)
+            excluded=0.0
+            # HLS/MPEG-TS is segment-granular: if a viewer requests 5s and
+            # segments are 4s each, hold back at least 8s, never only 4s.
+            while cut and excluded<holdback_seconds:
+                cut-=1
+                excluded+=entries[cut].duration
+            entries=entries[:cut]
         if from_seq is None:
             # Join near live; use a replay URL to start farther back.
             # A 3-fragment live playlist gives VLC almost no margin when
@@ -324,15 +336,22 @@ class RollingTimeshift:
                     self.send_error(404)
                     return
                 path = parsed.path[len(prefix):]
-                if path in ('live.m3u8', 'replay.m3u8'):
+                if path in ('live.m3u8', 'replay.m3u8', 'holdback.m3u8'):
                     since = None
+                    delay=0.0
+                    if path == 'holdback.m3u8':
+                        raw = parse_qs(parsed.query).get('ms', [])
+                        if len(raw) != 1 or not raw[0].isdigit() or not 1 <= int(raw[0]) <= 30000:
+                            self.send_error(400)
+                            return
+                        delay = int(raw[0]) / 1000.0
                     if path == 'replay.m3u8':
                         raw = parse_qs(parsed.query).get('seq', [])
                         if len(raw) != 1 or not raw[0].isdigit():
                             self.send_error(400)
                             return
                         since = int(raw[0])
-                    playlist = session.window.playlist(since)
+                    playlist = session.window.playlist(since,holdback_seconds=delay)
                     if not playlist:
                         self.send_error(503)
                         return
@@ -379,6 +398,11 @@ class RollingTimeshift:
     def live_url(self):
         return self.base_url + 'live.m3u8'
 
+    def holdback_url(self, seconds_back):
+        if not isinstance(seconds_back,(float,int)) or isinstance(seconds_back,bool) or not 0 < seconds_back <= 30:
+            raise ValueError('Video holdback must be between 0 and 30 seconds')
+        return self.base_url + 'holdback.m3u8?ms=' + str(round(seconds_back*1000))
+
     def replay_url(self, seconds_back):
         seq = self.window.starting_seq(seconds_back)
         if seq is None:
@@ -416,17 +440,18 @@ class RollingTimeshift:
         url=self.start(timeout=timeout)
         if seconds_back==0:
             return url
-        deadline=time.monotonic()+min(45,max(15,seconds_back+12))
-        while self.window.latest_seconds()<seconds_back and not self.stop_event.is_set():
+        deadline=time.monotonic()+min(55,max(15,seconds_back+15))
+        needed=seconds_back+2*SEGMENT_SECONDS
+        while self.window.latest_seconds()<needed and not self.stop_event.is_set():
             if time.monotonic()>=deadline:
                 break
             self.stop_event.wait(0.25)
         if self.stop_event.is_set():
             raise RuntimeError('Timeshift was cancelled before delayed playback')
         available=self.window.latest_seconds()
-        if available<1:
-            return url
-        return self.replay_url(min(float(seconds_back),available))
+        if available<needed:
+            raise RuntimeError('Not enough local DVR segments for Vosk video delay; try live playback')
+        return self.holdback_url(seconds_back)
 
     def close(self):
         self.stop_event.set()
