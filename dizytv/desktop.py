@@ -1750,6 +1750,8 @@ class MainWindow(QMainWindow):
         self.header_scroll=QScrollArea()
         self.header_scroll.setObjectName('toolbarScroll')
         self.header_scroll.setWidgetResizable(False)
+        # Keep each header button at its full text width. On narrow windows,
+        # make the overflow accessible instead of shrinking/cropping labels.
         self.header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.header_scroll.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Fixed)
@@ -1819,15 +1821,29 @@ class MainWindow(QMainWindow):
                               ('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
             b=QPushButton(label); b.clicked.connect(handler); side.addWidget(b)
         self.sidebar=sidebar
-        sidebar.setMinimumWidth(0)
+        self.sidebar_scroll=QScrollArea()
+        self.sidebar_scroll.setObjectName('sidebarScroll')
+        self.sidebar_scroll.setWidgetResizable(True)
+        self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.sidebar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.sidebar_scroll.setFrameShape(QFrame.NoFrame)
+        self.sidebar_scroll.setMinimumWidth(0)
+        self.sidebar_scroll.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
         sidebar.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Expanding)
-        split.addWidget(sidebar); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
+        # The panel will NEVER squeeze its buttons/labels shorter than their
+        # full text. At extremely narrow widths its own scrollbar takes over.
+        self.sidebar_scroll.setWidget(sidebar)
+        self.country_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.country_tree.setTextElideMode(Qt.ElideNone)
+        self.channels.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.channels.setTextElideMode(Qt.ElideNone)
+        split.addWidget(self.sidebar_scroll); self.tabs=QTabWidget();self.tabs.setMinimumWidth(0)
         self.tabs.setObjectName('mainTabs')
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.ElideRight)
-        split.addWidget(self.tabs);split.setSizes([270,880])
+        split.addWidget(self.tabs);split.setSizes([310,840])
         live=QWidget();live.setObjectName('livePage');live_layout=QVBoxLayout(live);live_layout.setContentsMargins(8,8,8,8);live_layout.setSpacing(6);self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play');self.now.setObjectName('channelHeading'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
         self.channel_banner.setObjectName('channelBanner')
@@ -1990,7 +2006,32 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
 
     def settle_startup_toolbar_layout(self):
-        """Reflow saved Normal/Compact/Large toolbar sizes after Qt polishing."""
+        """Polish shared Windows/macOS/Linux controls after the real Qt layout.
+
+        Qt calculates platform-specific text/DPI size hints only after the
+        window is shown and the saved stylesheet has been applied. The content
+        area is never allowed to shrink a label; overflow remains scrollable.
+        """
+        if not hasattr(self,'header_scroll'):
+            return
+        sidebar=self.sidebar
+        sidebar.ensurePolished()
+        for widget in (self.country_filter,self.genre_filter,self.kind_filter,
+                       self.source_filter,self.section_filter,self.sort_picker):
+            widget.ensurePolished()
+        text_needs=[
+            self.fontMetrics().horizontalAdvance('Countries / categories / channels')+40,
+            self.fontMetrics().horizontalAdvance('★ Add / remove favourite')+58,
+            self.fontMetrics().horizontalAdvance('Hide / restore selected')+58,
+            self.fontMetrics().horizontalAdvance('TV / Radio / stream')+48,
+        ]
+        # Platform font metrics, including saved 80%/Normal settings, determine
+        # the width rather than a fragile 270px hard-coded splitter column.
+        for widget in sidebar.findChildren(QPushButton):
+            text_needs.append(widget.sizeHint().width()+24)
+        required=max(280,*text_needs)
+        sidebar.setMinimumWidth(required)
+        self.sidebar_scroll.updateGeometry()
         for area in (self.header_scroll,self.controls_scroll):
             child=area.widget()
             if child is None:
@@ -2006,11 +2047,16 @@ class MainWindow(QMainWindow):
             base_height=child.sizeHint().height()
             if area is self.header_scroll:
                 base_height=max(base_height,self.header_logo.height()+8)
-            scroll_bar=area.horizontalScrollBar()
-            extra=(scroll_bar.sizeHint().height()
-                   if area is self.header_scroll and scroll_bar.maximum()>scroll_bar.minimum()
+                child.setMinimumWidth(child.sizeHint().width())
+            scrollbar=area.horizontalScrollBar()
+            # The header has a visible scrollbar when needed; the playback
+            # strip uses its existing chevrons and no native scrollbar.
+            extra=(scrollbar.sizeHint().height()
+                   if area is self.header_scroll and scrollbar.maximum()>scrollbar.minimum()
                    else 0)
-            area.setFixedHeight(base_height+(12 if area is self.header_scroll else 6)+extra)
+            desired=base_height+(12 if area is self.header_scroll else 6)+extra
+            if area.height()!=desired:
+                area.setFixedHeight(desired)
             area.updateGeometry()
         self.sync_player_button_arrows()
 
