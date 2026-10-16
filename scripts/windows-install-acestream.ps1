@@ -59,7 +59,7 @@ try {
     } finally { $dest.Dispose(); $stream.Dispose() }
     if ($total -lt 1024*100) { throw 'Downloaded Ace file is unexpectedly small' }
     # An installer can be large: verify its PE magic from a two-byte read,
-    # not a full 180 MiB ReadAllBytes allocation in the installer process.
+    # not a full executable buffer allocation in the installer process.
     $peek=[IO.File]::OpenRead($target)
     try {
         if ($peek.ReadByte() -ne 0x4d -or $peek.ReadByte() -ne 0x5a) {

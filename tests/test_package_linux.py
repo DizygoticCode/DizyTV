@@ -36,6 +36,14 @@ class LinuxPackageTests(unittest.TestCase):
             helper = internal / 'helper'
             helper.write_text('#!/bin/sh\nexit 0\n')
             helper.chmod(0o700)
+            speech = internal / 'speech' / 'vosk-model-small-en-us-0.15' / 'am'
+            speech.mkdir(parents=True)
+            speech.joinpath('final.mdl').write_bytes(b'fake speech model')
+            outpace = internal / 'outpace'
+            outpace.mkdir()
+            outpace.joinpath('outpace').write_text('#!/bin/sh\nexit 0\n')
+            outpace.joinpath('outpace').chmod(0o700)
+            outpace.joinpath('LICENSE').write_text('AGPL fixture')
             link = internal / 'runtime-link.dat'
             link.symlink_to(data.name)
             icon = root / 'assets' / 'branding' / 'dizytv-logo.png'
@@ -57,7 +65,7 @@ class LinuxPackageTests(unittest.TestCase):
                 if path.is_symlink():
                     continue
                 with self.subTest(path=path.relative_to(installed)):
-                    expected = 0o755 if path.is_dir() or path.name in ('DizyTV', 'dizytv', 'helper') else 0o644
+                    expected = 0o755 if path.is_dir() or path.name in ('DizyTV', 'dizytv', 'helper', 'outpace') and (path.is_dir() or path.name != 'LICENSE') else 0o644
                     self.assertEqual(stat.S_IMODE(path.stat().st_mode), expected)
             installed_link = installed / 'opt' / 'dizytv' / '_internal' / link.name
             self.assertTrue(installed_link.is_symlink())
