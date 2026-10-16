@@ -82,15 +82,15 @@ class OutpaceTests(unittest.TestCase):
             process.terminate.assert_not_called()
         # The first empty /streams reply starts the idle timer; it must not
         # race a VLC client that has prepared its URL but not attached.
+        # Each HTTP fetch returns a new stream. Reusing one consumed BytesIO
+        # here would incorrectly make the post-grace /streams recheck fail.
         with tempfile.TemporaryDirectory() as folder, patch.object(
-                outpace,'urlopen',return_value=Response(b'{"streams":[]}')), patch.object(
-                outpace.time,'monotonic',return_value=100):
-            self.assertFalse(outpace.stop_idle_owned_daemon(directory=folder))
-            process.terminate.assert_not_called()
-        with tempfile.TemporaryDirectory() as folder, patch.object(
-                outpace,'urlopen',return_value=Response(b'{"streams":[]}')), patch.object(
-                outpace.time,'monotonic',return_value=132):
-            self.assertTrue(outpace.stop_idle_owned_daemon(directory=folder))
+                outpace,'urlopen',side_effect=lambda *a,**k: Response(b'{"streams":[]}')):
+            with patch.object(outpace.time,'monotonic',return_value=100):
+                self.assertFalse(outpace.stop_idle_owned_daemon(directory=folder))
+                process.terminate.assert_not_called()
+            with patch.object(outpace.time,'monotonic',return_value=132):
+                self.assertTrue(outpace.stop_idle_owned_daemon(directory=folder))
         process.terminate.assert_called_once()
         self.assertIsNone(outpace._OWNED_PROCESS)
         self.assertFalse(outpace._SHUTTING_DOWN)
