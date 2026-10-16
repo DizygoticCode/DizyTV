@@ -2284,12 +2284,16 @@ class MainWindow(QMainWindow):
         alternate=rows[labels.index(label)]
         # Preserve existing favourites and manual EPG mappings: no state
         # mutation, and never erase the original selected channel.
-        self.selected=alternate
         match=next((i for i in range(self.channels.count())
                     if self.channels.item(i).data(Qt.UserRole)['id']==alternate['id']),None)
-        if match is not None:
+        if match is None:
+            # A playlist/genre/country filter may hide the selected source.
+            # Reuse global search's visibility reset before changing playback.
+            self.reveal_global_channel(alternate,show_guide=False)
+        else:
+            self.selected=alternate
             self.channels.setCurrentRow(match)
-        self.render_now()
+            self.render_now()
         self.play()
 
     def show_channel_source_details(self):
