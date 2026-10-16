@@ -4,6 +4,7 @@ on:
     branches: [main, build/native-apps]
     paths: ['dizytv/**', 'android/**', 'assets/**', 'tests/**', 'scripts/**', 'requirements.txt', 'pyproject.toml', 'THIRD-PARTY-NOTICES.md', '.github/workflows/native-builds.yml']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: ['dizytv/**', 'android/**', 'assets/**', 'tests/**', 'scripts/**', 'requirements.txt', 'pyproject.toml', 'THIRD-PARTY-NOTICES.md', '.github/workflows/native-builds.yml']
   workflow_dispatch:
 permissions:
@@ -14,7 +15,32 @@ concurrency:
   group: native-alpha-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  preflight:
+    name: Release metadata guard (before five-platform builds)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Ensure native versions and artifact names match
+        run: python scripts/check_release_metadata.py
+      - name: Refuse another rebuild of an already published release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag=$(python -c "from scripts.check_release_metadata import verify; print('v'+verify())")
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists: refusing duplicate five-platform build." >&2
+            exit 1
+          fi
   android:
+    # Draft PRs must never queue costly five-platform installer builds.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: preflight
     name: Android / universal APK
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -32,16 +58,18 @@ jobs:
       - name: Verify APK signature and checksum
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.17-alpha-android-universal-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.18-alpha-android-universal-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/*.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.17-alpha-android
+          name: DizyTV-0.1.18-alpha-android
           path: dist/
           if-no-files-found: error
           retention-days: 30
   desktop:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: preflight
     name: Desktop / ${{ matrix.target }}
     strategy:
       fail-fast: false
@@ -54,7 +82,7 @@ jobs:
           - os: macos-15-intel
             target: macos-x86_64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -72,6 +100,39 @@ jobs:
       - name: Stage checksum-pinned Windows speech assets
         if: runner.os == 'Windows'
         run: python scripts/stage_windows_speech.py
+      - name: Stage pinned VideoLAN VLC 3 runtime for Windows and macOS
+        if: runner.os == 'Windows' || runner.os == 'macOS'
+        run: python scripts/stage_private_vlc.py
+      - name: Prepare Mac FFmpeg executable from native wheel
+        if: runner.os == 'macOS'
+        run: python -m pip install imageio-ffmpeg==0.6.0
+      - name: Stage bundled English Vosk and Mac native FFmpeg
+        if: runner.os == 'macOS'
+        run: python scripts/stage_speech_other.py
+      - name: Compile pinned Outpace 0.2.0 for the native macOS architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The signed package will contain a separately licensed program.
+          # Build exact upstream v0.2.0 source, never an arbitrary executable.
+          upstream=e61be2aeb4e4ef3b4e6b42b22fe35f91271a7d5b
+          git clone --quiet --depth 1 --branch v0.2.0 https://github.com/jamezrin/outpace.git "$RUNNER_TEMP/outpace-src"
+          cd "$RUNNER_TEMP/outpace-src"
+          test "$(git rev-parse HEAD)" = "$upstream"
+          cargo build --locked --release -p ace-engine --bin outpace
+          test -x target/release/outpace
+          target/release/outpace --version
+          mkdir -p "$GITHUB_WORKSPACE/vendor/outpace"
+          cp target/release/outpace "$GITHUB_WORKSPACE/vendor/outpace/outpace"
+          cp LICENSE "$GITHUB_WORKSPACE/vendor/outpace/LICENSE"
+          chmod 0755 "$GITHUB_WORKSPACE/vendor/outpace/outpace"
+      - name: Verify official Windows Ace bootstrap does not download when in safe test mode
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/windows-install-acestream.ps1 -TestOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Ace bootstrap safety test failed' }
       - name: Package native application
         run: python scripts/build_desktop.py
       - name: Windows packaged startup and installer
@@ -80,8 +141,14 @@ jobs:
         run: |
           $process = Start-Process dist/DizyTV/DizyTV.exe -ArgumentList '--smoke-test','--data-dir','smoke-packaged' -PassThru -Wait
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed to launch' }
+          $runtime = Start-Process dist/DizyTV/DizyTV.exe -ArgumentList '--verify-native-components' -PassThru -Wait
+          if ($runtime.ExitCode -ne 0) { throw 'Packaged private VLC/FFmpeg/Vosk failed native load' }
           # The Windows installer must ship both dependencies, even when the CI
           # host already has an FFmpeg executable installed.
+          $vlc = 'dist/DizyTV/_internal/vlc'
+          if (-not (Test-Path (Join-Path $vlc 'libvlc.dll'))) { throw 'Private libVLC was not packaged' }
+          if (-not (Test-Path (Join-Path $vlc 'libvlccore.dll'))) { throw 'Private VLC core was not packaged' }
+          if (-not (Test-Path (Join-Path $vlc 'plugins'))) { throw 'Private VLC plugins were not packaged' }
           $speech = 'dist/DizyTV/_internal/speech'
           $ffmpeg = Join-Path $speech 'ffmpeg.exe'
           if (-not (Test-Path $ffmpeg)) { throw 'FFmpeg was not bundled' }
@@ -127,7 +194,7 @@ jobs:
             Start-Sleep -Seconds 3
             $old.Refresh()
             if ($old.HasExited) { throw 'Old worker did not start' }
-            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.17-alpha-windows-x64.exe').Path
+            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.18-alpha-windows-x64.exe').Path
             $install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $target + '"')) -PassThru -Wait
             if ($install.ExitCode -ne 0) { throw "Upgrade failed with running idle worker: exit $($install.ExitCode)" }
             $old.Refresh()
@@ -135,6 +202,9 @@ jobs:
             if (-not (Test-Path -LiteralPath (Join-Path $target '_internal/libcrypto-3.dll'))) { throw 'DLL not installed' }
             # Prove the *compiled Inno installer* copied the speech components,
             # rather than only testing PyInstaller's uninstalled dist directory.
+            $installedVlc = Join-Path $target '_internal/vlc'
+            if (-not (Test-Path (Join-Path $installedVlc 'libvlc.dll'))) { throw 'Installed private VLC absent' }
+            if (-not (Test-Path (Join-Path $installedVlc 'plugins'))) { throw 'Installed private VLC modules absent' }
             $installedSpeech = Join-Path $target '_internal/speech'
             $installedFFmpeg = Join-Path $installedSpeech 'ffmpeg.exe'
             if (-not (Test-Path -LiteralPath $installedFFmpeg)) { throw 'Installer omitted bundled FFmpeg' }
@@ -155,14 +225,52 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
+          # Vosk upstream uses the unusual libvosk.dyld extension, which
+          # must be explicitly collected as a native binary on both Macs.
+          test -s dist/DizyTV.app/Contents/Frameworks/vosk/libvosk.dyld
+          dist/DizyTV.app/Contents/MacOS/DizyTV --verify-native-components
+          # Check private playback-only libVLC, not a nested full VLC.app.
+          test -s dist/DizyTV.app/Contents/Frameworks/vlc/lib/libvlc.dylib || \
+            test -s dist/DizyTV.app/Contents/Resources/vlc/lib/libvlc.dylib || \
+            test -s dist/DizyTV.app/Contents/MacOS/vlc/lib/libvlc.dylib
+          if find dist/DizyTV.app -type d \( -name VLC.app -o -name Breakpad.framework \) -print -quit | grep -q .; then
+            echo 'Full VLC GUI/Breakpad framework incorrectly staged into the signed DizyTV bundle' >&2
+            exit 1
+          fi
+          test -x dist/DizyTV.app/Contents/MacOS/speech/ffmpeg || \
+            test -x dist/DizyTV.app/Contents/Resources/speech/ffmpeg || \
+            test -x dist/DizyTV.app/Contents/Frameworks/speech/ffmpeg
+          # Assert the actual PKG app has the separately licensed native helper.
+          helper="$(find dist/DizyTV.app/Contents -type f -name outpace -perm -111 -print -quit)"
+          test -n "$helper"
+          "$helper" --version | grep -i outpace
+          licence="$(find dist/DizyTV.app/Contents -type f -path '*/outpace/LICENSE' -print -quit)"
+          test -n "$licence"
+          grep -F 'GNU AFFERO GENERAL PUBLIC LICENSE' "$licence"
+          OUTPACE_BIND=127.0.0.1:6878 OUTPACE_RTMP_BIND=127.0.0.1:1935 OUTPACE_ENABLE_INBOUND=0 "$helper" serve >outpace-ci.log 2>&1 &
+          helper_pid=$!
+          trap 'kill "$helper_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 25); do
+            if curl -fsS --max-time 1 http://127.0.0.1:6878/healthz | grep -Fx ok; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1 || { cat outpace-ci.log; exit 1; }
+          curl -fsS --max-time 3 http://127.0.0.1:6878/networks | python -c 'import json,sys; assert "ace" in json.load(sys.stdin)["networks"]'
+          kill "$helper_pid" 2>/dev/null || true
+          wait "$helper_pid" 2>/dev/null || true
+          trap - EXIT
           # Validate the exact release filename in each native build, not only
           # in publish-alpha after waiting for every other platform to finish.
-          test -s "dist/DizyTV-0.1.17-alpha-${{ matrix.target }}.pkg"
-          pkgutil --payload-files "dist/DizyTV-0.1.17-alpha-${{ matrix.target }}.pkg"
+          test -s "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg"
+          pkgutil --payload-files "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg"
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.17-alpha-${{ matrix.target }}
+          name: DizyTV-0.1.18-alpha-${{ matrix.target }}
           path: |
             dist/*.exe
             dist/*.pkg
@@ -171,9 +279,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   package-linux:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: preflight
     name: Ubuntu 24.04 x64 • .deb
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -185,38 +295,58 @@ jobs:
       - name: Install Linux libVLC, Qt runtime libraries, and Debian packager
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
+          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output ffmpeg libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
       - name: Install pinned Python dependencies
         run: python -m pip install -r requirements.txt
       - name: Full unit and desktop UI tests
         run: python -m unittest discover -s tests -v
       - name: Source smoke startup
         run: python -m dizytv --smoke-test --data-dir smoke-source
+      - name: Stage English Vosk model for .deb
+        run: python scripts/stage_speech_other.py
+      - name: Build pinned native AGPL Outpace for Ubuntu 24.04
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream=e61be2aeb4e4ef3b4e6b42b22fe35f91271a7d5b
+          git clone --quiet --depth 1 --branch v0.2.0 https://github.com/jamezrin/outpace.git "$RUNNER_TEMP/outpace-src"
+          cd "$RUNNER_TEMP/outpace-src"
+          test "$(git rev-parse HEAD)" = "$upstream"
+          cargo build --locked --release -p ace-engine --bin outpace
+          test -x target/release/outpace
+          mkdir -p "$GITHUB_WORKSPACE/vendor/outpace"
+          cp target/release/outpace "$GITHUB_WORKSPACE/vendor/outpace/outpace"
+          cp LICENSE "$GITHUB_WORKSPACE/vendor/outpace/LICENSE"
+          chmod 0755 "$GITHUB_WORKSPACE/vendor/outpace/outpace"
       - name: Build native Linux executable
         run: python scripts/build_desktop.py
       - name: Package .deb
         run: python scripts/package_linux.py
       - name: Verify packaged app and .deb metadata
         run: |
-          test -s dist/DizyTV-0.1.17-alpha-linux-amd64.deb
-          dpkg-deb --contents dist/DizyTV-0.1.17-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
-          dpkg-deb --field dist/DizyTV-0.1.17-alpha-linux-amd64.deb
+          test -s dist/DizyTV-0.1.18-alpha-linux-amd64.deb
+          dpkg-deb --contents dist/DizyTV-0.1.18-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
+          dpkg-deb --field dist/DizyTV-0.1.18-alpha-linux-amd64.deb
           mkdir smoke-installed
-          dpkg-deb --extract dist/DizyTV-0.1.17-alpha-linux-amd64.deb smoke-installed
+          dpkg-deb --extract dist/DizyTV-0.1.18-alpha-linux-amd64.deb smoke-installed
           test -x smoke-installed/usr/bin/dizytv
           test -f smoke-installed/usr/share/applications/dizytv.desktop
+          test -x smoke-installed/opt/dizytv/_internal/outpace/outpace
+          test -f smoke-installed/opt/dizytv/_internal/outpace/LICENSE
+          smoke-installed/opt/dizytv/_internal/outpace/outpace --version
           if find smoke-installed/opt/dizytv -name 'libvlc*.so*' -print -quit | grep -q .; then
             echo 'Linux package must use the system libVLC libraries and matching plugins' >&2
             exit 1
           fi
           smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
-          sha256sum dist/DizyTV-0.1.17-alpha-linux-amd64.deb > dist/DizyTV-0.1.17-alpha-linux-amd64.deb.sha256
+          smoke-installed/opt/dizytv/DizyTV --verify-native-components
+          sha256sum dist/DizyTV-0.1.18-alpha-linux-amd64.deb > dist/DizyTV-0.1.18-alpha-linux-amd64.deb.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.17-alpha-linux-amd64
+          name: DizyTV-0.1.18-alpha-linux-amd64
           path: |
-            dist/DizyTV-0.1.17-alpha-linux-amd64.deb
-            dist/DizyTV-0.1.17-alpha-linux-amd64.deb.sha256
+            dist/DizyTV-0.1.18-alpha-linux-amd64.deb
+            dist/DizyTV-0.1.18-alpha-linux-amd64.deb.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -231,7 +361,7 @@ jobs:
       - name: Download verified installers
         uses: actions/download-artifact@v4
         with:
-          pattern: DizyTV-0.1.17-alpha-*
+          pattern: DizyTV-0.1.18-alpha-*
           path: native-artifacts
       - name: Collect native files and generate release checksums
         shell: bash
@@ -240,11 +370,11 @@ jobs:
           mkdir -p release
           find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' -o -name '*.deb' \) -exec cp -- '{}' release/ \;
           for asset in \
-            DizyTV-Setup-0.1.17-alpha-windows-x64.exe \
-            DizyTV-0.1.17-alpha-android-universal-debug.apk \
-            DizyTV-0.1.17-alpha-macos-arm64.pkg \
-            DizyTV-0.1.17-alpha-macos-x86_64.pkg \
-            DizyTV-0.1.17-alpha-linux-amd64.deb; do
+            DizyTV-Setup-0.1.18-alpha-windows-x64.exe \
+            DizyTV-0.1.18-alpha-android-universal-debug.apk \
+            DizyTV-0.1.18-alpha-macos-arm64.pkg \
+            DizyTV-0.1.18-alpha-macos-x86_64.pkg \
+            DizyTV-0.1.18-alpha-linux-amd64.deb; do
             test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
           done
           test "$(find release -type f | wc -l)" -eq 5
@@ -256,13 +386,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.1.17-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'v0.1.17-alpha already exists; refusing to silently replace published binaries.'
+          if gh release view v0.1.18-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.18-alpha already exists; refusing to silently replace published binaries.'
             exit 0
           fi
-          gh release create v0.1.17-alpha release/* \
+          gh release create v0.1.18-alpha release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DizyTV 0.1.17 alpha — Vosk sync and desktop playback fixes' \
+            --title 'DizyTV 0.1.18 alpha — integrated desktop playback dependencies' \
             --prerelease \
-          --notes 'DizyTV 0.1.17 alpha introduces desktop Vosk subtitle delay and opt-in held-back video/audio buffering, CC Off lifecycle and recovery fixes, cancellable and safely removable optional Vosk language models, responsive top toolbar and sidebar controls, and optional local hang diagnostics. Windows/macOS/Linux use the PySide6 desktop application; Android remains a separate Kotlin/Gradle implementation and does not claim these desktop-only features. Five native CI jobs gate the Windows x64 EXE, Android debug APK, macOS Apple Silicon and Intel PKGs, Ubuntu/Debian x64 DEB, and SHA256SUMS.txt. Published installers are alpha builds: Windows is unsigned, macOS packages unnotarized, Android debug-signed, and genuine live IPTV, Ace peers, stream stalls and Qt hangs still need physical-device validation. The optional timeshift does not guarantee automatic subtitle synchronisation or full freeze resolution.'
+          --notes 'DizyTV 0.1.18 alpha integrates private VideoLAN VLC 3.0.24 with Windows and macOS playback, packaged FFmpeg and English Vosk for desktop, Linux APT-managed VLC/FFmpeg, native AGPL-licensed Outpace for Mac/Linux compatible Ace swarms, optional explicit-consent original Ace Stream installer bootstraps on publisher-supported hosts, source diagnostics and safer shutdown. No proprietary Ace Stream binary is redistributed. Android remains a distinct Kotlin/libVLC app without desktop offline speech parity. Live IPTV availability, actual Ace peers, Windows Qt freezes and platform-specific media/video behaviour require human acceptance checks. Development installers remain unsigned/unnotarized; verify checksums and source/licensing terms.'

@@ -90,7 +90,9 @@ class TestTimeshift(unittest.TestCase):
             for _ in range(6):
                 session.window.append(PACKET*10,4)
             session._server=ThreadingHTTPServer(('127.0.0.1',0),session._handler())
-            Thread(target=session._server.serve_forever,daemon=True).start()
+            session._server_thread=Thread(target=session._serve_until_stopped,
+                                          args=(session._server,),daemon=True)
+            session._server_thread.start()
             try:
                 with urlopen(session.holdback_url(5)) as response:
                     manifest=response.read().decode()
@@ -263,7 +265,9 @@ class TestTimeshift(unittest.TestCase):
             session.window.append(PACKET*10,4)
             session._server=__import__('http.server',fromlist=['ThreadingHTTPServer']).ThreadingHTTPServer(('127.0.0.1',0),session._handler())
             try:
-                worker=__import__('threading').Thread(target=session._server.serve_forever,daemon=True)
+                worker=__import__('threading').Thread(target=session._serve_until_stopped,
+                                                      args=(session._server,),daemon=True)
+                session._server_thread=worker
                 worker.start()
                 with urlopen(session.live_url()) as res:
                     manifest=res.read().decode()

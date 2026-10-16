@@ -41,3 +41,25 @@ def duplicate_groups(channels):
         (key, rows) for key, rows in sorted(groups.items())
         if len(rows) > 1
     ]
+
+
+def independent_candidates(channels, selected):
+    """Same-station *unverified* candidates from distinct configured streams.
+
+    Keep country, radio/TV, '+1' and local regional distinctions intact.
+    Never assume they are playable or replace the user's saved favourites/EPG.
+    """
+    key=duplicate_key(selected)
+    if key is None:return []
+    current=selected.get('stream','')
+    seen={current}
+    options=[]
+    for channel in channels:
+        if duplicate_key(channel)!=key or channel.get('id')==selected.get('id'):
+            continue
+        stream=channel.get('stream','')
+        if not stream or stream in seen:
+            continue
+        seen.add(stream)
+        options.append(channel)
+    return options

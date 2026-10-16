@@ -1,4 +1,4 @@
-#define AppVersion "0.1.17-alpha"
+#define AppVersion "0.1.18-alpha"
 [Setup]
 AppId={{3F1997BD-12C5-4C17-B013-09C82DA8BAF6}
 AppName=DizyTV
@@ -9,7 +9,7 @@ DefaultDirName={localappdata}\Programs\DizyTV
 DefaultGroupName=DizyTV
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=DizyTV-Setup-0.1.17-alpha-windows-x64
+OutputBaseFilename=DizyTV-Setup-0.1.18-alpha-windows-x64
 SetupIconFile=..\assets\branding\dizytv.ico
 InfoBeforeFile=..\docs\WINDOWS-INCLUDED-COMPONENTS.txt
 UninstallDisplayIcon={app}\DizyTV.exe
@@ -22,6 +22,7 @@ RestartApplications=no
 
 [Files]
 Source: "windows-stop-worker.ps1"; Flags: dontcopy
+Source: "windows-install-acestream.ps1"; Flags: dontcopy
 Source: "..\dist\DizyTV\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"
 
@@ -31,14 +32,28 @@ Name: "{autodesktop}\DizyTV"; Filename: "{app}\DizyTV.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
-; Ace Stream is third-party P2P software. It is NOT shipped with DizyTV.
-; The user explicitly opts in to visiting its official installer/download site.
-Name: "acestreamsetup"; Description: "Open the official Ace Stream download page after installing DizyTV (optional third-party P2P engine)"; Flags: unchecked
+; The original third-party Ace installer is downloaded only on explicit opt-in.
+; The script verifies TLS redirect origins, size, PE header and Authenticode
+; publisher identity before it will run the original vendor setup and EULA.
+Name: "acestreamsetup"; Description: "Optional: download and run the original Ace Stream installer (third-party P2P, requires Internet and publisher EULA)"; Flags: unchecked
 
 [Run]
-Filename: "https://docs.acestream.net/products/"; Description: "Official Ace Stream Windows download page"; Flags: shellexec skipifsilent; Tasks: acestreamsetup
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{tmp}\windows-install-acestream.ps1"""; Description: "Verify and start original Ace Stream setup"; Flags: skipifsilent waituntilterminated; Tasks: acestreamsetup
 
 [Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('acestreamsetup') then
+  begin
+    try
+      ExtractTemporaryFile('windows-install-acestream.ps1');
+    except
+      MsgBox('Optional Ace Stream setup could not be prepared. DizyTV itself is installed. ' +
+             'Get the original installer directly from the official Ace Stream website.', mbError, MB_OK);
+    end;
+  end;
+end;
+
 // This runs before Restart Manager checks open DLLs/executables.
 // The 0.1.1 recorder intentionally stays open after the UI exits.
 function PrepareToInstall(var NeedsRestart: Boolean): String;

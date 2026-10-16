@@ -1,21 +1,27 @@
-DizyTV 0.1.11 alpha - Included Windows Components
+DizyTV 0.1.18-alpha Windows installer — included components
 
-The installer ALWAYS copies these components into DizyTV's private
-application folder, regardless of whether Windows already has a separate
-installation. You do NOT need to download or install these yourself:
+The installer contains these private, verified playback and transcription
+components, even if the PC has older or separate VLC/FFmpeg installations:
 
-  - Vosk 0.3.40 offline speech-recognition runtime (Apache 2.0)
-  - Vosk Small English US 0.15 language model (Apache 2.0)
-  - FFmpeg 8.1.2 essentials executable (GPL-licensed build)
+  - VideoLAN VLC 3.0.24 x64 private runtime, codec/protocol/audio/video plugins,
+    and original legal notices (LGPL/GPL and module-dependent terms)
+  - FFmpeg 8.1.2 essentials executable (original verified GPL build)
+  - Vosk 0.3.40 offline transcription runtime (Apache 2.0)
+  - Small English US Vosk 0.15 model (Apache 2.0)
 
-These are used only when you opt into "Generate live subtitles"
-from DizyTV's CC Subtitles menu. They do not run during installation.
-FFmpeg is not added to the system PATH and does not modify existing
-FFmpeg installations.
+The VLC/FFmpeg and Vosk files are packaged inside DizyTV, not installed
+globally. VLC is used to play compatible clear HTTP/HLS streams. Vosk uses
+CPU/memory only when local subtitles are enabled. No Windows system PATH,
+existing VLC installation or separately installed FFmpeg is modified.
 
-Still separate:
-  - VLC 3 x64 for the Windows playback engine
-  - Ace Stream engine for the optional Ace Stream channels
+OPTIONAL: The unchecked Ace Stream installation task may download the
+original third-party Ace installer directly from the official publisher
+over HTTPS, verify its trusted publisher identity, and show its unchanged
+installer/EULA. Ace uses P2P bandwidth; it is not required for ordinary
+HTTP/HLS. If verification fails or the user cancels, DizyTV remains usable.
+DizyTV does not modify or redistribute the proprietary Ace software.
 
-DizyTV cannot bypass broadcaster DRM or geographical access restrictions.
-See THIRD-PARTY-NOTICES.md for source links, licence terms and notices.
+These are unreleased development-installer notes until native CI, licence
+compliance review and human playback checks pass. DizyTV cannot bypass DRM,
+provider authentication or geographical restrictions.
+See THIRD-PARTY-NOTICES.md for source and licence notices.

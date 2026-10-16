@@ -15,14 +15,14 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar, QProgressDialog)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
 from .network import download
 from .sources import (configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS,
                       DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
-                      OPTIONAL_UK_RETRANSMISSIONS, OPTIONAL_SHOW_LOOP_PLAYLISTS, source_label)
+                      OPTIONAL_UK_RETRANSMISSIONS, OPTIONAL_SHOW_LOOP_PLAYLISTS, source_label, safe_source_label)
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
@@ -38,7 +38,7 @@ from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_t
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
 from .caption_sync import CaptionDelayQueue
 from .health_history import HealthHistory
-from .duplicates import duplicate_groups
+from .duplicates import duplicate_groups, independent_candidates
 from .system_usage import SystemSampler
 from .ui_diagnostics import UiHangMonitor
 
@@ -1822,6 +1822,8 @@ class MainWindow(QMainWindow):
         tools_menu.addAction('Check channel health…',self.open_channel_health)
         tools_menu.addAction('Find duplicate channels…',self.open_duplicate_channels)
         tools_menu.addAction('System usage…',self.open_system_usage)
+        tools_menu.addAction('Selected channel source…',self.show_channel_source_details)
+        tools_menu.addAction('Try another saved source…',self.try_alternative_source)
         tools_menu.addSeparator()
         self.ui_diagnostics_action=tools_menu.addAction('Log UI hangs locally (opt-in)')
         self.ui_diagnostics_action.setCheckable(True)
@@ -2257,6 +2259,59 @@ class MainWindow(QMainWindow):
         dialog=ChannelHealthDialog(self.store,self.selected,self.pool,self.refresh_disabled_channels,self)
         self.health_dialog=dialog
         dialog.show()
+
+    def try_alternative_source(self):
+        """Only user-selected saved alternatives, never redirect automatically."""
+        selected=self.selected
+        if not selected:
+            QMessageBox.information(self,'DizyTV alternatives','Select a channel first.')
+            return
+        rows=independent_candidates(catalogue(self.state),selected)
+        if not rows:
+            QMessageBox.information(self,'DizyTV alternatives',
+                'No separate saved source is available for this channel, country and programme type. '
+                'A programme guide entry alone does not guarantee a playable stream.')
+            return
+        # Do not expose private M3U URLs or tokens in the picker.
+        labels=[display_channel_name(item['name'])+' — '+
+                safe_source_label((item.get('sources') or [item.get('source','')])[0])+
+                ' [candidate '+str(i+1)+', not verified]' for i,item in enumerate(rows)]
+        label,accepted=QInputDialog.getItem(self,'Try another saved source',
+            'Choose a different imported stream; playback is not guaranteed:',
+            labels,0,False)
+        if not accepted:
+            return
+        alternate=rows[labels.index(label)]
+        # Preserve existing favourites and manual EPG mappings: no state
+        # mutation, and never erase the original selected channel.
+        match=next((i for i in range(self.channels.count())
+                    if self.channels.item(i).data(Qt.UserRole)['id']==alternate['id']),None)
+        if match is None:
+            # A playlist/genre/country filter may hide the selected source.
+            # Reuse global search's visibility reset before changing playback.
+            self.reveal_global_channel(alternate,show_guide=False)
+        else:
+            self.selected=alternate
+            self.channels.setCurrentRow(match)
+            self.render_now()
+        self.play()
+
+    def show_channel_source_details(self):
+        """Show playlist provenance without exposing private URLs or tokens."""
+        channel=self.selected
+        if not channel:
+            QMessageBox.information(self,'DizyTV channel source','Select a channel first.')
+            return
+        origins=list(dict.fromkeys(x for x in
+                 (channel.get('sources') or [channel.get('source','')]) if x))
+        labels=[safe_source_label(origin) for origin in origins] or ['Unknown source']
+        message=('Channel: '+display_channel_name(channel['name'])+
+                 '\nImported playlist: '+', '.join(labels)+
+                 '\n\nAn EPG listing is independent of the video stream. '+
+                 'A working guide does not establish a working playback URL. '+
+                 'Network errors do not prove a feed is permanently dead. '+
+                 'Custom provider URLs and credentials are hidden.')
+        QMessageBox.information(self,'DizyTV — Channel source details',message)
 
     def show_source_status(self):
         state=self.store.read(); counts={}
@@ -2782,7 +2837,12 @@ class MainWindow(QMainWindow):
                 if not self.seek_slider.isSliderDown():
                     self.seek_slider.setValue(max(0,1000-int(self.timeshift_lag/max(1,available)*1000)))
             else:
-                self.seek_notice.setText('DVR window available' if seekable else 'LIVE — no local time-shift enabled')
+                # VLC can retain seekable state from an earlier failed stream.
+                state_name=str(self.player.get_state())
+                if not state_name.endswith(('.Playing','.Paused')):
+                    self.seek_notice.setText('Playback not confirmed — seekability is not decoded video.')
+                else:
+                    self.seek_notice.setText('DVR seeking supported (picture not verified)' if seekable else 'LIVE — no local time-shift enabled')
         # VLC can be in State.Playing with audible audio and a black video
         # surface. Inspect decoded/displayed frames separately after startup.
         if (self.player and self.playback_started and not self._video_issue_notified
@@ -3372,11 +3432,10 @@ class MainWindow(QMainWindow):
 
     def init_player(self):
         if self.player:return
-        if os.name=='nt':
-            for root in ('PROGRAMFILES','PROGRAMFILES(X86)'):
-                folder=Path(os.environ.get(root,'C:/Program Files'))/'VideoLAN'/'VLC'
-                if (folder/'libvlc.dll').exists():
-                    os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH',''); self.dll_dir=os.add_dll_directory(str(folder)); break
+        # An installed application always uses its verified package-private
+        # VLC binaries and modules; never silently load an older system VLC.
+        from .media_runtime import configure_private_vlc
+        configure_private_vlc()
         import vlc
         self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
         vlc_options=['--no-video-title-show',*self._vlc_subtitle_profile]
@@ -3508,10 +3567,102 @@ class MainWindow(QMainWindow):
         self.record_now()
 
     def open_ace_stream_setup(self):
-        # Do not redistribute, download or silently execute proprietary binaries.
-        # The browser opens official engine documentation for this platform.
-        site=('https://wiki.acestream.media/Install_Ubuntu' if sys.platform.startswith('linux')
-              else 'https://docs.acestream.net/products/')
+        if sys.platform.startswith('linux'):
+            # The .deb includes this bootstrap in the PyInstaller application.
+            # Download the original publisher archive only on explicit consent.
+            from .linux_ace_bootstrap import compatibility, install_original
+            from .engine import linux_engine_path
+            try:
+                existing=linux_engine_path(self.state['settings'].get('engine_executable',''))
+            except RuntimeError as exc:
+                # An explicitly selected but now-missing launcher is a
+                # Settings problem, not consent to install another engine.
+                QMessageBox.warning(self,'DizyTV — configured Ace engine',str(exc))
+                return
+            if existing:
+                QMessageBox.information(self,'DizyTV — Ace Stream engine',
+                    'An existing Linux Ace engine is already configured:\n'+
+                    str(existing)+'\n\nDizyTV will not replace it or start a second installer.')
+                return
+            if getattr(self,'_ace_bootstrap_task',None) is not None:
+                self.status.setText('Original Ace Stream download is already running.')
+                return
+            try:
+                compatibility()
+            except RuntimeError as exc:
+                from .outpace import packaged_binary
+                helper=packaged_binary()
+                if helper is not None:
+                    QMessageBox.information(
+                        self,'DizyTV — bundled Outpace',
+                        'The original proprietary Ace engine is not verified for this Linux release.\n\n'
+                        'DizyTV includes the separately AGPL-licensed Outpace engine for '
+                        'compatible public Ace swarms. It starts automatically when you '
+                        'select a compatible Ace channel; no additional install is required.\n\n'
+                        'Original engine compatibility: '+str(exc))
+                else:
+                    QMessageBox.warning(self,'DizyTV — Linux Ace compatibility',
+                        str(exc)+'\n\nOfficial Linux products: https://docs.acestream.net/products/\n'
+                        'The DizyTV .deb still works for ordinary HTTP/HLS channels.')
+                return
+            answer=QMessageBox.question(
+                self,'Install original Ace Stream engine?',
+                'Optional third-party software: Ace Stream uses peer-to-peer network '
+                'bandwidth and has its own publisher terms.\n\n'
+                'This downloads the publisher\'s unchanged Ubuntu 22.04 engine '
+                'from download.acestream.media into your own ~/.local/opt/acestream '
+                'folder. A fixed SHA-256 checksum will be checked before installing. '
+                'Nothing is executed automatically by setup.\n\n'
+                'Publisher terms: https://www.acestream.org/license\n'
+                'Proceed with this optional download?',
+                QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+            if answer!=QMessageBox.Yes:
+                return
+            cancel=threading.Event()
+            progress=QProgressDialog('Downloading original Ace Stream engine…',
+                                     'Cancel download',0,1000,self)
+            progress.setWindowTitle('DizyTV — optional Ace Stream installation')
+            progress.setMinimumDuration(0)
+            progress.setWindowModality(Qt.NonModal)
+            progress.setAutoClose(False)
+            progress.canceled.connect(cancel.set)
+            task=None
+            def work():
+                return install_original(
+                    consent=True,cancel=cancel.is_set,
+                    progress=lambda received,total:task.signals.progress.emit(received,total))
+            task=Task(work)
+            self._ace_bootstrap_task=task
+            self._ace_bootstrap_progress=progress
+            def onprogress(received,total):
+                if total:
+                    progress.setValue(min(990,round(received/max(1,total)*990)))
+                progress.setLabelText(
+                    'Downloading and verifying original Ace Stream: '+
+                    str(round(received/1024/1024,1))+' MiB')
+            def done(path):
+                self._ace_bootstrap_task=None
+                progress.setValue(1000);progress.close()
+                self.status.setText('Original Ace Stream engine staged and verified.')
+                QMessageBox.information(
+                    self,'DizyTV — Ace Stream engine installed',
+                    'Verified publisher archive installed at:\n'+path+
+                    '\n\nThe original engine was not launched during installation. '
+                    'Playing an Ace channel will start its local engine when needed. '
+                    'This does not guarantee the selected stream has peers.')
+            def failed(message):
+                self._ace_bootstrap_task=None
+                progress.close()
+                self.status.setText('Optional Ace setup did not complete; DizyTV is unaffected.')
+                QMessageBox.warning(self,'DizyTV — optional Ace setup',message)
+            task.signals.progress.connect(onprogress)
+            task.signals.success.connect(done)
+            task.signals.failure.connect(failed)
+            progress.show()
+            self.pool.start(task)
+            return
+        # Proprietary Ace binaries are never silently bundled or rehosted.
+        site='https://docs.acestream.net/products/'
         if not QDesktopServices.openUrl(QUrl(site)):
             self.error('Could not open the official Ace Stream products page in your browser.')
 
@@ -3535,12 +3686,15 @@ class MainWindow(QMainWindow):
         self.source_check_serial+=1
         serial=self.source_check_serial
         channel=self.selected['id']
-        diagnostic=Task(lambda:probe_stream(self.selected['stream']))
+        url=self.selected['stream']
+        origins=self.selected.get('sources') or [self.selected.get('source','')]
+        origin_label=safe_source_label(origins[0] if origins else '')
+        diagnostic=Task(lambda:probe_stream(url))
         self.source_check=diagnostic
         def ready(message):
             if (serial==self.source_check_serial and self.selected and
                     self.selected['id']==channel):
-                self.status.setText(message)
+                self.status.setText(origin_label+': '+message)
         diagnostic.signals.success.connect(ready)
         diagnostic.signals.failure.connect(lambda _message:None)
         self.pool.start(diagnostic)
@@ -3679,8 +3833,10 @@ class MainWindow(QMainWindow):
             self.status.setText('Connecting to Ace Engine and preparing channel; waiting for available peers…')
             def prepare():
                 ensure_ready(self.state['settings']['engine_url'],
-                             executable_path=self.state['settings'].get('engine_executable',''))
-                return start_playback_session(ch['stream'],self.state['settings']['engine_url'])
+                             executable_path=self.state['settings'].get('engine_executable',''),
+                             directory=self.store.directory)
+                return start_playback_session(ch['stream'],self.state['settings']['engine_url'],
+                                              directory=self.store.directory)
             task=Task(prepare)
             self.engine_task=task
             def ready(playback_url):
@@ -4276,6 +4432,35 @@ class MainWindow(QMainWindow):
         self.stop_playback()
         if self.player:self.player.release(); self.player=None
         if self.vlc_instance:self.vlc_instance.release(); self.vlc_instance=None
+        # Only stop the Outpace child that DizyTV itself launched. Do not
+        # disrupt an active/due-soon detached recording, or wait on the Qt UI.
+        if sys.platform=='darwin' or sys.platform.startswith('linux'):
+            from .outpace import stop_owned_daemon
+            latest=self.store.try_read()
+            jobs=(latest or self.state).get('jobs',[])
+            now=time.time()
+            from .core import ace_request_params
+            channels={c['id']:c for c in (latest or self.state).get('channels',[])}
+            # Keep the GUI-owned helper only when a *currently active Ace*
+            # recording still needs it. Future timers start an engine from
+            # the detached recorder when due; ordinary HTTP jobs do not need
+            # Outpace, and paused/cancelled jobs must not pin a P2P daemon.
+            pending=(latest is None or any(
+                job.get('status') in ('recording','starting') and
+                job.get('start',now+1) <= now < job.get('end',0) and
+                ace_request_params(channels.get(job.get('channel_id'),{}).get('stream','')) is not None
+                for job in jobs))
+            # Hand off even an idle GUI-owned helper when a detached worker
+            # exists: another open DizyTV window may still be viewing it.
+            # The worker performs native-session and PID checks off the Qt
+            # thread. Tests/smoke mode without a worker stop it directly.
+            if pending or self.start_worker:
+                from .outpace import handoff_owned_daemon
+                handed_off=handoff_owned_daemon(self.store.directory)
+                if not pending and not handed_off:
+                    stop_owned_daemon()
+            else:
+                stop_owned_daemon()
         super().closeEvent(event)
 
 

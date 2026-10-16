@@ -14,6 +14,12 @@
 
 Mac packages target macOS 13+. Windows builds target x64. Build settings and CI runner results establish package targets; fresh installation and compatibility on user devices are still to be tested.
 
+## Proposed Outpace in the forthcoming macOS packages
+
+For the next desktop release, both macOS Intel and Apple Silicon builds compile the original, separately licensed [Outpace](https://github.com/jamezrin/outpace) v0.2.0 from pinned upstream source and place the native daemon and full AGPL licence inside the DizyTV app. DizyTV can start this bundled helper on demand when a public Ace channel is selected; its native localhost-only streaming API serves decoded media to the existing VLC playback surface. It does not install or modify the proprietary Ace Stream engine, require Docker, enable experimental compatibility endpoints or bypass DRM. Outpace supports public unencrypted Ace-compatible swarms; real peer playback and network/device behaviour require manual tests. Licence and corresponding-source review is mandatory before distribution.
+
+**This is development code, not part of the already-published 0.1.17-alpha PKGs.** Those still require an external/remote Ace engine and VLC 3. Do not claim Mac all-in-one completion until the Mac package builds and integration checks pass.
+
 ## Install and configure
 
 Download the native .exe, .apk, .pkg or .deb directly from the [0.1.17-alpha pre-release](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.17-alpha) and verify against its [SHA256SUMS.txt](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/SHA256SUMS.txt). Run the Windows EXE, install the APK through Android's permitted sideload flow, or open the matching Mac PKG to install `DizyTV.app` in Applications. Unsigned/development builds may trigger browser or operating-system trust warnings. Do not disable protective software to proceed.

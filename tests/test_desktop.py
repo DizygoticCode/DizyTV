@@ -1279,15 +1279,79 @@ class DesktopTests(unittest.TestCase):
             dialog.close()
             window.close()
 
-    def test_ace_setup_opens_verified_official_provider_without_download(self):
+    def test_ace_setup_is_explicit_and_unsupported_linux_never_downloads(self):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
-            with patch('dizytv.desktop.QDesktopServices.openUrl',return_value=True) as open_url:
+            if sys.platform.startswith('linux'):
+                window.state['settings']['engine_executable']='/home/test/custom/start-engine'
+                # Unsupported host displays an actionable explanation; it
+                # must not open a modal dialog in unattended CI or download
+                # proprietary software without explicit consent.
+                with patch('dizytv.engine.linux_engine_path',return_value=None) as find_engine, \
+                     patch('dizytv.linux_ace_bootstrap.compatibility',
+                           side_effect=RuntimeError('requires Ubuntu 22.04')), \
+                     patch('dizytv.outpace.packaged_binary',return_value=None), \
+                     patch('dizytv.desktop.QMessageBox.warning') as warning, \
+                     patch('dizytv.desktop.QDesktopServices.openUrl') as open_url:
+                    window.open_ace_stream_setup()
+                    find_engine.assert_called_once_with('/home/test/custom/start-engine')
+                    warning.assert_called_once()
+                    self.assertIn('Ubuntu 22.04',warning.call_args.args[2])
+                    open_url.assert_not_called()
+            else:
+                with patch('dizytv.desktop.QDesktopServices.openUrl',return_value=True) as open_url:
+                    window.open_ace_stream_setup()
+                    self.assertEqual('https://docs.acestream.net/products/',
+                                     open_url.call_args.args[0].toString())
+            window.close()
+
+    def test_ace_setup_rejects_missing_configured_linux_launcher(self):
+        if not sys.platform.startswith('linux'):
+            self.skipTest('Linux-specific original Ace launcher')
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.state['settings']['engine_executable']='/missing/engine/start-engine'
+            with patch('dizytv.engine.linux_engine_path',
+                       side_effect=RuntimeError('Select an executable Linux Ace Stream start-engine script')) as find, \
+                 patch('dizytv.desktop.QMessageBox.warning') as warning, \
+                 patch('dizytv.linux_ace_bootstrap.install_original') as install:
                 window.open_ace_stream_setup()
-                self.assertEqual(
-                    'https://wiki.acestream.media/Install_Ubuntu'
-                    if sys.platform.startswith('linux') else 'https://docs.acestream.net/products/',
-                    open_url.call_args.args[0].toString())
+                find.assert_called_once_with('/missing/engine/start-engine')
+                warning.assert_called_once()
+                self.assertIn('start-engine',warning.call_args.args[2])
+                install.assert_not_called()
+            window.close()
+
+    def test_alt_source_reveals_channel_when_filtered_out(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            original=dict(id='a'*40,name='Example News',stream='https://example.com/one.ts',
+                          group='News',tvg_id='example-news',genre='News',
+                          country='United Kingdom',kind='TV',transport='HTTP',
+                          source='https://example.com/a.m3u',
+                          sources=['https://example.com/a.m3u'])
+            alternative=dict(original,id='b'*40,stream='https://example.com/two.ts',
+                             source='https://example.org/b.m3u',
+                             sources=['https://example.org/b.m3u'])
+            store.update(lambda state:state.update(channels=[original,alternative]))
+            window=MainWindow(store,start_worker=False)
+            window.selected=original
+            # Simulate the old source being the only visible row under a
+            # playlist filter, while the second candidate is in the cache.
+            window.channels.clear()
+            window.channels.addItem(original['name'])
+            window.channels.item(0).setData(Qt.UserRole,original)
+            window.channels.setCurrentRow(0)
+            with patch('dizytv.desktop.independent_candidates',return_value=[alternative]), \
+                 patch('dizytv.desktop.QInputDialog.getItem',
+                       side_effect=lambda *args:(args[3][0],True)), \
+                 patch.object(window,'play') as play:
+                window.try_alternative_source()
+                self.assertEqual(alternative['id'],window.selected['id'])
+                self.assertEqual(alternative['id'],
+                    window.channels.currentItem().data(Qt.UserRole)['id'])
+                play.assert_called_once()
             window.close()
 
     def test_epg_mapping_picker_suggests_regions_and_saves_only_confirmed_choice(self):

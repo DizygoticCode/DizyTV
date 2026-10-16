@@ -20,6 +20,10 @@ shutil.copyfile(ROOT/'THIRD-PARTY-NOTICES.md',licences/'NOTICES.md')
 licence_packages=('python-vlc','tzdata','pyinstaller','vosk',
                   'requests','srt','tqdm','charset-normalizer','idna',
                   'urllib3','certifi','Pillow','cffi','pycparser')
+# The macOS native FFmpeg executable originates in this pinned wheel;
+# retain its wrapper/package licence and a provenance record as well.
+if sys.platform=='darwin':
+    licence_packages += ('imageio-ffmpeg',)
 for package in (*licence_packages,'colorama'):
     try:wheel=distribution(package)
     except PackageNotFoundError:
@@ -50,7 +54,7 @@ for package in (*licence_packages,'colorama'):
             target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(source,target)
             found=1
-    if package in ('vosk','requests','srt','tqdm','cffi','pycparser') and not found:
+    if package in ('vosk','requests','srt','tqdm','cffi','pycparser','imageio-ffmpeg') and not found:
         raise RuntimeError('Missing licence terms for bundled dependency '+package)
 image=Image.open('assets/branding/dizytv-logo.png')
 image.save('assets/branding/dizytv.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
@@ -58,13 +62,55 @@ image.save('assets/branding/dizytv.icns')
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','DizyTV',
       '--paths',str(ROOT),'--add-data','assets'+os.pathsep+'assets',
       '--collect-data','tzdata','--collect-binaries','vosk','--hidden-import','vlc','--hidden-import','vosk']
+if os.name in ('nt',) or sys.platform=='darwin':
+    private_vlc=ROOT/'vendor'/'vlc'
+    if os.name=='nt':
+        expected=(private_vlc/'libvlc.dll', private_vlc/'libvlccore.dll', private_vlc/'plugins')
+    else:
+        expected=(private_vlc/'lib'/'libvlc.dylib',
+                  private_vlc/'lib'/'libvlccore.dylib',
+                  private_vlc/'plugins')
+    if any(not p.exists() for p in expected):
+        raise RuntimeError('Native private libVLC missing: refusing an incomplete installer')
+    args += ['--add-data',str(private_vlc)+os.pathsep+'vlc']
 if os.name=='nt':
     speech=ROOT/'vendor'/'speech'
     if not (speech/'ffmpeg.exe').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir() or not (speech/'vosk-model-small-en-us-0.15'/'conf').is_dir():
         raise RuntimeError('Missing staged Windows FFmpeg/Vosk model: refusing to build an incomplete installer')
     args += ['--add-data',str(speech)+os.pathsep+'speech']
 if sys.platform=='darwin':
-    args += ['--windowed','--icon','assets/branding/dizytv.icns','--osx-bundle-identifier','dev.dizygotic.dizytv']
+    speech=ROOT/'vendor'/'speech'
+    if not (speech/'ffmpeg').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir():
+        raise RuntimeError('Mac FFmpeg/English Vosk resources are missing')
+    args += ['--add-data',str(speech)+os.pathsep+'speech']
+    # The Vosk 0.3.40 binding loads a nonstandard .dyld filename using
+    # cffi.dlopen() at import time. PyInstaller's --collect-binaries vosk
+    # does not discover this nonstandard extension by itself. Stage the
+    # untouched, official wheel file explicitly alongside vosk/__init__.py.
+    import importlib.util
+    vosk_spec=importlib.util.find_spec('vosk')
+    if vosk_spec is None or not vosk_spec.submodule_search_locations:
+        raise RuntimeError('Installed Vosk 0.3.40 wheel cannot be located')
+    vosk_dir=Path(next(iter(vosk_spec.submodule_search_locations)))
+    vosk_dyld=vosk_dir/'libvosk.dyld'
+    if not vosk_dyld.is_file():
+        raise RuntimeError('Original Vosk macOS libvosk.dyld missing from the pinned wheel')
+    architectures=subprocess.run(
+        ['lipo','-archs',str(vosk_dyld)],
+        check=True,capture_output=True,text=True).stdout.split()
+    if platform.machine() not in architectures:
+        raise RuntimeError('Vosk native wheel lacks '+platform.machine()+' architecture')
+    args += ['--add-binary',str(vosk_dyld)+os.pathsep+'vosk']
+    # A distinct AGPL-licensed helper compiled from a pinned upstream commit.
+    outpace=ROOT/'vendor'/'outpace'
+    helper=outpace/'outpace'
+    licence=outpace/'LICENSE'
+    if not helper.is_file() or not licence.is_file():
+        raise RuntimeError('Required macOS Outpace binary and licence are missing')
+    args += ['--add-binary',str(helper)+os.pathsep+'outpace',
+             '--add-data',str(licence)+os.pathsep+'outpace',
+             '--windowed','--icon','assets/branding/dizytv.icns',
+             '--osx-bundle-identifier','dev.dizygotic.dizytv']
 elif os.name=='nt':
     args += ['--windowed','--icon','assets/branding/dizytv.ico']
 args += ['dizytv/__main__.py']

@@ -29,6 +29,10 @@ class LinuxBuildTests(unittest.TestCase):
             'EXE': lambda *args, **kwargs: None,
             'COLLECT': lambda exe, binaries, datas, **kwargs: binaries,
         }
-        with patch.dict(sys.modules, {'PyInstaller.utils.hooks': hooks}):
+        with patch.dict(sys.modules, {'PyInstaller.utils.hooks': hooks}), \
+             patch.object(Path,'is_file',return_value=True):
             result = runpy.run_path(str(spec), init_globals=build)
         self.assertEqual(other, result['coll'])
+        self.assertIn('dizytv.linux_ace_bootstrap',
+                      spec.read_text(encoding='utf-8'))
+        self.assertIn("outpace / 'outpace'", spec.read_text(encoding='utf-8'))

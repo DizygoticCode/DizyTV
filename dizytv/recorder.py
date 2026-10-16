@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from urllib.request import Request, build_opener
 
-from .core import safe_filename, stream_url, ACTIVE
+from .core import safe_filename, stream_url, ace_request_params, ACTIVE
 from .network import SafeRedirect
 from .storage import Store, file_lock
 
@@ -125,6 +125,32 @@ def finish_job(store,job_id,result):
     store.update(change)
 
 
+def recording_playback_url(channel, settings, directory=None):
+    """Prepare a direct recorder URL using the *selected* local engine API.
+
+    Outpace deliberately disables Ace's experimental /ace/getstream endpoint.
+    The recorder must use the same native playback URL as DizyTV itself.
+    A future queued timer starts its own trusted engine on demand; it does not
+    depend on a GUI window or a daemon retained when that window closes.
+    """
+    source=channel['stream']
+    if ace_request_params(source) is None:
+        return stream_url(source,settings['engine_url'])
+    from .engine import ensure_ready, start_playback_session
+    address=settings['engine_url']
+    ensure_ready(address,executable_path=settings.get('engine_executable',''),directory=directory)
+    return start_playback_session(source,address,directory=directory)
+
+
+def release_recorder_outpace(directory=None):
+    """Stop only an Outpace child this *worker* started, not external engines."""
+    if sys.platform=='darwin' or sys.platform.startswith('linux'):
+        from .outpace import stop_idle_owned_daemon, reap_handed_off_daemon
+        stop_idle_owned_daemon(directory=directory)
+        if directory is not None:
+            reap_handed_off_daemon(directory)
+
+
 def worker(directory=None):
     store = Store(directory)
     try:
@@ -142,11 +168,27 @@ def worker(directory=None):
                     prior=sum(s.get('bytes',0) for s in job.get('segments',[]))
                     def cancelled():
                         return not any(j['id']==job['id'] and j['status']=='recording' for j in store.read()['jobs'])
-                    result = record_stream(stream_url(channel['stream'],state['settings']['engine_url']),
-                                           state['settings']['recording_dir'],job['title'],job['end'],
-                                           state['settings']['reserve_bytes'],cancelled,
-                                           lambda size,path:update_job(store,job['id'],{'bytes':prior+size,'path':path}))
+                    try:
+                        target=recording_playback_url(channel,state['settings'],directory=store.directory)
+                        result = record_stream(
+                            target,state['settings']['recording_dir'],job['title'],job['end'],
+                            state['settings']['reserve_bytes'],cancelled,
+                            lambda size,path:update_job(store,job['id'],
+                                {'bytes':prior+size,'path':path}))
+                    except (RuntimeError,ValueError,OSError) as exc:
+                        # A missing/unsupported Ace engine must fail this job,
+                        # not terminate the long-running detached recorder.
+                        result={'status':'failed','bytes':0,'path':'',
+                                'error':type(exc).__name__+': '+str(exc)[:400]}
+                    finally:
+                        if ace_request_params(channel['stream']) is not None:
+                            release_recorder_outpace(store.directory)
                     finish_job(store,job['id'],result)
+                # If a previous timer started Outpace, do not kill it
+                # while the UI or another client is still watching. Once
+                # the native API has no active media sessions, free only
+                # this worker's own child and allow future timers to start.
+                release_recorder_outpace(store.directory)
                 time.sleep(1)
     except (BlockingIOError, PermissionError):
         return

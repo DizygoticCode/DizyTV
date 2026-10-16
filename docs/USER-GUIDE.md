@@ -1,4 +1,7 @@
-# DizyTV — how to use it
+# DizyTV
+
+> **Forthcoming Mac feature (not in 0.1.17-alpha):** Both Intel and Apple Silicon installers are being updated to include the original AGPL-licensed Outpace daemon, built from the publisher's pinned source. DizyTV will launch it only for requested public Ace channels, with native localhost streaming into VLC, without requiring Docker or a separately downloaded proprietary Ace Stream engine. This does not guarantee encrypted/premium content or currently broken third-party channel URLs. [Review development/installation details](DISTRIBUTION.md).
+ — how to use it
 
 [← Back to README](../README.md) · [Native downloads](https://github.com/DizygoticCode/DizyTV/releases) · [Build checks](BUILD-VERIFICATION.md)
 

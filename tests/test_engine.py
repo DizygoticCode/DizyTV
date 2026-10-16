@@ -21,7 +21,9 @@ class EngineTests(unittest.TestCase):
             engine.engine_endpoint('file:///C:/app')
 
     def test_already_running_engine_never_spawns_process(self):
-        with patch.object(engine,'running',return_value=True),patch.object(engine.subprocess,'Popen') as spawn:
+        with patch.object(engine.sys,'platform','win32'), \
+             patch.object(engine,'running',return_value=True), \
+             patch.object(engine.subprocess,'Popen') as spawn:
             self.assertEqual('connected',engine.ensure_ready('http://127.0.0.1:6878'))
             spawn.assert_not_called()
 
@@ -62,7 +64,9 @@ class EngineTests(unittest.TestCase):
     def test_linux_launcher_starts_only_for_local_engine(self):
         from pathlib import Path
         with patch.object(engine.sys,'platform','linux'), \
-             patch.object(engine,'running',side_effect=[False,True]), \
+             patch.object(engine,'running',side_effect=[False,False,True]), \
+             patch('dizytv.outpace.api_ready',return_value=False), \
+             patch('dizytv.outpace.packaged_binary',return_value=None), \
              patch.object(engine,'linux_engine_path',return_value=Path('/opt/acestream/start-engine')), \
              patch.object(engine.subprocess,'Popen') as spawn:
             self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
@@ -73,6 +77,41 @@ class EngineTests(unittest.TestCase):
             self.assertEqual('--client-console',spawn.call_args.args[0][1])
             self.assertEqual('/opt/acestream',
                              Path(spawn.call_args.kwargs['cwd']).as_posix())
+
+    def test_linux_package_prefers_outpace_but_respects_other_local_engine(self):
+        from pathlib import Path
+        from dizytv import outpace
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(outpace,'api_ready',return_value=False), \
+             patch.object(engine,'running',return_value=False), \
+             patch.object(outpace,'packaged_binary',return_value=Path('/opt/dizytv/outpace')), \
+             patch.object(engine,'linux_engine_path',return_value=None):
+            with patch.object(outpace,'ensure_ready',return_value='started') as start:
+                self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
+                start.assert_called_once()
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(outpace,'api_ready',return_value=False), \
+             patch.object(engine,'running',return_value=True), \
+             patch.object(outpace,'ensure_ready') as start:
+            self.assertEqual('connected',engine.ensure_ready('http://127.0.0.1:6878'))
+            start.assert_not_called()
+
+    def test_linux_configured_original_engine_precedes_bundled_outpace(self):
+        from pathlib import Path
+        from dizytv import outpace
+        original=Path('/home/operator/private/start-engine')
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(outpace,'api_ready',return_value=False), \
+             patch.object(engine,'running',side_effect=[False,False,True]), \
+             patch.object(engine,'linux_engine_path',return_value=original) as find, \
+             patch.object(outpace,'packaged_binary',return_value=Path('/opt/dizytv/outpace')), \
+             patch.object(outpace,'ensure_ready') as outpace_start, \
+             patch.object(engine.subprocess,'Popen') as start:
+            self.assertEqual('started',engine.ensure_ready(
+                'http://127.0.0.1:6878',executable_path=str(original)))
+            find.assert_called_with(str(original))
+            outpace_start.assert_not_called()
+            self.assertEqual(str(original),start.call_args.args[0][0])
 
     def test_linux_remote_engine_is_connect_only(self):
         with patch.object(engine.sys,'platform','linux'), \
