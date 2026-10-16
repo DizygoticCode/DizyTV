@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - wip/complete-dependency-gates
+      - fix/desktop-stability-timeshift-recording
   workflow_dispatch:
 permissions:
   contents: read
