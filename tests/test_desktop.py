@@ -124,6 +124,37 @@ class DesktopTests(unittest.TestCase):
         self.assertLess(grid.minimumWidth(),default)
         self.assertLess(grid.geometry_units()[0],58)
 
+    def test_vosk_caption_delay_is_saved_and_adjustable_while_watching(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            window=MainWindow(store,start_worker=False)
+            dialog=Settings(window.state,window)
+            self.assertEqual(0,dialog.caption_delay.value())
+            dialog.caption_delay.setValue(750)
+            self.assertEqual(750,dialog.values()['auto_caption_delay_ms'])
+            dialog.close()
+            window.change_auto_caption_delay(500)
+            self.assertEqual(500,store.read()['settings']['auto_caption_delay_ms'])
+            window.change_auto_caption_delay(50000)
+            self.assertEqual(10000,store.read()['settings']['auto_caption_delay_ms'])
+            window.change_auto_caption_delay(-9750)
+            self.assertEqual(250,store.read()['settings']['auto_caption_delay_ms'])
+            window._auto_caption_worker=Mock()
+            window._auto_caption_seq=123
+            window.receive_auto_caption(122,'Wrong channel')
+            self.assertEqual(0,len(window._auto_caption_queue))
+            window.receive_auto_caption(123,'Recognised voice')
+            self.assertEqual(1,len(window._auto_caption_queue))
+            with patch.object(window,'show_auto_caption_text') as display:
+                window.change_auto_caption_delay()
+                display.assert_called_once_with('Recognised voice')
+            self.assertEqual(0,len(window._auto_caption_queue))
+            window.stop_auto_captions()
+            self.assertEqual(0,len(window._auto_caption_queue))
+            window._auto_caption_worker=None
+            window.close()
+
     def test_settings_pair_only_imported_uk_fast_guides_without_duplicates(self):
         from dizytv.sources import (FREE_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
                                    DEFAULT_GUIDE_URLS)
