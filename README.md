@@ -21,9 +21,9 @@
 
 DizyTV brings M3U/IPTV playlists, XMLTV listings, Ace Stream and ordinary HTTP/HLS channels into a native TV interface. Browse by country, genre and category, find a programme with global search, save favourites and record broadcasts to your own storage.
 
-**Current public build:** [v0.1.17-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.17-alpha). This is a **development release**, not a verified replacement for a licensed TV service. Channels are imported from third parties, may be unavailable or geographically restricted, and may require an external player engine.
+**Current public build:** [v0.1.18-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.18-alpha) — all five platform builds and release publication [passed in GitHub Actions](https://github.com/DizygoticCode/DizyTV/actions/runs/38954068009). This is an **experimental development release**, not a verified replacement for a licensed TV service. Third-party channels may be unavailable, region-restricted or unsuitable for embedded playback; build success does **not** establish real-device playback reliability.
 
-**New in 0.1.17-alpha:** desktop Vosk caption delay and opt-in delayed live video/audio, safer all-off/restart behaviour, managed language downloads, responsive toolbar/sidebar layout, buffered recovery and opt-in local UI-hang diagnostics. Android receives a new build but not these desktop-only features. CI passing does not prove actual stream or device playback.
+**New in 0.1.18-alpha:** packaged VideoLAN VLC 3.0.24 on Windows and both Mac architectures, integrated desktop FFmpeg and bundled English offline Vosk model, original-source [Outpace](https://github.com/jamezrin/outpace) 0.2.0 for compatible public Ace swarms on macOS/Linux, an optional consent-based original Ace Stream setup flow on Windows, improved per-source playback diagnostics, safe alternate saved-source selection, and further worker/playback lifecycle tests. Android remains a distinct native Kotlin/libVLC app without desktop Vosk/FFmpeg parity. See [the release notes below](#new-in-0118-alpha) and [outstanding device tests](#known-limitations-and-unverified-behaviour).
 
 ## Downloads
 
@@ -31,28 +31,28 @@ Direct installer links (no ZIP extraction required):
 
 | Platform | Download | Requirement |
 | --- | --- | --- |
-| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-Setup-0.1.17-alpha-windows-x64.exe) | Windows x64; VLC 3 x64 for playback |
-| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-android-universal-debug.apk) | Android 8+ |
-| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-arm64.pkg) | macOS 13+; VLC 3 |
-| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-x86_64.pkg) | macOS 13+; VLC 3 |
-| **Linux** | [Ubuntu/Debian x64 installer (.deb)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-linux-amd64.deb) | Ubuntu 24.04 x64 CI-verified; other Debian-family distros require testing; system libVLC 3 |
+| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-Setup-0.1.18-alpha-windows-x64.exe) | Windows x64; VLC 3, FFmpeg and English Vosk bundled; original Ace engine optional |
+| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-android-universal-debug.apk) | Android 8+; embedded libVLC, debug-signed |
+| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-arm64.pkg) | macOS 13+; private VLC 3, FFmpeg, English Vosk and Outpace bundled |
+| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-x86_64.pkg) | macOS 13+; private VLC 3, FFmpeg, English Vosk and Outpace bundled |
+| **Linux** | [Ubuntu/Debian x64 installer (.deb)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-linux-amd64.deb) | Ubuntu 24.04 x64 CI-tested; APT-managed VLC/FFmpeg, bundled English Vosk and Outpace |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-Setup-0.1.17-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-linux-amd64.deb"><img alt="Download Ubuntu Linux DEB directly" src="https://img.shields.io/badge/Download-Linux%20DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-Setup-0.1.18-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-linux-amd64.deb"><img alt="Download Ubuntu Linux DEB directly" src="https://img.shields.io/badge/Download-Linux%20DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
 </p>
 
-[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
 
 > [!CAUTION]
 > These alpha packages are not yet publicly code-signed: Windows EXE is unsigned, Mac PKGs are unnotarized and the Android APK is debug-signed. **Do not disable browser or device security protections** to get around a security warning. Save a backup before changing test versions; Android debug signing keys can prevent in-place upgrades.
 
 ## Quick start — how to use DizyTV
 
-1. **Install DizyTV** using the download for your device. For Ace Stream, separately install and run the appropriate engine. Direct HTTP/HLS channels do not need an Ace engine.
+1. **Install DizyTV** using the native installer for your device. Windows and macOS include private VLC 3; Linux uses distribution packages installed through APT; Android includes libVLC. Direct HTTP/HLS needs no Ace engine. On Mac/Linux, compatible *public* Ace streams can use bundled Outpace; on Windows, an original Ace Stream engine is optional (unchecked third-party setup task or a separately installed engine). Android Ace support remains dependent on an external compatible app/engine.
 2. **Add channels:** Open **Settings → Channel playlists**. Use **Add built-in free playlists** to add presets, or paste M3U links one per line; save and choose **Refresh channels**.
 3. **Add a programme guide:** Open **Settings → XMLTV sources**, save the guide URLs, then choose **Refresh guide**. Use **Map EPG** if a channel does not match its listings.
 4. **Find something to watch:** Choose a channel from the list, filter by **Country / Category / Playlist**, or use **Ctrl+K** to search all channel and programme names. The **24/7 Shows & Loops** category is available when matching channels are imported.
@@ -67,11 +67,27 @@ Direct installer links (no ZIP extraction required):
 | Watch | Organise | Record & manage |
 | --- | --- | --- |
 | Embedded libVLC video and subtitle tracks | M3U playlists and XMLTV programme guide | Record now or from EPG |
-| Ace Stream via separately installed engine | Country, category, genre and playlist filters | Device-local recording storage |
+| Optional original Ace engine (Windows); bundled native Outpace (Mac/Linux, compatible public streams) | Country, category, genre and playlist filters | Device-local recording storage |
 | Cinema, fullscreen and resizable pop-out | Global channel/programme search (Ctrl+K) | Local backup and restore |
 | Optional supported live timeshift | Favourites, manual channel hiding, timezone-aware guide | Basic channel reachability checks |
 
 DizyTV **does not bundle paid IPTV subscriptions, provide DRM circumvention or guarantee any individual stream**. It can list a channel for which the broadcaster has no playable video on your network. Public links are not a substitute for authorised access.
+
+## New in 0.1.18-alpha
+
+- **Windows and macOS VLC included:** native desktop installers ship private VideoLAN VLC **3.0.24** and plugins rather than requiring a system VLC installation. Native CI loads the packaged runtime and tests local synthetic audio/video decoding; actual broadcaster/device playback still needs acceptance testing.
+- **Desktop captions out of the box:** Windows, both Mac architectures and Linux include English Vosk speech models; Windows/Mac bundle FFmpeg and Linux installs FFmpeg through APT. Transcription is opt-in, and additional supported language models are managed in DizyTV Settings.
+- **Mac and Linux native Outpace:** native **Outpace 0.2.0** binaries compiled from pinned upstream source ship with their separate AGPL licence for supported public, unencrypted Ace-compatible swarms. No proprietary Ace engine is embedded. Private/local engine ownership checks protect existing engines and detached recordings; genuine swarm playback/recording needs testing.
+- **Windows optional original Ace setup:** an **unchecked** installer task can attempt to retrieve the original publisher's installer through allowlisted HTTPS and check its Authenticode identity. It does not bundle or silently install Ace, accept its EULA, or enable P2P for ordinary channels. The actual publisher signer/redirect and installed-engine detection on all supported machines still need field verification; if that verification fails, the optional task fails safely.
+- **Channel/source diagnostics:** distinguishes HTML landing pages from media, improves privacy-safe network failure classifications, shows imported source provenance and offers **Try another saved source** when eligible alternatives are present. This cannot make unavailable, encrypted or region-restricted ITV2/E4 streams playable.
+- **Playback stability and upgrade safety:** expanded regression coverage for the live buffer, closed caption shutdown, Windows installer idle-recording-worker upgrades, queued recordings and Outpace attachment/shutdown races. Windows **Not Responding** reports are not yet proven fixed on real devices.
+- **Release evidence:** [0.1.18 main-branch workflow](https://github.com/DizygoticCode/DizyTV/actions/runs/38954068009) passed Windows, Linux, Android, Intel Mac, Apple Silicon Mac and direct release publication. [PR #37](https://github.com/DizygoticCode/DizyTV/pull/37) is merged.
+
+## Known limitations and unverified behaviour
+
+This is an **alpha**, not a guarantee of playable imported IPTV or full cross-platform feature parity. Physical testing is still needed for clean Windows/macOS/Linux installations; sustained Windows playback without UI hangs; subtitle Off and Vosk lifecycle; ITV2/E4 source failures; legitimate Ace peer availability; Android device behaviour; and recording continuity. Track [Windows dependencies #27](https://github.com/DizygoticCode/DizyTV/issues/27), [cross-platform acceptance #28](https://github.com/DizygoticCode/DizyTV/issues/28), [ITV2/E4 diagnostics #30](https://github.com/DizygoticCode/DizyTV/issues/30), and [Windows playback freeze #32](https://github.com/DizygoticCode/DizyTV/issues/32). See the [0.1.18 device acceptance checklist](docs/0.1.18-CANDIDATE-ACCEPTANCE.md).
+
+**Third-party redistribution and development signing:** The package includes third-party VLC, FFmpeg, Vosk and (on Mac/Linux) AGPL Outpace components. The exact source/relinking and redistribution compliance review remains outstanding; read [component licences and notices](THIRD-PARTY-NOTICES.md). Windows releases are unsigned; Mac packages are unnotarized; Android uses a CI debug key that may prevent upgrades. Do not disable device security features to install an unfamiliar binary.
 
 ## New in 0.1.17-alpha
 
