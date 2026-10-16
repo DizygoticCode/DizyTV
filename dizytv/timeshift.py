@@ -233,6 +233,8 @@ class RollingTimeshift:
         self._server = None
         self._server_thread = None
         self._capture_thread = None
+        self._closed = False
+        self._close_lock = threading.Lock()
         self._opened = False
         self._http = build_opener(SafeRedirect)
 
@@ -414,6 +416,19 @@ class RollingTimeshift:
             raise RuntimeError('No cached programmes are ready for rewind')
         return self.base_url + f'replay.m3u8?seq={seq}'
 
+    def _serve_until_stopped(self, server):
+        """Use bounded request polling instead of shutdown() cross-thread waits.
+
+        ThreadingHTTPServer.shutdown() can deadlock if called before its
+        serve_forever thread has entered the loop (a channel-switch race).
+        """
+        server.timeout = 0.25
+        while not self.stop_event.is_set():
+            try:
+                server.handle_request()
+            except (OSError, ValueError):
+                break  # Closed socket after cancellation.
+
     def start(self, timeout=18):
         if self.stop_event.is_set():
             raise RuntimeError('Timeshift session was already closed')
@@ -421,12 +436,19 @@ class RollingTimeshift:
             raise RuntimeError('Timeshift already running')
         self._opened = True
         try:
-            self._server = ThreadingHTTPServer(('127.0.0.1',0), self._handler())
-            self._server_thread = threading.Thread(target=self._server.serve_forever,daemon=True)
+            server = ThreadingHTTPServer(('127.0.0.1',0), self._handler())
+            self._server = server
+            if self.stop_event.is_set():
+                raise RuntimeError('Timeshift cancelled during server startup')
+            self._server_thread = threading.Thread(
+                target=self._serve_until_stopped, args=(server,),
+                name='dizytv-timeshift-http', daemon=True)
             self._server_thread.start()
+            if self.stop_event.is_set():
+                raise RuntimeError('Timeshift cancelled before capture started')
             self._capture_thread = threading.Thread(target=self._capture,daemon=True)
             self._capture_thread.start()
-            if not self.ready.wait(timeout) or not self.window.snapshot():
+            if not self.ready.wait(timeout) or self.stop_event.is_set() or not self.window.snapshot():
                 raise RuntimeError(self.error or 'This channel did not provide usable MPEG-TS/HLS segments')
             return self.live_url()
         except Exception:
@@ -459,12 +481,31 @@ class RollingTimeshift:
             raise RuntimeError('Not enough playable DVR segments for Vosk video delay; try live playback')
         return self.holdback_url(seconds_back)
 
+    def close_async(self):
+        """Cancel immediately; never wait for IO/server cleanup in the Qt GUI."""
+        self.stop_event.set()
+        self.ready.set()
+        threading.Thread(target=self.close,
+                         name='dizytv-timeshift-cleanup',
+                         daemon=True).start()
+
     def close(self):
         self.stop_event.set()
-        if self._server:
-            self._server.shutdown()
-            self._server.server_close()
+        self.ready.set()  # Unblock an in-flight start(timeout=18).
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            server = self._server
             self._server = None
-        if self._capture_thread and self._capture_thread is not threading.current_thread():
-            self._capture_thread.join(timeout=1)
-        self.window.close()
+            # No serve_forever(), so shutdown() is neither needed nor safe.
+            # The request loop exits after <= 250ms even if no clients call it.
+            if server is not None:
+                server.server_close()
+            server_thread = self._server_thread
+            if server_thread is not None and server_thread is not threading.current_thread():
+                server_thread.join(timeout=1)
+            capture_thread = self._capture_thread
+            if capture_thread is not None and capture_thread is not threading.current_thread():
+                capture_thread.join(timeout=1)
+            self.window.close()
