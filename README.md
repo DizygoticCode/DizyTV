@@ -21,9 +21,9 @@
 
 DizyTV brings M3U/IPTV playlists, XMLTV listings, Ace Stream and ordinary HTTP/HLS channels into a native TV interface. Browse by country, genre and category, find a programme with global search, save favourites and record broadcasts to your own storage.
 
-**Current public build:** [v0.1.16-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.16-alpha). This is a **development release**, not a verified replacement for a licensed TV service. Channels are imported from third parties, may be unavailable or geographically restricted, and may require an external player engine.
+**Current public build:** [v0.1.17-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.17-alpha). This is a **development release**, not a verified replacement for a licensed TV service. Channels are imported from third parties, may be unavailable or geographically restricted, and may require an external player engine.
 
-**New in 0.1.16-alpha:** native Linux `.deb` support, improved playback diagnostics, safer HLS/Ace handling, progressive channel health scanning, duplicate management and faster large-catalogue browsing. All five platform release CI jobs passed; physical-device playback and real large-channel catalogues still need testing.
+**New in 0.1.17-alpha:** desktop Vosk caption delay and opt-in delayed live video/audio, safer all-off/restart behaviour, managed language downloads, responsive toolbar/sidebar layout, buffered recovery and opt-in local UI-hang diagnostics. Android receives a new build but not these desktop-only features. CI passing does not prove actual stream or device playback.
 
 ## Downloads
 
@@ -31,21 +31,21 @@ Direct installer links (no ZIP extraction required):
 
 | Platform | Download | Requirement |
 | --- | --- | --- |
-| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-Setup-0.1.16-alpha-windows-x64.exe) | Windows x64; VLC 3 x64 for playback |
-| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-android-universal-debug.apk) | Android 8+ |
-| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-arm64.pkg) | macOS 13+; VLC 3 |
-| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-x86_64.pkg) | macOS 13+; VLC 3 |
-| **Linux** | [Ubuntu/Debian x64 installer (.deb)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-linux-amd64.deb) | Ubuntu 24.04 x64 CI-verified; other Debian-family distros require testing; system libVLC 3 |
+| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-Setup-0.1.17-alpha-windows-x64.exe) | Windows x64; VLC 3 x64 for playback |
+| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-android-universal-debug.apk) | Android 8+ |
+| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-arm64.pkg) | macOS 13+; VLC 3 |
+| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-x86_64.pkg) | macOS 13+; VLC 3 |
+| **Linux** | [Ubuntu/Debian x64 installer (.deb)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-linux-amd64.deb) | Ubuntu 24.04 x64 CI-verified; other Debian-family distros require testing; system libVLC 3 |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-Setup-0.1.16-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/DizyTV-0.1.16-alpha-linux-amd64.deb"><img alt="Download Ubuntu Linux DEB directly" src="https://img.shields.io/badge/Download-Linux%20DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-Setup-0.1.17-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-linux-amd64.deb"><img alt="Download Ubuntu Linux DEB directly" src="https://img.shields.io/badge/Download-Linux%20DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
 </p>
 
-[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.16-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
 
 > [!CAUTION]
 > These alpha packages are not yet publicly code-signed: Windows EXE is unsigned, Mac PKGs are unnotarized and the Android APK is debug-signed. **Do not disable browser or device security protections** to get around a security warning. Save a backup before changing test versions; Android debug signing keys can prevent in-place upgrades.
@@ -73,7 +73,16 @@ Direct installer links (no ZIP extraction required):
 
 DizyTV **does not bundle paid IPTV subscriptions, provide DRM circumvention or guarantee any individual stream**. It can list a channel for which the broadcaster has no playable video on your network. Public links are not a substitute for authorised access.
 
-## New in 0.1.16-alpha
+## New in 0.1.17-alpha
+
+- **Desktop subtitle synchronization:** independent Vosk text delay and optional rolling-timeshift video/audio holdback, adjustable from Settings and the CC menu. Delay is approximate, manually tuned, and requires a compatible stream.
+- **Subtitles Off and recovery:** CC all-off stops Vosk, clears queued text and retries turning off embedded tracks after stream retunes; recognition cleanup/restart and stalled cached playback have additional safeguards.
+- **Desktop stability:** asynchronous timeshift cleanup and nonblocking state snapshots reduce UI-blocking paths, with opt-in local Qt hang logging to investigate remaining Windows Not Responding reports.
+- **UI sizing:** toolbar and sidebar heights are re-evaluated on launch and scale changes so text is not vertically cropped, with scrolling where space is limited.
+- **Vosk model management:** desktop users can download optional language models, see progress, cancel downloads and remove verified app-managed models safely; custom external models are protected.
+- **Platform boundaries:** the separate Android Kotlin app is repackaged at 0.1.17 but does not gain desktop PySide6 features. Actual video freezes, Vosk sync/drift, third-party streams and OS-specific operation require device testing.
+
+## Earlier 0.1.16-alpha changes
 
 The [0.1.16-alpha development work (PR #23)](https://github.com/DizygoticCode/DizyTV/pull/23) delivered these updates to the desktop app:
 

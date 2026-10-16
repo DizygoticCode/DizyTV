@@ -1,5 +1,12 @@
 # Native alpha build verification
 
+## 0.1.17-alpha — 16 October 2026
+
+PRs [#29](https://github.com/DizygoticCode/DizyTV/pull/29) and [#31](https://github.com/DizygoticCode/DizyTV/pull/31) are merged into `main` at commit [`9f39dff`](https://github.com/DizygoticCode/DizyTV/commit/9f39dff780d6a25f0c9fc4e97fc1ed61991b1e48). The full five-platform native workflow on the merged code completed successfully in [run 38873645029](https://github.com/DizygoticCode/DizyTV/actions/runs/38873645029), including Windows native installer and idle recorder upgrade checks, Mac Intel/ARM PKGs, Ubuntu DEB and Android tests/APK.
+
+A separate versioned 0.1.17 packaging workflow is required to publish installers tagged v0.1.17-alpha. This source-code CI success is not a guarantee of successful live decoding, subtitle synchronization accuracy, real-world stability or zero Windows UI hangs. Enable local hang diagnostics only with operator consent and inspect logs before sharing.
+
+
 ## 0.1.16-alpha — 15 October 2026
 
 The [five-platform PR CI run on `9136c93`](https://github.com/DizygoticCode/DizyTV/actions/runs/38815152069) completed successfully: Windows x64 EXE packaging/upgrade verification, macOS arm64 and Intel PKGs, Ubuntu 24.04 amd64 DEB with system libVLC, and Android universal debug APK tests/lint/signature. A local full Python/PySide6 run passed **223 tests, zero failures or skips**; macOS arm64 CI retained five expected skips for offscreen/other-platform-only cases. GitHub code re-review reported no major issues. The release publishing step runs after all native jobs succeed on `main`.

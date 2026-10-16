@@ -13,6 +13,7 @@
 - Local JSON backup/restore with destination reset and explicit timer rearming.
 - Windows EXE, Apple Silicon/Intel Mac PKGs, Ubuntu Linux x64 DEB, and universal Android debug APK built in CI, with checksums and licence notices.
 - 0.1.16-alpha desktop adds adjustable HTTP/HLS network buffering, more resilient Ace playback lifecycle, local system usage, progressive health scanning, conservative duplicate management, and UK FAST playlist/guide pairing.
+- 0.1.17-alpha desktop adds opt-in local Vosk caption synchronization, managed optional speech-model downloads, improved subtitle Off/recovery and responsive Qt toolbar/sidebar, plus opt-in hang diagnostics. Actual physical Windows hangs and live stream reliability remain verification tasks.
 
 See [build verification](docs/BUILD-VERIFICATION.md) for actual evidence. Successful builds do not establish physical-device acceptance.
 

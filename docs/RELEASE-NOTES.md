@@ -2,6 +2,16 @@
 
 For current downloads and instructions, start with the [README](../README.md).
 
+## 0.1.17-alpha — Vosk sync, responsive desktop and playback lifecycle
+
+- **Desktop (Windows, macOS, Linux):** independently configurable locally generated Vosk subtitle text delay (0–10 seconds, 250 ms steps) and opt-in video/audio holdback (0–30 seconds) via existing on-device rolling HLS timeshift. Audio and video remain together; holdback is segment-granular, requires a compatible HLS/MPEG-TS stream and is not automatically calibrated.
+- **CC Off reliability:** both generated Vosk and broadcast subtitles can be disabled, with queued overlay text discarded and embedded track Off retried after VLC playback retunes; restart is serialized to avoid overlapping recognizers. Cached playback recovery preserves moving holdback where supported.
+- **Optional Vosk languages:** cancellable downloads with progress, integrity checks and safe removal only of app-managed models; existing custom folders and the bundled English model are protected.
+- **Desktop usability:** repair vertically clipped toolbar/logo and sidebar selectors after startup or UI-scale changes, retaining full text and scrolling overflow. Move timeshift shutdown off the Qt event loop and use nonblocking state reads; add opt-in local UI hang stack logging.
+- **Packages:** Windows x64 native EXE; macOS ARM/Intel PKGs; Ubuntu/Debian x64 DEB; Android universal debug APK; SHA-256 manifest. Android has its own Kotlin app, not the desktop Vosk/Qt feature set.
+- **Validation limits:** the integrated pre-release version build still requires its own five-platform CI before publication. Windows playback hangs, live video freezes, network buffering, recognition drift, geo/DRM and third-party channel reliability have not been conclusively validated on real devices. Earlier 0.1.16 installers remain unchanged.
+
+
 ## 0.1.16-alpha — native Ubuntu Linux and playback/channel-management improvements
 
 - Adds experimental Ubuntu/Debian x86-64 `.deb` with system VLC 3/libVLC, separately installed Ace Engine support, optional FFmpeg/Vosk transcription and a native desktop launcher.

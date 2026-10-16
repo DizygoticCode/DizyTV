@@ -32,12 +32,12 @@ jobs:
       - name: Verify APK signature and checksum
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.16-alpha-android-universal-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.17-alpha-android-universal-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/*.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.16-alpha-android
+          name: DizyTV-0.1.17-alpha-android
           path: dist/
           if-no-files-found: error
           retention-days: 30
@@ -127,7 +127,7 @@ jobs:
             Start-Sleep -Seconds 3
             $old.Refresh()
             if ($old.HasExited) { throw 'Old worker did not start' }
-            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.16-alpha-windows-x64.exe').Path
+            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.17-alpha-windows-x64.exe').Path
             $install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $target + '"')) -PassThru -Wait
             if ($install.ExitCode -ne 0) { throw "Upgrade failed with running idle worker: exit $($install.ExitCode)" }
             $old.Refresh()
@@ -157,12 +157,12 @@ jobs:
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
           # Validate the exact release filename in each native build, not only
           # in publish-alpha after waiting for every other platform to finish.
-          test -s "dist/DizyTV-0.1.16-alpha-${{ matrix.target }}.pkg"
-          pkgutil --payload-files "dist/DizyTV-0.1.16-alpha-${{ matrix.target }}.pkg"
+          test -s "dist/DizyTV-0.1.17-alpha-${{ matrix.target }}.pkg"
+          pkgutil --payload-files "dist/DizyTV-0.1.17-alpha-${{ matrix.target }}.pkg"
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.16-alpha-${{ matrix.target }}
+          name: DizyTV-0.1.17-alpha-${{ matrix.target }}
           path: |
             dist/*.exe
             dist/*.pkg
@@ -198,11 +198,11 @@ jobs:
         run: python scripts/package_linux.py
       - name: Verify packaged app and .deb metadata
         run: |
-          test -s dist/DizyTV-0.1.16-alpha-linux-amd64.deb
-          dpkg-deb --contents dist/DizyTV-0.1.16-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
-          dpkg-deb --field dist/DizyTV-0.1.16-alpha-linux-amd64.deb
+          test -s dist/DizyTV-0.1.17-alpha-linux-amd64.deb
+          dpkg-deb --contents dist/DizyTV-0.1.17-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
+          dpkg-deb --field dist/DizyTV-0.1.17-alpha-linux-amd64.deb
           mkdir smoke-installed
-          dpkg-deb --extract dist/DizyTV-0.1.16-alpha-linux-amd64.deb smoke-installed
+          dpkg-deb --extract dist/DizyTV-0.1.17-alpha-linux-amd64.deb smoke-installed
           test -x smoke-installed/usr/bin/dizytv
           test -f smoke-installed/usr/share/applications/dizytv.desktop
           if find smoke-installed/opt/dizytv -name 'libvlc*.so*' -print -quit | grep -q .; then
@@ -210,13 +210,13 @@ jobs:
             exit 1
           fi
           smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
-          sha256sum dist/DizyTV-0.1.16-alpha-linux-amd64.deb > dist/DizyTV-0.1.16-alpha-linux-amd64.deb.sha256
+          sha256sum dist/DizyTV-0.1.17-alpha-linux-amd64.deb > dist/DizyTV-0.1.17-alpha-linux-amd64.deb.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.16-alpha-linux-amd64
+          name: DizyTV-0.1.17-alpha-linux-amd64
           path: |
-            dist/DizyTV-0.1.16-alpha-linux-amd64.deb
-            dist/DizyTV-0.1.16-alpha-linux-amd64.deb.sha256
+            dist/DizyTV-0.1.17-alpha-linux-amd64.deb
+            dist/DizyTV-0.1.17-alpha-linux-amd64.deb.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -231,7 +231,7 @@ jobs:
       - name: Download verified installers
         uses: actions/download-artifact@v4
         with:
-          pattern: DizyTV-0.1.16-alpha-*
+          pattern: DizyTV-0.1.17-alpha-*
           path: native-artifacts
       - name: Collect native files and generate release checksums
         shell: bash
@@ -240,11 +240,11 @@ jobs:
           mkdir -p release
           find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' -o -name '*.deb' \) -exec cp -- '{}' release/ \;
           for asset in \
-            DizyTV-Setup-0.1.16-alpha-windows-x64.exe \
-            DizyTV-0.1.16-alpha-android-universal-debug.apk \
-            DizyTV-0.1.16-alpha-macos-arm64.pkg \
-            DizyTV-0.1.16-alpha-macos-x86_64.pkg \
-            DizyTV-0.1.16-alpha-linux-amd64.deb; do
+            DizyTV-Setup-0.1.17-alpha-windows-x64.exe \
+            DizyTV-0.1.17-alpha-android-universal-debug.apk \
+            DizyTV-0.1.17-alpha-macos-arm64.pkg \
+            DizyTV-0.1.17-alpha-macos-x86_64.pkg \
+            DizyTV-0.1.17-alpha-linux-amd64.deb; do
             test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
           done
           test "$(find release -type f | wc -l)" -eq 5
@@ -256,13 +256,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.1.16-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'v0.1.16-alpha already exists; refusing to silently replace published binaries.'
+          if gh release view v0.1.17-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.17-alpha already exists; refusing to silently replace published binaries.'
             exit 0
           fi
-          gh release create v0.1.16-alpha release/* \
+          gh release create v0.1.17-alpha release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DizyTV 0.1.16 alpha — native Linux, diagnostics and channel management' \
+            --title 'DizyTV 0.1.17 alpha — Vosk sync and desktop playback fixes' \
             --prerelease \
-          --notes 'DizyTV 0.1.16 alpha adds an experimental Ubuntu/Debian amd64 .deb alongside native Windows x64 EXE, macOS arm64/Intel PKGs and the Android Kotlin/Gradle debug APK. Shared desktop changes include a local Tools → System usage panel (CPU/RAM and VLC counters), progressive on-demand HTTP health scanning with progress/stop and conservative rate-limit handling, reversible duplicate-channel candidate management with previous per-device HTTP status, a one-click UK FAST playlist plus XMLTV pairing, and a standard 24/7 category without an extra shortcut button. Direct HTTP/HLS playback gains a manually adjustable buffer while existing Ace Stream playback paths are retained. The Linux build uses installed libVLC, a separately installed native Ace start-engine, and opt-in local FFmpeg/Vosk. Native CI validates package creation, startup and unit tests; DRM, geo access, individual third-party feeds, P2P peers and real-device decoding still need manual verification. All five native artifacts and checksums are published only after the five CI jobs pass; none of these apps bundles an Ace engine or a guaranteed stream catalogue. Android remains a separate Kotlin/Gradle implementation and is not asserted to have desktop-only features.'
+          --notes 'DizyTV 0.1.17 alpha introduces desktop Vosk subtitle delay and opt-in held-back video/audio buffering, CC Off lifecycle and recovery fixes, cancellable and safely removable optional Vosk language models, responsive top toolbar and sidebar controls, and optional local hang diagnostics. Windows/macOS/Linux use the PySide6 desktop application; Android remains a separate Kotlin/Gradle implementation and does not claim these desktop-only features. Five native CI jobs gate the Windows x64 EXE, Android debug APK, macOS Apple Silicon and Intel PKGs, Ubuntu/Debian x64 DEB, and SHA256SUMS.txt. Published installers are alpha builds: Windows is unsigned, macOS packages unnotarized, Android debug-signed, and genuine live IPTV, Ace peers, stream stalls and Qt hangs still need physical-device validation. The optional timeshift does not guarantee automatic subtitle synchronisation or full freeze resolution.'
