@@ -1707,12 +1707,19 @@ class MainWindow(QMainWindow):
         self.light_timer=QTimer(self)
         self.light_timer.setInterval(850)
         self.light_timer.timeout.connect(self.pulse_live_light)
+        self._startup_layout_pending=True
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
         root=QWidget();root.setObjectName('appShell');self.setCentralWidget(root);layout=QVBoxLayout(root);layout.setContentsMargins(9,8,9,8);layout.setSpacing(8)
         topbar=QWidget();topbar.setObjectName('appHeader');top=QHBoxLayout(topbar);top.setContentsMargins(4,4,4,4);top.setSpacing(8)
-        logo=QLabel(); logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(54,54,Qt.KeepAspectRatio,Qt.SmoothTransformation)); top.addWidget(logo)
+        logo=QLabel(); logo.setObjectName('dizytvLogo')
+        logo.setFixedSize(54,54)
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setPixmap(QPixmap(str(ASSETS/'branding/dizytv-logo.png')).scaled(54,54,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        top.addWidget(logo)
+        self.header_logo=logo
+        self.header_topbar=topbar
         brand=QLabel('DizyTV'); brand.setObjectName('brand'); top.addWidget(brand)
         theme_label=QLabel('Theme')
         theme_label.setObjectName('filterTitle')
@@ -1973,6 +1980,40 @@ class MainWindow(QMainWindow):
             # Previously cached Ace channels hid newly configured public feeds.
             # Always refresh on startup, retaining cached channels until success.
             QTimer.singleShot(200,self.refresh_channels)
+    def showEvent(self,event):
+        super().showEvent(event)
+        if self._startup_layout_pending:
+            self._startup_layout_pending=False
+            # Qt computes stylesheet-driven QPushButton hints only once the
+            # real platform window is shown. The initial pre-show QScrollArea
+            # dimensions can therefore clip the logo and header controls.
+            QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
+
+    def settle_startup_toolbar_layout(self):
+        """Reflow saved Normal/Compact/Large toolbar sizes after Qt polishing."""
+        for area in (self.header_scroll,self.controls_scroll):
+            child=area.widget()
+            if child is None:
+                continue
+            child.ensurePolished()
+            for widget in child.findChildren(QWidget):
+                widget.ensurePolished()
+            child_layout=child.layout()
+            if child_layout:
+                child_layout.invalidate()
+                child_layout.activate()
+            child.adjustSize()
+            base_height=child.sizeHint().height()
+            if area is self.header_scroll:
+                base_height=max(base_height,self.header_logo.height()+8)
+            scroll_bar=area.horizontalScrollBar()
+            extra=(scroll_bar.sizeHint().height()
+                   if area is self.header_scroll and scroll_bar.maximum()>scroll_bar.minimum()
+                   else 0)
+            area.setFixedHeight(base_height+(12 if area is self.header_scroll else 6)+extra)
+            area.updateGeometry()
+        self.sync_player_button_arrows()
+
     def error(self,message):
         self.status.setText(message); QMessageBox.warning(self,'DizyTV',message)
     def load_guide(self):
@@ -2305,7 +2346,7 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.adjustSize()
                 scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
-        QTimer.singleShot(0,self,self.sync_player_button_arrows)
+        QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
 
     def scroll_player_buttons(self,step):
         bar=self.controls_scroll.horizontalScrollBar()
@@ -2519,7 +2560,12 @@ class MainWindow(QMainWindow):
         self.status.setText('Stream playback ended; offline speech captions stopped.')
 
     def tick(self):
-        self.state=self.store.read(); zone=self.state['settings']['timezone']
+        # Detached recording workers hold a cross-process state lock while
+        # writing. The five-second Qt timer must not wait behind that lock.
+        snapshot=self.store.try_read()
+        if snapshot is not None:
+            self.state=snapshot
+        zone=self.state['settings']['timezone']
         label=('Auto: '+detected_zone() if zone=='auto' else zone); local=format_time(time.time(),zone,False,detected_zone()); key=label+' '+local.rsplit(' ',1)[-1]
         self.timezone_label.setText(label+' • '+local)
         if key!=self.displayed_zone:self.displayed_zone=key; self.render_guide()
