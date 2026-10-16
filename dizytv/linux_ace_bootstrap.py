@@ -78,7 +78,7 @@ def compatibility(distribution=None, machine=None):
     return True
 
 
-def download_official(destination, opener=None, digest=SHA256, progress=None):
+def download_official(destination, opener=None, digest=SHA256, progress=None, cancel=None):
     """Fixed publisher URL, size bound, fixed SHA and same-host HTTPS redirects."""
     check_publisher_url(OFFICIAL_URL)
     if opener is None:
@@ -96,6 +96,8 @@ def download_official(destination, opener=None, digest=SHA256, progress=None):
             if size is not None and size > MAX_ARCHIVE_BYTES:
                 raise RuntimeError("Ace engine download exceeds the size limit")
             while True:
+                if cancel is not None and cancel():
+                    raise RuntimeError("Ace Stream download cancelled; no files installed")
                 chunk = response.read(1024 * 1024)
                 if not chunk:
                     break
@@ -146,8 +148,8 @@ def extract_verified_archive(archive_path, destination):
     return selected
 
 
-def install_original(*, consent=False, destination=None, progress=None, opener=None,
-                     distribution=None, machine=None, digest=SHA256):
+def install_original(*, consent=False, destination=None, progress=None, cancel=None,
+                     opener=None, distribution=None, machine=None, digest=SHA256):
     """Opt-in per-user install with atomic publish and zero automatic execution."""
     if consent is not True:
         raise PermissionError("Ace Stream P2P installation requires explicit user consent")
@@ -163,8 +165,12 @@ def install_original(*, consent=False, destination=None, progress=None, opener=N
     with tempfile.TemporaryDirectory(prefix=".dizytv-ace-", dir=parent) as temp:
         root = Path(temp)
         archive = root / "official.tar.gz"
-        download_official(archive, opener=opener, digest=digest, progress=progress)
+        download_official(archive, opener=opener, digest=digest, progress=progress, cancel=cancel)
+        if cancel is not None and cancel():
+            raise RuntimeError("Ace Stream installation cancelled")
         content = extract_verified_archive(archive, root / "unpack")
+        if cancel is not None and cancel():
+            raise RuntimeError("Ace Stream installation cancelled")
         # This provenance marker belongs to DizyTV; upstream engine remains
         # otherwise unchanged. No scripts, services or executables are run.
         (content / ".dizytv-publisher-install.json").write_text(

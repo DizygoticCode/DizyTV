@@ -1,7 +1,8 @@
 """Package the Linux x86_64 PyInstaller build as an installable .deb.
 
 The executable links against system libVLC and its plugins, rather than bundling
-an unmanaged or incompatible Ace Stream binary. Engine is separately installed.
+an unmanaged or incompatible Ace Stream binary. An optional publisher
+bootstrap is embedded in the application but never runs during APT install.
 """
 from __future__ import annotations
 
@@ -53,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='dizytv-deb-') as folder:
         'Depends: libvlc5, vlc-plugin-base, vlc-plugin-video-output, ffmpeg, libgl1, libxcb-cursor0, libxkbcommon-x11-0\n'
         'Description: DizyTV native live television player\n'
         ' Local TV player with XMLTV guides and recordings.\n'
-        ' Uses system libVLC and separately installed Ace Stream engine.\n')
+        ' Uses system libVLC and FFmpeg; optional in-app Ace bootstrap.\n')
     # The package becomes root-owned: a restrictive build umask must not leave
     # users unable to read its libraries or traverse its installation paths.
     root.chmod(0o755)

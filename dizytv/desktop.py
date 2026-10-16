@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QDialogButtonBox, QFormLayout, QLayout, QComboBox, QSpinBox, QDoubleSpinBox,
-    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar)
+    QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar, QProgressDialog)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
                    check_conflicts, export_backup, restore_backup, MAX_BACKUP, validate_state, normalise_genre, catalogue, match_guide, guide_lookup, guide_suggestions, display_channel_name, channel_section, channel_kind, COUNTRIES, GENRES)
@@ -3563,10 +3563,85 @@ class MainWindow(QMainWindow):
         self.record_now()
 
     def open_ace_stream_setup(self):
-        # Do not redistribute, download or silently execute proprietary binaries.
-        # The browser opens official engine documentation for this platform.
-        site=('https://wiki.acestream.media/Install_Ubuntu' if sys.platform.startswith('linux')
-              else 'https://docs.acestream.net/products/')
+        if sys.platform.startswith('linux'):
+            # The .deb includes this bootstrap in the PyInstaller application.
+            # Download the original publisher archive only on explicit consent.
+            from .linux_ace_bootstrap import compatibility, install_original
+            from .engine import linux_engine_path
+            existing=linux_engine_path()
+            if existing:
+                QMessageBox.information(self,'DizyTV — Ace Stream engine',
+                    'An existing Linux Ace engine is already configured:\n'+
+                    str(existing)+'\n\nDizyTV will not replace it or start a second installer.')
+                return
+            if getattr(self,'_ace_bootstrap_task',None) is not None:
+                self.status.setText('Original Ace Stream download is already running.')
+                return
+            try:
+                compatibility()
+            except RuntimeError as exc:
+                QMessageBox.warning(self,'DizyTV — Linux Ace compatibility',
+                    str(exc)+'\n\nOfficial Linux products: https://docs.acestream.net/products/\n'
+                    'The DizyTV .deb still works for ordinary HTTP/HLS channels.')
+                return
+            answer=QMessageBox.question(
+                self,'Install original Ace Stream engine?',
+                'Optional third-party software: Ace Stream uses peer-to-peer network '
+                'bandwidth and has its own publisher terms.\n\n'
+                'This downloads the publisher\'s unchanged Ubuntu 22.04 engine '
+                'from download.acestream.media into your own ~/.local/opt/acestream '
+                'folder. A fixed SHA-256 checksum will be checked before installing. '
+                'Nothing is executed automatically by setup.\n\n'
+                'Publisher terms: https://www.acestream.org/license\n'
+                'Proceed with this optional download?',
+                QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+            if answer!=QMessageBox.Yes:
+                return
+            cancel=threading.Event()
+            progress=QProgressDialog('Downloading original Ace Stream engine…',
+                                     'Cancel download',0,1000,self)
+            progress.setWindowTitle('DizyTV — optional Ace Stream installation')
+            progress.setMinimumDuration(0)
+            progress.setWindowModality(Qt.NonModal)
+            progress.setAutoClose(False)
+            progress.canceled.connect(cancel.set)
+            task=None
+            def work():
+                return install_original(
+                    consent=True,cancel=cancel.is_set,
+                    progress=lambda received,total:task.signals.progress.emit(received,total))
+            task=Task(work)
+            self._ace_bootstrap_task=task
+            self._ace_bootstrap_progress=progress
+            def onprogress(received,total):
+                if total:
+                    progress.setValue(min(990,round(received/max(1,total)*990)))
+                progress.setLabelText(
+                    'Downloading and verifying original Ace Stream: '+
+                    str(round(received/1024/1024,1))+' MiB')
+            def done(path):
+                self._ace_bootstrap_task=None
+                progress.setValue(1000);progress.close()
+                self.status.setText('Original Ace Stream engine staged and verified.')
+                QMessageBox.information(
+                    self,'DizyTV — Ace Stream engine installed',
+                    'Verified publisher archive installed at:\n'+path+
+                    '\n\nThe original engine was not launched during installation. '
+                    'Playing an Ace channel will start its local engine when needed. '
+                    'This does not guarantee the selected stream has peers.')
+            def failed(message):
+                self._ace_bootstrap_task=None
+                progress.close()
+                self.status.setText('Optional Ace setup did not complete; DizyTV is unaffected.')
+                QMessageBox.warning(self,'DizyTV — optional Ace setup',message)
+            task.signals.progress.connect(onprogress)
+            task.signals.success.connect(done)
+            task.signals.failure.connect(failed)
+            progress.show()
+            self.pool.start(task)
+            return
+        # Proprietary Ace binaries are never silently bundled or rehosted.
+        site='https://docs.acestream.net/products/'
         if not QDesktopServices.openUrl(QUrl(site)):
             self.error('Could not open the official Ace Stream products page in your browser.')
 

@@ -220,7 +220,7 @@ def ensure_ready(address, startup_seconds=25, executable_path=''):
     elif sys.platform.startswith('linux'):
         executable=linux_engine_path(executable_path)
         if executable is None:
-            raise RuntimeError('Ace Stream engine not detected on Linux. Install the publisher-provided engine separately, then select its start-engine script in Settings.')
+            raise RuntimeError('Ace Stream engine not detected on Linux. Use Tools → Set up Ace Stream engine for an optional original-publisher download on supported Ubuntu 22.04, or select a trusted start-engine script in Settings.')
         args=[str(executable),'--client-console']
         flags=0
     else:
