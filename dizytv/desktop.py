@@ -2443,7 +2443,8 @@ class MainWindow(QMainWindow):
 
         Never interrupt user pause, replay, or a scheduled recording.
         """
-        if self.timeshift is None or self.player is None or not self.playback_started:
+        if (self.timeshift is None or self.timeshift_task is not None
+                or self.player is None or not self.playback_started):
             return
         now=time.monotonic() if now is None else now
         entries=self.timeshift.window.snapshot()
@@ -2472,11 +2473,49 @@ class MainWindow(QMainWindow):
                 and now-self.last_live_recovery>=45
                 and (playing or status.endswith('.Buffering') or status.endswith('.Error')
                      or status.endswith('.Ended'))):
+            # Reconnecting the player does not stop or erase the capture ring.
+            # A moving Vosk holdback remains held back after recovery; never
+            # silently switch a synced viewer to the unbuffered LIVE endpoint.
+            if self._active_holdback_ms:
+                if len(self.timeshift.window.holdback_entries(
+                        self._active_holdback_ms/1000))<3:
+                    self.seek_notice.setText('Vosk video buffer refilling; waiting for playable fragments.')
+                    return
+                target=self.timeshift.holdback_url(self._active_holdback_ms/1000)
+            else:
+                target=self.timeshift.live_url()
             self.last_live_recovery=now
             self.last_good_video=now
-            # Reconnecting the player does not stop or erase the capture ring.
-            self.play_url(self.timeshift.live_url())
-            self.status.setText('Recovered stalled timeshift playback to LIVE automatically.')
+            self.play_url(target,preserve_captions=self._auto_caption_worker is not None)
+            if not self.playback_started:
+                self.stop_auto_captions()
+                return
+            self.status.setText('Recovered stalled buffered TV playback'+
+                                (' while preserving Vosk video delay.' if self._active_holdback_ms
+                                 else ' to LIVE.'))
+
+    def stop_caption_on_terminal_playback(self):
+        """Hide stale Vosk text if the current source has actually ended.
+
+        Never interfere with recoverable timeshift buffering: the DVR watchdog
+        can reconnect a held-back stream as long as new fragments arrive.
+        """
+        if self._auto_caption_worker is None or self._auto_caption_stopping:
+            return
+        if not self.player or not self.playback_started:
+            self.stop_auto_captions()
+            return
+        try:status=str(self.player.get_state())
+        except (AttributeError,OSError,RuntimeError):return
+        terminal=(status.endswith('.Ended') or status.endswith('.Error')
+                  or status.endswith('.Stopped'))
+        if not terminal:
+            return
+        if self.timeshift is not None and self.timeshift_task is None:
+            if time.monotonic()-self.last_capture_progress<=25:
+                return  # Rolling cache can still recover video.
+        self.stop_auto_captions()
+        self.status.setText('Stream playback ended; offline speech captions stopped.')
 
     def tick(self):
         self.state=self.store.read(); zone=self.state['settings']['timezone']
@@ -2492,6 +2531,7 @@ class MainWindow(QMainWindow):
         self.check_live_timeshift()
         self.check_direct_playback()
         self.sync_subtitles()
+        self.stop_caption_on_terminal_playback()
         if self._auto_caption_overlay is not None and time.monotonic()-self._auto_caption_updated>6:
             self._auto_caption_overlay.hide()
         if self.player and self.playback_started:
@@ -2871,6 +2911,11 @@ class MainWindow(QMainWindow):
         if not self.player or not self.playback_started or not self._playback_url:
             self.status.setText('Play a live channel before starting local speech captions.')
             return
+        try:play_state=str(self.player.get_state())
+        except (AttributeError,OSError,RuntimeError):play_state=''
+        if play_state.endswith(('.Stopped','.Ended','.Error')):
+            self.status.setText('The stream is stopped; restart playback before generating Vosk captions.')
+            return
         settings=self.state['settings']
         language=settings.get('auto_caption_language','English (bundled)')
         model_override=settings.get('auto_caption_model_dir','') if language=='English (bundled)' else ''
@@ -3156,6 +3201,7 @@ class MainWindow(QMainWindow):
             self.status.setText('Connecting to stream…')
         except Exception as exc:
             self.playback_started=0
+            self.stop_auto_captions()
             self.error('Playback could not start. Check that VLC 3 is installed and the stream is available. '+str(exc))
     def detected_timezone(self):
         return detected_zone()
@@ -3374,6 +3420,9 @@ class MainWindow(QMainWindow):
         is_ace=ace_id(ch['stream']) is not None
         if is_ace and self.engine_task is not None:
             self.status.setText('Ace Stream engine startup is already in progress…'); return
+        # The viewer has requested a new channel NOW. Remove old Vosk words
+        # before an Ace engine/TV source may spend seconds connecting.
+        self.stop_auto_captions()
         if not is_ace:
             # Supersede pending Ace preparation when tuning a direct channel.
             # Its late callbacks must neither start video nor block a new Ace request.
