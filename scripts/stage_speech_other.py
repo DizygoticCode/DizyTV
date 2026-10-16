@@ -54,9 +54,13 @@ def main():
         stage_model(archive,DEST)
     if sys.platform=='darwin':
         import imageio_ffmpeg
-        exe=Path(imageio_ffmpeg.get_ffmpeg_exe())
-        if not exe.is_file():
-            raise RuntimeError('Native macOS FFmpeg wheel has no executable')
+        exe=Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+        wheel_binaries=Path(imageio_ffmpeg.__file__).resolve().parent/'binaries'
+        # imageio_ffmpeg.get_ffmpeg_exe honours an environment override. A
+        # system PATH or IMAGEIO_FFMPEG_EXE override must never make us silently
+        # package an unverified external executable in the Mac installer.
+        if wheel_binaries not in exe.parents or not exe.is_file():
+            raise RuntimeError('Pinned macOS FFmpeg wheel did not provide its own native executable')
         target=DEST/'ffmpeg'
         shutil.copy2(exe,target)
         target.chmod(0o755)
