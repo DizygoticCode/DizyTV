@@ -356,7 +356,7 @@ class DesktopTests(unittest.TestCase):
                 w.check_live_timeshift(now=110)
                 reconnect.assert_called_once_with(
                     'http://127.0.0.1/holdback.m3u8?ms=5000',preserve_captions=False)
-            w.timeshift.window.holdback_url.assert_called_once_with(5)
+            w.timeshift.holdback_url.assert_called_once_with(5)
             w.timeshift.live_url.assert_not_called()
             w.timeshift=None
             w.player=None
@@ -1024,6 +1024,8 @@ class DesktopTests(unittest.TestCase):
             w=MainWindow(store,start_worker=False)
             w.player=Mock()
             w.playback_started=1
+            w.player.video_get_spu_description.return_value=[(3,'English')]
+            w.player.video_get_spu.side_effect=[3,3,-1]
             w.player.video_set_spu.side_effect=[-1,0]
             w.sync_subtitles()
             self.assertFalse(w._subtitle_auto_applied)
