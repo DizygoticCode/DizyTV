@@ -1762,7 +1762,11 @@ class MainWindow(QMainWindow):
         self.header_buttons=[logo,brand,self.timezone_label]+[top.itemAt(i).widget() for i in range(top.count()) if top.itemAt(i).widget() is not None]
         split=QSplitter();split.setChildrenCollapsible(True);layout.addWidget(split,1)
         self.split=split
-        sidebar=QWidget();sidebar.setObjectName('appSidebar');side=QVBoxLayout(sidebar);side.setContentsMargins(10,10,10,10);side.setSpacing(7);self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
+        sidebar=QWidget();sidebar.setObjectName('appSidebar');side=QVBoxLayout(sidebar);side.setContentsMargins(10,10,10,10);side.setSpacing(7)
+        # Keep each filter/checkbox/button at its full vertical size. When
+        # space runs out, the sidebar scrolls instead of crushing text rows.
+        side.setSizeConstraint(QVBoxLayout.SetMinimumSize)
+        self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox()
         self.kind_filter=QComboBox(); self.source_filter=QComboBox()
         self.section_filter=QComboBox()
@@ -1798,6 +1802,7 @@ class MainWindow(QMainWindow):
         side.addWidget(order)
         browser_label=QLabel('Countries / categories / channels'); side.addWidget(browser_label)
         self.country_tree=QTreeWidget(); self.country_tree.setHeaderHidden(True)
+        self.country_tree.setMinimumHeight(86)
         self.country_tree.setMaximumHeight(240)
         self.country_tree.itemClicked.connect(self.country_tree_clicked)
         self.country_tree.itemDoubleClicked.connect(self.country_tree_double_clicked)
@@ -1815,7 +1820,11 @@ class MainWindow(QMainWindow):
         self.show_disabled.toggled.connect(self.refresh_disabled_channels)
         selector_row.addWidget(self.show_disabled)
         side.addWidget(selectors)
-        self.channels=QListWidget(); self.channels.currentItemChanged.connect(self.choose_channel); self.channels.itemDoubleClicked.connect(lambda:self.play()); side.addWidget(self.channels,1)
+        self.channels=QListWidget()
+        self.channels.setMinimumHeight(86)
+        self.channels.currentItemChanged.connect(self.choose_channel)
+        self.channels.itemDoubleClicked.connect(lambda:self.play())
+        side.addWidget(self.channels,1)
         for label,handler in [('★ Add / remove favourite',self.favourite),
                               ('Hide / restore selected',self.toggle_channel_visibility),
                               ('Map EPG',self.map_channel),('Edit categories',self.edit_categories)]:
@@ -2016,6 +2025,21 @@ class MainWindow(QMainWindow):
             return
         sidebar=self.sidebar
         sidebar.ensurePolished()
+        # Never let QSplitter/QScrollArea compress a category label, filter,
+        # dropdown, favourite checkbox or action button below its styled
+        # text height.  The panel scrolls VERTICALLY when the window is short.
+        for widget in sidebar.findChildren((QLabel,QPushButton,QComboBox,
+                                            QCheckBox,QLineEdit)):
+            widget.ensurePolished()
+            hint=widget.sizeHint().height()
+            if hint>0 and widget.minimumHeight()!=hint:
+                widget.setMinimumHeight(hint)
+        sidebar.layout().invalidate()
+        sidebar.layout().activate()
+        required_height=sidebar.layout().minimumSize().height()
+        if sidebar.minimumHeight()!=required_height:
+            sidebar.setMinimumHeight(required_height)
+        self.sidebar_scroll.updateGeometry()
         for widget in (self.country_filter,self.genre_filter,self.kind_filter,
                        self.source_filter,self.section_filter,self.sort_picker):
             widget.ensurePolished()
