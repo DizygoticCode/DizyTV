@@ -1666,6 +1666,7 @@ class MainWindow(QMainWindow):
         self.last_live_recovery=0;self.last_good_video=time.monotonic()
         self._subtitle_auto_applied=False
         self._subtitle_manual_track=None
+        self._subtitle_session_all_off=False
         self._subtitle_track_signature=()
         self._vlc_subtitle_profile=None
         self._playback_url=''
@@ -3019,6 +3020,7 @@ class MainWindow(QMainWindow):
 
     def disable_all_subtitles(self):
         """CC Off disables both independent caption engines immediately."""
+        self._subtitle_session_all_off=True
         self.stop_auto_captions()
         self._subtitle_manual_track=-1
         self._subtitle_auto_applied=True
@@ -3037,6 +3039,8 @@ class MainWindow(QMainWindow):
         except (AttributeError,OSError,RuntimeError):
             self.status.setText('Subtitle selection is not available from this VLC build.')
             return
+        if track!=-1:
+            self._subtitle_session_all_off=False
         self._subtitle_manual_track=track
         self._subtitle_auto_applied=True
         self.status.setText('Subtitles off' if track==-1 else 'Subtitle track '+str(track)+' selected')
@@ -3177,9 +3181,12 @@ class MainWindow(QMainWindow):
                         self.state['settings'].get('http_buffer_ms',4000)))
             self.player.set_media(media); media.release()
             self._subtitle_auto_applied=False
-            self._subtitle_manual_track=None
+            self._subtitle_manual_track=(-1 if self._subtitle_session_all_off else None)
             self._subtitle_track_signature=()
             if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
+            if self._subtitle_session_all_off:
+                try:self.player.video_set_spu(-1)
+                except (AttributeError,OSError,RuntimeError):pass
             self.playback_started=time.monotonic(); self.playback_reported=False
             self._last_media_activity=None
             self._video_issue_notified=False
