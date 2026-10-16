@@ -34,12 +34,12 @@ def main():
         import subprocess
         import vlc
         from dizytv.auto_captions import verify_caption_engine
-        instance=vlc.Instance('--intf=dummy','--no-video-title-show')
-        if instance is None:
-            raise RuntimeError('Packaged libVLC failed to instantiate')
-        instance.release()
         binary,model=verify_caption_engine()
         subprocess.run([binary,'-version'],check=True,stdout=subprocess.DEVNULL)
+        from dizytv.native_media_probe import verify_media_pipeline
+        frames=verify_media_pipeline(binary,vlc)
+        if frames<3:
+            raise RuntimeError('Packaged video decoder did not produce frames')
         if not model:
             raise RuntimeError('Packaged Vosk model is unavailable')
         if sys.platform.startswith('linux'):
