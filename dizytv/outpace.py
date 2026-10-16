@@ -10,11 +10,12 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlsplit, parse_qs
 from urllib.request import urlopen
 
 
@@ -69,6 +70,16 @@ def playback_url(stream, address):
     from .core import ace_request_params, http_url
     base = local_api_address(address)
     params = ace_request_params(stream)
+    # Legacy playlists sometimes express an explicit bare infohash as
+    # "acestream:?infohash=<40 hex>". The generic Ace parser rejects it,
+    # so handle ONLY this exact bounded selector for Outpace native playback.
+    if not params and urlsplit(stream).scheme == 'acestream':
+        parts = urlsplit(stream)
+        tokens = parse_qs(parts.query,keep_blank_values=True)
+        if not parts.netloc and parts.path == '' and set(tokens) == {'infohash'}:
+            hashes=tokens['infohash']
+            if len(hashes)==1 and re.fullmatch(r'[a-fA-F0-9]{40}',hashes[0]):
+                params={'infohash':hashes[0].lower()}
     if not params:
         raise RuntimeError('Selected channel does not contain a supported Ace content ID.')
     if 'id' in params and re.fullmatch(r'[a-fA-F0-9]{40}', params['id']):
@@ -87,7 +98,6 @@ def ensure_ready(address, startup_seconds=25):
         return 'connected'
     # Never try to install or replace software behind an unfamiliar local
     # service. Also refuse to launch if the installed bundle is incomplete.
-    import socket
     try:
         with socket.create_connection(('127.0.0.1', 6878), timeout=0.3):
             raise RuntimeError('Another application owns port 6878. Stop that service '
@@ -120,4 +130,12 @@ def ensure_ready(address, startup_seconds=25):
             raise RuntimeError('Packaged Outpace stopped during startup. '
                                'Inspect macOS permissions and the daemon logs.')
         time.sleep(0.35)
+    # This daemon is owned by this one startup attempt. Do not leave a
+    # process running if its native health API never becomes ready.
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
     raise RuntimeError('Outpace started but its private localhost API did not become ready.')
