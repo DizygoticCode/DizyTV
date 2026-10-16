@@ -54,7 +54,7 @@ jobs:
           - os: macos-15-intel
             target: macos-x86_64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -72,6 +72,24 @@ jobs:
       - name: Stage checksum-pinned Windows speech assets
         if: runner.os == 'Windows'
         run: python scripts/stage_windows_speech.py
+      - name: Compile pinned Outpace 0.2.0 for the native macOS architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The signed package will contain a separately licensed program.
+          # Build exact upstream v0.2.0 source, never an arbitrary executable.
+          upstream=e61be2aeb4e4ef3b4e6b42b22fe35f91271a7d5b
+          git clone --quiet --depth 1 --branch v0.2.0 https://github.com/jamezrin/outpace.git "$RUNNER_TEMP/outpace-src"
+          cd "$RUNNER_TEMP/outpace-src"
+          test "$(git rev-parse HEAD)" = "$upstream"
+          cargo build --locked --release -p ace-engine --bin outpace
+          test -x target/release/outpace
+          target/release/outpace --version
+          mkdir -p "$GITHUB_WORKSPACE/vendor/outpace"
+          cp target/release/outpace "$GITHUB_WORKSPACE/vendor/outpace/outpace"
+          cp LICENSE "$GITHUB_WORKSPACE/vendor/outpace/LICENSE"
+          chmod 0755 "$GITHUB_WORKSPACE/vendor/outpace/outpace"
       - name: Package native application
         run: python scripts/build_desktop.py
       - name: Windows packaged startup and installer
@@ -155,6 +173,29 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
+          # Assert the actual PKG app has the separately licensed native helper.
+          helper="$(find dist/DizyTV.app/Contents -type f -name outpace -perm -111 -print -quit)"
+          test -n "$helper"
+          "$helper" --version | grep -i outpace
+          licence="$(find dist/DizyTV.app/Contents -type f -path '*/outpace/LICENSE' -print -quit)"
+          test -n "$licence"
+          grep -F 'GNU AFFERO GENERAL PUBLIC LICENSE' "$licence"
+          OUTPACE_BIND=127.0.0.1:6878 OUTPACE_RTMP_BIND=127.0.0.1:1935 OUTPACE_ENABLE_INBOUND=0 "$helper" serve >outpace-ci.log 2>&1 &
+          helper_pid=$!
+          trap 'kill "$helper_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 25); do
+            if curl -fsS --max-time 1 http://127.0.0.1:6878/healthz | grep -Fx ok; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1 || { cat outpace-ci.log; exit 1; }
+          curl -fsS --max-time 3 http://127.0.0.1:6878/networks | python -c 'import json,sys; assert "ace" in json.load(sys.stdin)["networks"]'
+          kill "$helper_pid" 2>/dev/null || true
+          wait "$helper_pid" 2>/dev/null || true
+          trap - EXIT
           # Validate the exact release filename in each native build, not only
           # in publish-alpha after waiting for every other platform to finish.
           test -s "dist/DizyTV-0.1.17-alpha-${{ matrix.target }}.pkg"

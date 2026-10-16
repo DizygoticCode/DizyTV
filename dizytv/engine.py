@@ -106,6 +106,11 @@ def engine_diagnostics(address,timeout=3):
     host,port=engine_endpoint(address)
     if host not in ('127.0.0.1','localhost','::1'):
         return 'Configured engine is remote; automatic local startup is unavailable.'
+    if sys.platform=='darwin' and port==6878:
+        from .outpace import api_ready
+        if api_ready(address):
+            return ('Outpace native engine is running locally. This verifies its API, '
+                    'not a playable channel or live peer connectivity.')
     api=address.rstrip('/')+'/webui/api/service?method=get_version'
     try:
         with urlopen(api,timeout=timeout) as response:
@@ -128,6 +133,12 @@ def start_playback_session(stream, address, timeout=20):
     a content/peer error. We never pass an unverified outside URL to VLC.
     """
     from .core import ace_request_params, http_url, stream_url
+    if sys.platform=='darwin':
+        host,port=engine_endpoint(address)
+        if host in ('127.0.0.1','localhost','::1') and port==6878:
+            from .outpace import api_ready, playback_url
+            if api_ready(address):
+                return playback_url(stream,address)
     params=ace_request_params(stream)
     if params is None:
         raise ValueError('Selected channel has no supported Ace Stream content ID')
@@ -190,9 +201,12 @@ def ensure_ready(address, startup_seconds=25, executable_path=''):
     Remote engines are connect-only. Never auto-install, auto-download, or
     execute an arbitrary playlist URL as a local process.
     """
+    host,port=engine_endpoint(address)
+    if sys.platform=='darwin' and host in ('127.0.0.1','localhost','::1') and port==6878:
+        from .outpace import ensure_ready as ensure_outpace
+        return ensure_outpace(address,startup_seconds)
     if running(address):
         return 'connected'
-    host,port=engine_endpoint(address)
     if host not in ('127.0.0.1','localhost','::1') or port!=6878:
         raise RuntimeError('Ace Stream engine is unreachable at the configured address. Check Settings.')
     if sys.platform=='win32':

@@ -64,7 +64,16 @@ if os.name=='nt':
         raise RuntimeError('Missing staged Windows FFmpeg/Vosk model: refusing to build an incomplete installer')
     args += ['--add-data',str(speech)+os.pathsep+'speech']
 if sys.platform=='darwin':
-    args += ['--windowed','--icon','assets/branding/dizytv.icns','--osx-bundle-identifier','dev.dizygotic.dizytv']
+    # A distinct AGPL-licensed helper compiled from a pinned upstream commit.
+    outpace=ROOT/'vendor'/'outpace'
+    helper=outpace/'outpace'
+    licence=outpace/'LICENSE'
+    if not helper.is_file() or not licence.is_file():
+        raise RuntimeError('Required macOS Outpace binary and licence are missing')
+    args += ['--add-binary',str(helper)+os.pathsep+'outpace',
+             '--add-data',str(licence)+os.pathsep+'outpace',
+             '--windowed','--icon','assets/branding/dizytv.icns',
+             '--osx-bundle-identifier','dev.dizygotic.dizytv']
 elif os.name=='nt':
     args += ['--windowed','--icon','assets/branding/dizytv.ico']
 args += ['dizytv/__main__.py']
