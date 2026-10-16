@@ -1852,7 +1852,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setElideMode(Qt.ElideRight)
-        split.addWidget(self.tabs);split.setSizes([310,840])
+        split.addWidget(self.tabs);split.setSizes([270,880])
         live=QWidget();live.setObjectName('livePage');live_layout=QVBoxLayout(live);live_layout.setContentsMargins(8,8,8,8);live_layout.setSpacing(6);self.live_layout=live_layout; self.now=QLabel('Choose a channel, then press Play');self.now.setObjectName('channelHeading'); self.now.setWordWrap(True); live_layout.addWidget(self.now)
         self.channel_banner=QLabel('')
         self.channel_banner.setObjectName('channelBanner')
@@ -2045,18 +2045,9 @@ class MainWindow(QMainWindow):
         for widget in (self.country_filter,self.genre_filter,self.kind_filter,
                        self.source_filter,self.section_filter,self.sort_picker):
             widget.ensurePolished()
-        text_needs=[
-            self.fontMetrics().horizontalAdvance('Countries / categories / channels')+40,
-            self.fontMetrics().horizontalAdvance('★ Add / remove favourite')+58,
-            self.fontMetrics().horizontalAdvance('Hide / restore selected')+58,
-            self.fontMetrics().horizontalAdvance('TV / Radio / stream')+48,
-        ]
-        # Platform font metrics, including saved 80%/Normal settings, determine
-        # the width rather than a fragile 270px hard-coded splitter column.
-        for widget in sidebar.findChildren(QPushButton):
-            text_needs.append(widget.sizeHint().width()+24)
-        required=max(280,*text_needs)
-        sidebar.setMinimumWidth(required)
+        # Keep the viewer's selected splitter width. The side panel scrolls
+        # vertically if the window is too short, without consuming extra video
+        # space merely because category labels have wide text.
         self.sidebar_scroll.updateGeometry()
         for area in (self.header_scroll,self.controls_scroll):
             child=area.widget()
