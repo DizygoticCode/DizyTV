@@ -186,6 +186,48 @@ class TestTimeshift(unittest.TestCase):
             session.close()  # Concurrent/late cleanup is harmless.
             self.assertTrue(session.stop_event.is_set())
 
+    def test_socket_created_during_close_is_not_leaked(self):
+        """A rapid channel switch can cancel HTTP server construction itself."""
+        from threading import Event, Thread
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/live.ts',root,
+                                     session_id='concurrent-socket-close')
+            creating=Event()
+            allow_create=Event()
+            server=Mock()
+            errors=[]
+            def slow_server(*args,**kwargs):
+                creating.set()
+                if not allow_create.wait(3):
+                    raise RuntimeError('socket creation test timed out')
+                return server
+            def start():
+                try:session.start(timeout=0.1)
+                except RuntimeError as exc:errors.append(str(exc))
+            try:
+                with patch('dizytv.timeshift.ThreadingHTTPServer',side_effect=slow_server):
+                    starter=Thread(target=start,daemon=True)
+                    starter.start()
+                    self.assertTrue(creating.wait(2))
+                    session.close_async()
+                    self.assertTrue(session.stop_event.is_set())
+                    allow_create.set()
+                    starter.join(timeout=3)
+                    self.assertFalse(starter.is_alive())
+                # Cleanup runs on a separate thread, but is guaranteed to
+                # close the socket created after cancellation, never leak it.
+                limit=time.monotonic()+3
+                while server.server_close.call_count==0 and time.monotonic()<limit:
+                    time.sleep(.02)
+                server.server_close.assert_called_once_with()
+                self.assertTrue(errors)
+                self.assertFalse(session._capture_thread is not None and
+                                 session._capture_thread.is_alive())
+            finally:
+                allow_create.set()
+                session.close()
+
     def test_closed_timeshift_rejects_late_capture_start(self):
         with tempfile.TemporaryDirectory() as root:
             session=RollingTimeshift('https://example.com/channel.ts',root,
