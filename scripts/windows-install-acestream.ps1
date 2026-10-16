@@ -58,10 +58,14 @@ try {
         }
     } finally { $dest.Dispose(); $stream.Dispose() }
     if ($total -lt 1024*100) { throw 'Downloaded Ace file is unexpectedly small' }
-    $bytes=[IO.File]::ReadAllBytes($target)
-    if ($bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
-        throw 'Publisher returned HTML or a non-Windows executable'
-    }
+    # An installer can be large: verify its PE magic from a two-byte read,
+    # not a full 180 MiB ReadAllBytes allocation in the installer process.
+    $peek=[IO.File]::OpenRead($target)
+    try {
+        if ($peek.ReadByte() -ne 0x4d -or $peek.ReadByte() -ne 0x5a) {
+            throw 'Publisher returned HTML or a non-Windows executable'
+        }
+    } finally { $peek.Dispose() }
     $signature=Get-AuthenticodeSignature -LiteralPath $target
     if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
         throw 'Original Ace installer has no valid trusted Authenticode signature'
@@ -81,6 +85,7 @@ try {
     Write-Warning ('DizyTV is installed. For a manual attempt, use ' + $officialPage)
     exit 1
 } finally {
+    if ($response) { $response.Dispose() }
     if ($http) { $http.Dispose() }
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue }
 }

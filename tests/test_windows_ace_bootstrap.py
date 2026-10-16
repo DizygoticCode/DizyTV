@@ -25,3 +25,6 @@ class WindowsAceBootstrapTests(unittest.TestCase):
                 self.assertIn(required,source)
         self.assertNotIn('Invoke-Expression',source)
         self.assertNotIn('/SILENT',source)
+        self.assertNotIn('ReadAllBytes',source)
+        self.assertIn('OpenRead',source)
+        self.assertIn('$response.Dispose()',source)

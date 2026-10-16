@@ -99,6 +99,12 @@ jobs:
           cp target/release/outpace "$GITHUB_WORKSPACE/vendor/outpace/outpace"
           cp LICENSE "$GITHUB_WORKSPACE/vendor/outpace/LICENSE"
           chmod 0755 "$GITHUB_WORKSPACE/vendor/outpace/outpace"
+      - name: Verify official Windows Ace bootstrap does not download when in safe test mode
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/windows-install-acestream.ps1 -TestOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Ace bootstrap safety test failed' }
       - name: Package native application
         run: python scripts/build_desktop.py
       - name: Windows packaged startup and installer
