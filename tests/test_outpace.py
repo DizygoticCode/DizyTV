@@ -1,5 +1,6 @@
 """Native Outpace integration tests without requiring a Mac, swarm or network."""
 import io
+import json
 import socket
 import tempfile
 import unittest
@@ -16,12 +17,18 @@ class OutpaceTests(unittest.TestCase):
     def setUp(self):
         self.previous_owned=outpace._OWNED_PROCESS
         self.previous_shutdown=outpace._SHUTTING_DOWN
+        self.previous_identity=outpace._OWNED_IDENTITY
+        self.previous_binary=outpace._OWNED_BINARY
         outpace._OWNED_PROCESS=None
         outpace._SHUTTING_DOWN=False
+        outpace._OWNED_IDENTITY=None
+        outpace._OWNED_BINARY=None
 
     def tearDown(self):
         outpace._OWNED_PROCESS=self.previous_owned
         outpace._SHUTTING_DOWN=self.previous_shutdown
+        outpace._OWNED_IDENTITY=self.previous_identity
+        outpace._OWNED_BINARY=self.previous_binary
 
     def test_close_does_not_touch_external_engine_or_active_recording(self):
         self.assertFalse(outpace.stop_owned_daemon())
@@ -77,6 +84,72 @@ class OutpaceTests(unittest.TestCase):
         process.terminate.assert_called_once()
         self.assertIsNone(outpace._OWNED_PROCESS)
         self.assertFalse(outpace._SHUTTING_DOWN)
+
+
+    def test_gui_handoff_reaps_only_same_verified_idle_process(self):
+        """The detached recorder may clean up its former GUI's exact helper."""
+        class Response:
+            status=200
+            def __enter__(self): return self
+            def __exit__(self,*args): return None
+            def read(self,n): return b'{"streams":[]}'
+        with tempfile.TemporaryDirectory() as folder:
+            owned=Mock()
+            owned.pid=24321
+            owned.poll.return_value=None
+            outpace._OWNED_PROCESS=owned
+            outpace._OWNED_BINARY='/private/DizyTV/outpace/outpace'
+            outpace._OWNED_IDENTITY='b'*64
+            self.assertTrue(outpace.handoff_owned_daemon(folder))
+            marker=Path(folder)/'outpace-handoff.json'
+            self.assertTrue(marker.exists())
+            self.assertTrue(outpace._SHUTTING_DOWN)
+            data=json.loads(marker.read_text())
+            self.assertEqual(24321,data['pid'])
+            self.assertEqual(outpace._OWNED_BINARY,data['binary'])
+            current={'channels':[{'id':'a'*40,'stream':'acestream://'+'b'*40}],
+                     'jobs':[{'status':'recording','channel_id':'a'*40,
+                              'start':100,'end':9999999999}]}
+            with patch.object(outpace,'_process_identity',return_value='b'*64), \\
+                 patch('dizytv.storage.Store') as store, \\
+                 patch.object(outpace,'urlopen',return_value=Response()), \\
+                 patch.object(outpace.os,'kill') as terminate:
+                store.return_value.try_read.return_value=current
+                self.assertFalse(outpace.reap_handed_off_daemon(folder))
+                terminate.assert_not_called()
+                self.assertTrue(marker.exists())
+                # Once the Ace timer and API sessions are idle, terminate the
+                # verified former GUI child exactly once.
+                current['jobs']=[]
+                self.assertTrue(outpace.reap_handed_off_daemon(folder))
+                terminate.assert_called_once_with(24321,outpace.signal.SIGTERM)
+                self.assertFalse(marker.exists())
+
+    def test_handoff_rejects_recycled_pid_and_active_native_sessions(self):
+        class Response:
+            status=200
+            def __enter__(self): return self
+            def __exit__(self,*args): return None
+            def read(self,n): return b'{"streams":[{"clients":1}]}'
+        with tempfile.TemporaryDirectory() as folder:
+            marker=Path(folder)/'outpace-handoff.json'
+            marker.write_text(json.dumps({'pid':24321,'binary':'/private/outpace',
+                                          'identity':'b'*64}))
+            with patch.object(outpace,'_process_identity',return_value='c'*64), \\
+                 patch.object(outpace.os,'kill') as terminate:
+                self.assertFalse(outpace.reap_handed_off_daemon(folder))
+                terminate.assert_not_called()
+                self.assertFalse(marker.exists())
+            marker.write_text(json.dumps({'pid':24321,'binary':'/private/outpace',
+                                          'identity':'b'*64}))
+            with patch.object(outpace,'_process_identity',return_value='b'*64), \\
+                 patch('dizytv.storage.Store') as store, \\
+                 patch.object(outpace,'urlopen',return_value=Response()), \\
+                 patch.object(outpace.os,'kill') as terminate:
+                store.return_value.try_read.return_value={'jobs':[],'channels':[]}
+                self.assertFalse(outpace.reap_handed_off_daemon(folder))
+                terminate.assert_not_called()
+                self.assertTrue(marker.exists())
 
     def test_mac_packaged_path_only_and_original_name(self):
         with tempfile.TemporaryDirectory() as folder:
