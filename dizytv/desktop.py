@@ -844,6 +844,20 @@ class Settings(QDialog):
         self.caption_delay.setValue(self.original.get('auto_caption_delay_ms',0))
         self.caption_delay.setToolTip('0 = show Vosk text as soon as recognised. Positive values delay it to match slower video playback.')
         form.addRow('Vosk subtitle delay',self.caption_delay)
+        self.caption_video_delay=QSpinBox()
+        self.caption_video_delay.setObjectName('autoCaptionVideoDelayMs')
+        self.caption_video_delay.setRange(0,30000)
+        self.caption_video_delay.setSingleStep(1000)
+        self.caption_video_delay.setSuffix(' ms')
+        self.caption_video_delay.setValue(self.original.get('auto_caption_video_delay_ms',0))
+        self.caption_video_delay.setToolTip('Delay live VIDEO and AUDIO together via the optional local rolling timeshift buffer.')
+        form.addRow('Video delay for Vosk',self.caption_video_delay)
+        video_note=QLabel('When recognition appears late, delay the VIDEO and AUDIO together; '
+                          'requires “Keep a temporary on-device rolling buffer” below. '
+                          'Changes made here take effect on the next channel start; '
+                          'for live adjustments use the CC menu. Not supported by all streams.')
+        video_note.setWordWrap(True)
+        form.addRow(video_note)
         delay_note=QLabel('For captions appearing BEFORE the spoken words, increase the delay. '
                           'For captions appearing AFTER the words, reduce toward 0 ms. '
                           'Vosk cannot show text before recognising the audio; automatic sync '
@@ -1083,6 +1097,7 @@ class Settings(QDialog):
                     auto_caption_ffmpeg_path=self.auto_ffmpeg_path.text(),
                     auto_caption_language=self.caption_language.currentText(),
                     auto_caption_delay_ms=self.caption_delay.value(),
+                    auto_caption_video_delay_ms=self.caption_video_delay.value(),
                     guide_scale=self.guide_scale.value(),engine_executable=self.engine_path.text())
 
 
@@ -2984,6 +2999,24 @@ class MainWindow(QMainWindow):
         reset=menu.addAction('Reset Vosk delay to 0 ms')
         reset.setEnabled(delay!=0)
         reset.triggered.connect(lambda:self.change_auto_caption_delay())
+        menu.addSection('Video/audio holdback via local timeshift')
+        video_delay=self.state['settings'].get('auto_caption_video_delay_ms',0)
+        local_ready=(self.timeshift is not None and self.player is not None and
+                     bool(self.playback_started))
+        current_video=menu.addAction('Target video delay: '+str(video_delay)+' ms')
+        current_video.setEnabled(False)
+        advance=menu.addAction('Less VIDEO delay (−1 second)')
+        advance.setEnabled(local_ready and video_delay>0)
+        advance.triggered.connect(lambda:self.change_auto_caption_video_delay(-1000))
+        hold=menu.addAction('More VIDEO delay (+1 second)')
+        hold.setEnabled(local_ready and video_delay<30000)
+        hold.triggered.connect(lambda:self.change_auto_caption_video_delay(1000))
+        video_reset=menu.addAction('Reset VIDEO delay to live')
+        video_reset.setEnabled(local_ready and video_delay>0)
+        video_reset.triggered.connect(lambda:self.change_auto_caption_video_delay())
+        if not local_ready:
+            notice=menu.addAction('Enable on-device timeshift in Settings to delay video')
+            notice.setEnabled(False)
         menu.exec(QCursor.pos())
 
     def init_player(self):
@@ -3005,8 +3038,11 @@ class MainWindow(QMainWindow):
         if sys.platform=='darwin':self.player.set_nsobject(win)
         elif os.name=='nt':self.player.set_hwnd(win)
         else:self.player.set_xwindow(win)
-    def play_url(self,url):
-        self.stop_auto_captions()
+    def play_url(self,url,preserve_captions=False):
+        # Only the in-place DVR caption-sync controls use preserve_captions;
+        # channel tuning, record recovery and ordinary seeks retain old reset.
+        if not preserve_captions:
+            self.stop_auto_captions()
         self._playback_url=url
         self._active_direct_video=False
         try:
@@ -3188,7 +3224,9 @@ class MainWindow(QMainWindow):
         self.last_capture_progress=time.monotonic()
         self.last_good_video=time.monotonic()
         self.status.setText('Preparing temporary local timeshift buffer…')
-        job=Task(session.start)
+        requested_delay_ms=(settings.get('auto_caption_video_delay_ms',0)
+                            if settings.get('timeshift_enabled',False) else 0)
+        job=Task(lambda:session.start_delayed(requested_delay_ms/1000))
         self.timeshift_task=job
         def ready(local_url):
             if self.timeshift is not session:
@@ -3196,7 +3234,11 @@ class MainWindow(QMainWindow):
                 return
             self.timeshift_task=None
             self.play_url(local_url)
-            self.seek_notice.setText('Temporary on-device timeshift is recording; up to '+str(session.window.minutes)+' minutes')
+            self.timeshift_lag=(min(requested_delay_ms/1000,session.window.latest_seconds())
+                                if requested_delay_ms else 0)
+            self.seek_notice.setText('Temporary on-device timeshift is recording; up to '+str(session.window.minutes)+
+                                     ' minutes'+(' • video ~'+str(round(self.timeshift_lag,1))+'s behind LIVE for Vosk sync'
+                                                 if self.timeshift_lag>0 else ''))
         def failed(message):
             if self.timeshift is not session:return
             self.timeshift=None
@@ -3207,6 +3249,44 @@ class MainWindow(QMainWindow):
         job.signals.success.connect(ready)
         job.signals.failure.connect(failed)
         self.pool.start(job)
+
+    def change_auto_caption_video_delay(self,change_ms=None):
+        """Move the complete A/V playback behind live, using existing local DVR.
+
+        A separate source-based FFmpeg recognition worker is intentionally kept
+        alive across this *same-source* replay so its timeline isn't restarted.
+        This cannot guarantee media-clock sync for providers serving mismatched
+        live edges, but gives users a real picture+sound holdback control.
+        """
+        old=self.store.read()['settings'].get('auto_caption_video_delay_ms',0)
+        target=0 if change_ms is None else max(0,min(30000,old+change_ms))
+        if self.timeshift is None or self.player is None or not self.playback_started:
+            self.status.setText('Video holdback needs active local timeshift playback. '
+                                'Enable “Keep a temporary on-device rolling buffer” in Settings, '
+                                'then restart the channel. No stream was interrupted.')
+            return
+        available=self.timeshift.window.latest_seconds()
+        if target>0 and available<1:
+            self.status.setText('Timeshift buffer is still filling; try again shortly.')
+            return
+        actual=min(target/1000,available) if target>0 else 0.0
+        try:
+            target_url=(self.timeshift.replay_url(actual) if actual>=1 else
+                        self.timeshift.live_url())
+            # Do not stop Vosk while retuning ONLY the current DVR replay URL.
+            self.play_url(target_url,preserve_captions=True)
+            if not self.playback_started:return
+        except (OSError,RuntimeError,ValueError) as exc:
+            self.status.setText('Could not adjust video delay: '+str(exc)[:160])
+            return
+        self.timeshift_lag=actual
+        self.state=self.store.update(lambda s:s['settings'].update(auto_caption_video_delay_ms=target))
+        self.seek_notice.setText('DVR video/audio ~'+str(round(actual,1))+
+                                 's behind live; selected target '+str(target)+' ms. '
+                                 'Existing Vosk subtitle delay stays separate.')
+        self.status.setText('Video/audio holdback '+str(target)+' ms. '
+                            'Matching stream positions is approximate; '
+                            'network source clocks may differ.')
 
     def play(self):
         if not self.selected:return
