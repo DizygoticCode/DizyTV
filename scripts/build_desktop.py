@@ -63,6 +63,12 @@ if os.name=='nt':
     if not (speech/'ffmpeg.exe').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir() or not (speech/'vosk-model-small-en-us-0.15'/'conf').is_dir():
         raise RuntimeError('Missing staged Windows FFmpeg/Vosk model: refusing to build an incomplete installer')
     args += ['--add-data',str(speech)+os.pathsep+'speech']
+    # Preserve official VideoLAN's unmodified x64 DLLs and matching plugins.
+    # A missing staged archive aborts CI rather than silently using host VLC.
+    vlc=ROOT/'vendor'/'vlc'
+    if not (vlc/'libvlc.dll').is_file() or not (vlc/'libvlccore.dll').is_file() or not (vlc/'plugins').is_dir() or not (vlc/'COPYING.txt').is_file():
+        raise RuntimeError('Missing pinned VideoLAN VLC runtime and licences')
+    args += ['--add-binary',str(vlc)+os.pathsep+'vlc']
 if sys.platform=='darwin':
     args += ['--windowed','--icon','assets/branding/dizytv.icns','--osx-bundle-identifier','dev.dizygotic.dizytv']
 elif os.name=='nt':

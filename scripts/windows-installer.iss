@@ -22,6 +22,7 @@ RestartApplications=no
 
 [Files]
 Source: "windows-stop-worker.ps1"; Flags: dontcopy
+Source: "windows-acestream-bootstrap.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "..\dist\DizyTV\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"
 
@@ -32,11 +33,12 @@ Name: "{autodesktop}\DizyTV"; Filename: "{app}\DizyTV.exe"; Tasks: desktopicon
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 ; Ace Stream is third-party P2P software. It is NOT shipped with DizyTV.
-; The user explicitly opts in to visiting its official installer/download site.
-Name: "acestreamsetup"; Description: "Open the official Ace Stream download page after installing DizyTV (optional third-party P2P engine)"; Flags: unchecked
+; The user explicitly opts in before the original signed publisher installer is
+; fetched and launched. Signature failure is fail-closed with a manual fallback.
+Name: "acestreamsetup"; Description: "Download and run the official Ace Stream installer (optional third-party P2P engine; separate publisher terms apply)"; Flags: unchecked
 
 [Run]
-Filename: "https://docs.acestream.net/products/"; Description: "Official Ace Stream Windows download page"; Flags: shellexec skipifsilent; Tasks: acestreamsetup
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{tmp}\windows-acestream-bootstrap.ps1"""; Description: "Verify and launch the original Ace Stream installer"; Flags: postinstall skipifsilent; Tasks: acestreamsetup
 
 [Code]
 // This runs before Restart Manager checks open DLLs/executables.

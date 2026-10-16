@@ -3372,11 +3372,20 @@ class MainWindow(QMainWindow):
 
     def init_player(self):
         if self.player:return
-        if os.name=='nt':
+        from .native_vlc import configure_bundled_vlc
+        local_vlc=configure_bundled_vlc()
+        if os.name=='nt' and getattr(sys,'frozen',False) and not local_vlc:
+            # A bundled Windows installer must never silently rely on the
+            # presence of a user-installed VLC copy to pass a smoke test.
+            raise RuntimeError('DizyTV bundled VLC playback runtime is incomplete.')
+        if os.name=='nt' and not local_vlc:
+            # Source-checkout developer fallback only.
             for root in ('PROGRAMFILES','PROGRAMFILES(X86)'):
                 folder=Path(os.environ.get(root,'C:/Program Files'))/'VideoLAN'/'VLC'
                 if (folder/'libvlc.dll').exists():
-                    os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH',''); self.dll_dir=os.add_dll_directory(str(folder)); break
+                    os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH','')
+                    self.dll_dir=os.add_dll_directory(str(folder))
+                    break
         import vlc
         self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
         vlc_options=['--no-video-title-show',*self._vlc_subtitle_profile]

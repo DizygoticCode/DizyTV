@@ -72,6 +72,9 @@ jobs:
       - name: Stage checksum-pinned Windows speech assets
         if: runner.os == 'Windows'
         run: python scripts/stage_windows_speech.py
+      - name: Stage pinned official VideoLAN VLC 3 runtime
+        if: runner.os == 'Windows'
+        run: python scripts/stage_windows_vlc.py
       - name: Package native application
         run: python scripts/build_desktop.py
       - name: Windows packaged startup and installer
@@ -82,6 +85,12 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed to launch' }
           # The Windows installer must ship both dependencies, even when the CI
           # host already has an FFmpeg executable installed.
+          $vlc = 'dist/DizyTV/_internal/vlc'
+          if (-not (Test-Path (Join-Path $vlc 'libvlc.dll'))) { throw 'Private libVLC missing' }
+          if (-not (Test-Path (Join-Path $vlc 'libvlccore.dll'))) { throw 'Private libVLC core missing' }
+          if (-not (Test-Path (Join-Path $vlc 'COPYING.txt'))) { throw 'VideoLAN licence omitted' }
+          $plugin = Get-ChildItem -LiteralPath (Join-Path $vlc 'plugins') -Recurse -Filter '*.dll' -ErrorAction Stop | Select-Object -First 1
+          if (-not $plugin) { throw 'VideoLAN plugins omitted' }
           $speech = 'dist/DizyTV/_internal/speech'
           $ffmpeg = Join-Path $speech 'ffmpeg.exe'
           if (-not (Test-Path $ffmpeg)) { throw 'FFmpeg was not bundled' }
@@ -135,6 +144,10 @@ jobs:
             if (-not (Test-Path -LiteralPath (Join-Path $target '_internal/libcrypto-3.dll'))) { throw 'DLL not installed' }
             # Prove the *compiled Inno installer* copied the speech components,
             # rather than only testing PyInstaller's uninstalled dist directory.
+            $installedVLC = Join-Path $target '_internal/vlc'
+            if (-not (Test-Path (Join-Path $installedVLC 'libvlc.dll'))) { throw 'Installer omitted libVLC' }
+            if (-not (Test-Path (Join-Path $installedVLC 'libvlccore.dll'))) { throw 'Installer omitted libvlc core' }
+            if (-not (Test-Path (Join-Path $installedVLC 'plugins'))) { throw 'Installer omitted VLC plugins' }
             $installedSpeech = Join-Path $target '_internal/speech'
             $installedFFmpeg = Join-Path $installedSpeech 'ffmpeg.exe'
             if (-not (Test-Path -LiteralPath $installedFFmpeg)) { throw 'Installer omitted bundled FFmpeg' }
