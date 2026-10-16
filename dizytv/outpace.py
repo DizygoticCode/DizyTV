@@ -6,8 +6,10 @@ Outpace's native API is used; its experimental Ace-compat API is not enabled.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import re
 import socket
@@ -25,6 +27,8 @@ LOCAL_HOSTS = frozenset(('localhost', '127.0.0.1', '::1'))
 # Track only child processes created by this DizyTV instance. Never kill a
 # pre-existing listener or the system-installed proprietary Ace engine.
 _OWNED_PROCESS = None
+_OWNED_IDENTITY = None
+_OWNED_BINARY = None
 _SHUTTING_DOWN = False
 _PROCESS_LOCK = threading.Lock()
 
@@ -37,7 +41,7 @@ def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
     The detached recording worker can release *its own* helper with
     allow_restart=True so that later queued jobs can start it again.
     """
-    global _OWNED_PROCESS, _SHUTTING_DOWN
+    global _OWNED_PROCESS, _OWNED_IDENTITY, _OWNED_BINARY, _SHUTTING_DOWN
     with _PROCESS_LOCK:
         if not allow_restart:
             _SHUTTING_DOWN = True
@@ -45,6 +49,8 @@ def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
             return False
         process = _OWNED_PROCESS
         _OWNED_PROCESS = None
+        _OWNED_IDENTITY = None
+        _OWNED_BINARY = None
     try:
         if process.poll() is None:
             process.terminate()  # sends SIGTERM; do not block in wait()
@@ -52,6 +58,107 @@ def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
     except (OSError, RuntimeError):
         pass
     return False
+
+
+
+def _process_identity(pid, binary):
+    """Fingerprint only the specific local Outpace child we launched.
+
+    A PID by itself is unsafe: it can be reused after the creator exits. ps
+    supplies a start time as well as the *full* command line on Linux/macOS.
+    If either is unavailable or does not match our private binary, fail closed.
+    """
+    if not isinstance(pid, int) or pid <= 1 or not isinstance(binary, str):
+        return None
+    try:
+        checked = subprocess.run(
+            ['ps', '-ww', '-p', str(pid), '-o', 'lstart=', '-o', 'args='],
+            capture_output=True, text=True, timeout=2, check=False)
+        description = checked.stdout.strip()
+        if checked.returncode != 0 or not description:
+            return None
+        if (' ' + binary + ' serve') not in (' ' + description):
+            return None
+        return hashlib.sha256(description.encode('utf-8')).hexdigest()
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def handoff_owned_daemon(directory):
+    """Record verified process ownership for the detached recorder.
+
+    The GUI can close during an Ace recording without killing its stream.
+    Only the existing recorder worker may later reap this exact process,
+    once both scheduled Ace jobs and native Outpace sessions are idle.
+    """
+    from .storage import atomic_json
+    global _SHUTTING_DOWN
+    with _PROCESS_LOCK:
+        _SHUTTING_DOWN = True
+        process = _OWNED_PROCESS
+        identity = _OWNED_IDENTITY
+        binary = _OWNED_BINARY
+    if process is None or identity is None or binary is None:
+        return False
+    if process.poll() is not None:
+        return False
+    try:
+        atomic_json(Path(directory) / 'outpace-handoff.json',
+                    {'pid': process.pid, 'binary': binary, 'identity': identity})
+        return True
+    except (OSError, ValueError):
+        # Never sacrifice an in-progress recording for cleanup bookkeeping.
+        return False
+
+
+def reap_handed_off_daemon(directory, address='http://127.0.0.1:6878'):
+    """Reap the former GUI child only after validating identity and idleness.
+
+    The worker must never stop an unrelated system Ace installation or
+    interrupt another viewer's Outpace session.
+    """
+    from .core import ace_request_params
+    from .storage import Store
+    marker = Path(directory) / 'outpace-handoff.json'
+    if not marker.exists():
+        return False
+    try:
+        data = json.loads(marker.read_text(encoding='utf-8'))
+        pid, binary, identity = data['pid'], data['binary'], data['identity']
+        if not isinstance(identity, str) or len(identity) != 64:
+            return False
+        if _process_identity(pid, binary) != identity:
+            # Dead/replaced PIDs no longer belong to us.
+            marker.unlink(missing_ok=True)
+            return False
+        store = Store(directory)
+        state = store.try_read()
+        if state is None:
+            return False
+        now = time.time()
+        channels = {c['id']: c for c in state['channels']}
+        for job in state['jobs']:
+            if (job.get('status') in ('queued', 'starting', 'recording') and
+                    job.get('start', now + 10) <= now + 5 < job.get('end', 0) and
+                    ace_request_params(channels.get(job.get('channel_id'), {}).get('stream', '')) is not None):
+                return False
+        base = local_api_address(address)
+        with urlopen(base + '/streams', timeout=0.75) as response:
+            if response.status != 200:
+                return False
+            payload = response.read(32769)
+        if len(payload) > 32768 or json.loads(payload).get('streams') != []:
+            return False
+        # Recheck to prevent terminating a recycled PID after network I/O.
+        if _process_identity(pid, binary) != identity:
+            marker.unlink(missing_ok=True)
+            return False
+        os.kill(pid, signal.SIGTERM)
+        marker.unlink(missing_ok=True)
+        return True
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, URLError,
+            HTTPError, TimeoutError):
+        return False
 
 
 def stop_idle_owned_daemon(address='http://127.0.0.1:6878'):
@@ -144,7 +251,7 @@ def playback_url(stream, address):
 
 
 def ensure_ready(address, startup_seconds=25):
-    global _OWNED_PROCESS
+    global _OWNED_PROCESS, _OWNED_IDENTITY, _OWNED_BINARY
     base = local_api_address(address)
     with _PROCESS_LOCK:
         if _SHUTTING_DOWN:
@@ -187,11 +294,18 @@ def ensure_ready(address, startup_seconds=25):
     deadline = time.monotonic() + startup_seconds
     while time.monotonic() < deadline:
         if api_ready(base):
+            identity = _process_identity(process.pid, str(binary))
+            with _PROCESS_LOCK:
+                if _OWNED_PROCESS is process:
+                    _OWNED_IDENTITY = identity
+                    _OWNED_BINARY = str(binary)
             return 'started'
         if process.poll() is not None:
             with _PROCESS_LOCK:
                 if _OWNED_PROCESS is process:
                     _OWNED_PROCESS = None
+                    _OWNED_IDENTITY = None
+                    _OWNED_BINARY = None
             raise RuntimeError('Packaged Outpace stopped during startup. '
                                'Inspect macOS permissions and the daemon logs.')
         time.sleep(0.35)
@@ -201,6 +315,8 @@ def ensure_ready(address, startup_seconds=25):
     with _PROCESS_LOCK:
         if _OWNED_PROCESS is process:
             _OWNED_PROCESS = None
+            _OWNED_IDENTITY = None
+            _OWNED_BINARY = None
     try:
         process.wait(timeout=3)
     except subprocess.TimeoutExpired:
