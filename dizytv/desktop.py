@@ -3372,11 +3372,10 @@ class MainWindow(QMainWindow):
 
     def init_player(self):
         if self.player:return
-        if os.name=='nt':
-            for root in ('PROGRAMFILES','PROGRAMFILES(X86)'):
-                folder=Path(os.environ.get(root,'C:/Program Files'))/'VideoLAN'/'VLC'
-                if (folder/'libvlc.dll').exists():
-                    os.environ['PATH']=str(folder)+os.pathsep+os.environ.get('PATH',''); self.dll_dir=os.add_dll_directory(str(folder)); break
+        # An installed application always uses its verified package-private
+        # VLC binaries and modules; never silently load an older system VLC.
+        from .media_runtime import configure_private_vlc
+        configure_private_vlc()
         import vlc
         self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
         vlc_options=['--no-video-title-show',*self._vlc_subtitle_profile]

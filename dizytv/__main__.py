@@ -24,6 +24,9 @@ def main():
         worker(args.data_dir)
         return 0
     configure_desktop_environment()
+    # Select the verified private VLC libraries *before* importing python-vlc.
+    from dizytv.media_runtime import configure_private_vlc
+    configure_private_vlc()
     from dizytv.desktop import run
     return run(args.data_dir,args.smoke_test)
 

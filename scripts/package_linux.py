@@ -18,6 +18,8 @@ if os.name!='posix' or not TARGET.is_dir() or not (TARGET/'DizyTV').is_file():
     raise SystemExit('Run after scripts/build_desktop.py on a Linux amd64 host')
 if os.uname().machine not in ('x86_64','amd64'):
     raise SystemExit('Linux .deb currently targets amd64 only')
+if not (TARGET/'_internal'/'speech'/'vosk-model-small-en-us-0.15'/'am').is_dir():
+    raise SystemExit('Bundled English Vosk speech model missing from .deb')
 icon=ROOT/'assets'/'branding'/'dizytv-logo.png'
 output=ROOT/'dist'/f'DizyTV-{VERSION}-linux-amd64.deb'
 
@@ -48,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='dizytv-deb-') as folder:
         f'Version: {VERSION}\n'
         'Section: video\nPriority: optional\nArchitecture: amd64\n'
         'Maintainer: DizygoticCode <https://github.com/DizygoticCode/DizyTV>\n'
-        'Depends: libvlc5, vlc-plugin-base, vlc-plugin-video-output, libgl1, libxcb-cursor0, libxkbcommon-x11-0\n'
+        'Depends: libvlc5, vlc-plugin-base, vlc-plugin-video-output, ffmpeg, libgl1, libxcb-cursor0, libxkbcommon-x11-0\n'
         'Description: DizyTV native live television player\n'
         ' Local TV player with XMLTV guides and recordings.\n'
         ' Uses system libVLC and separately installed Ace Stream engine.\n')

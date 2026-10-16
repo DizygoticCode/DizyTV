@@ -7,7 +7,9 @@ a = Analysis(
     [str(root / 'dizytv' / '__main__.py')],
     pathex=[str(root)],
     binaries=collect_dynamic_libs('vosk'),
-    datas=[(str(root / 'assets'), 'assets'), *collect_data_files('tzdata')],
+    datas=[(str(root / 'assets'), 'assets'),
+           (str(root / 'vendor' / 'speech'), 'speech'),
+           *collect_data_files('tzdata')],
     hiddenimports=['vlc', 'vosk'],
 )
 # ctypes analysis automatically finds system VLC. Ship its Python binding,

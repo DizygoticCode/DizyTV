@@ -13,9 +13,12 @@ from DizyTV's CC Subtitles menu. They do not run during installation.
 FFmpeg is not added to the system PATH and does not modify existing
 FFmpeg installations.
 
-Still separate:
-  - VLC 3 x64 for the Windows playback engine
-  - Ace Stream engine for the optional Ace Stream channels
+The next planned release additionally includes a verified private VLC 3
+runtime and compatible modules; no separate VLC installation will be needed.
+The published 0.1.17 alpha still requires external VLC.
+Ace Stream remains third-party P2P software and requires separate explicit
+install consent; it must be fetched from the official publisher and verified
+before any installer is executed.
 
 DizyTV cannot bypass broadcaster DRM or geographical access restrictions.
 See THIRD-PARTY-NOTICES.md for source links, licence terms and notices.

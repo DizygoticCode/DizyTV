@@ -72,6 +72,15 @@ jobs:
       - name: Stage checksum-pinned Windows speech assets
         if: runner.os == 'Windows'
         run: python scripts/stage_windows_speech.py
+      - name: Stage pinned VideoLAN VLC 3 runtime for Windows and macOS
+        if: runner.os == 'Windows' || runner.os == 'macOS'
+        run: python scripts/stage_private_vlc.py
+      - name: Prepare Mac FFmpeg executable from native wheel
+        if: runner.os == 'macOS'
+        run: python -m pip install imageio-ffmpeg==0.6.0
+      - name: Stage bundled English Vosk and Mac native FFmpeg
+        if: runner.os == 'macOS'
+        run: python scripts/stage_speech_other.py
       - name: Compile pinned Outpace 0.2.0 for the native macOS architecture
         if: runner.os == 'macOS'
         shell: bash
@@ -100,6 +109,10 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed to launch' }
           # The Windows installer must ship both dependencies, even when the CI
           # host already has an FFmpeg executable installed.
+          $vlc = 'dist/DizyTV/_internal/vlc'
+          if (-not (Test-Path (Join-Path $vlc 'libvlc.dll'))) { throw 'Private libVLC was not packaged' }
+          if (-not (Test-Path (Join-Path $vlc 'libvlccore.dll'))) { throw 'Private VLC core was not packaged' }
+          if (-not (Test-Path (Join-Path $vlc 'plugins'))) { throw 'Private VLC plugins were not packaged' }
           $speech = 'dist/DizyTV/_internal/speech'
           $ffmpeg = Join-Path $speech 'ffmpeg.exe'
           if (-not (Test-Path $ffmpeg)) { throw 'FFmpeg was not bundled' }
@@ -153,6 +166,9 @@ jobs:
             if (-not (Test-Path -LiteralPath (Join-Path $target '_internal/libcrypto-3.dll'))) { throw 'DLL not installed' }
             # Prove the *compiled Inno installer* copied the speech components,
             # rather than only testing PyInstaller's uninstalled dist directory.
+            $installedVlc = Join-Path $target '_internal/vlc'
+            if (-not (Test-Path (Join-Path $installedVlc 'libvlc.dll'))) { throw 'Installed private VLC absent' }
+            if (-not (Test-Path (Join-Path $installedVlc 'plugins'))) { throw 'Installed private VLC modules absent' }
             $installedSpeech = Join-Path $target '_internal/speech'
             $installedFFmpeg = Join-Path $installedSpeech 'ffmpeg.exe'
             if (-not (Test-Path -LiteralPath $installedFFmpeg)) { throw 'Installer omitted bundled FFmpeg' }
@@ -173,6 +189,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
+          test -s dist/DizyTV.app/Contents/Frameworks/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib || \
+            test -s dist/DizyTV.app/Contents/Resources/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib || \
+            test -s dist/DizyTV.app/Contents/MacOS/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib
+          test -x dist/DizyTV.app/Contents/MacOS/speech/ffmpeg || \
+            test -x dist/DizyTV.app/Contents/Resources/speech/ffmpeg || \
+            test -x dist/DizyTV.app/Contents/Frameworks/speech/ffmpeg
           # Assert the actual PKG app has the separately licensed native helper.
           helper="$(find dist/DizyTV.app/Contents -type f -name outpace -perm -111 -print -quit)"
           test -n "$helper"
@@ -233,6 +255,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Source smoke startup
         run: python -m dizytv --smoke-test --data-dir smoke-source
+      - name: Stage English Vosk model for .deb
+        run: python scripts/stage_speech_other.py
       - name: Build native Linux executable
         run: python scripts/build_desktop.py
       - name: Package .deb

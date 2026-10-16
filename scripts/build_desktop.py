@@ -58,12 +58,28 @@ image.save('assets/branding/dizytv.icns')
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--name','DizyTV',
       '--paths',str(ROOT),'--add-data','assets'+os.pathsep+'assets',
       '--collect-data','tzdata','--collect-binaries','vosk','--hidden-import','vlc','--hidden-import','vosk']
+if os.name in ('nt',) or sys.platform=='darwin':
+    private_vlc=ROOT/'vendor'/'vlc'
+    if os.name=='nt':
+        expected=(private_vlc/'libvlc.dll', private_vlc/'libvlccore.dll', private_vlc/'plugins')
+    else:
+        contents=private_vlc/'VLC.app'/'Contents'
+        expected=(contents/'MacOS'/'lib'/'libvlc.dylib',
+                  contents/'MacOS'/'lib'/'libvlccore.dylib',
+                  contents/'MacOS')
+    if any(not p.exists() for p in expected):
+        raise RuntimeError('Native private libVLC missing: refusing an incomplete installer')
+    args += ['--add-data',str(private_vlc)+os.pathsep+'vlc']
 if os.name=='nt':
     speech=ROOT/'vendor'/'speech'
     if not (speech/'ffmpeg.exe').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir() or not (speech/'vosk-model-small-en-us-0.15'/'conf').is_dir():
         raise RuntimeError('Missing staged Windows FFmpeg/Vosk model: refusing to build an incomplete installer')
     args += ['--add-data',str(speech)+os.pathsep+'speech']
 if sys.platform=='darwin':
+    speech=ROOT/'vendor'/'speech'
+    if not (speech/'ffmpeg').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir():
+        raise RuntimeError('Mac FFmpeg/English Vosk resources are missing')
+    args += ['--add-data',str(speech)+os.pathsep+'speech']
     # A distinct AGPL-licensed helper compiled from a pinned upstream commit.
     outpace=ROOT/'vendor'/'outpace'
     helper=outpace/'outpace'
