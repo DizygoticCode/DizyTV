@@ -1,5 +1,6 @@
 """Atomic, locked device state shared with the detached desktop recorder."""
 import copy
+import errno
 import json
 import os
 import tempfile
@@ -82,6 +83,26 @@ class Store:
     def read(self):
         with _mutex, file_lock(self.directory/'state.lock'):
             return self._read()
+
+    def try_read(self):
+        """Return state, or None when the recorder owns the lock.
+
+        GUI refreshes must never wait behind a recording worker's cross-process
+        state lock. Unlike read(), this is strictly nonblocking on BOTH locks.
+        Actual corrupt-state/disk errors still propagate to the caller.
+        """
+        if not _mutex.acquire(blocking=False):
+            return None
+        try:
+            try:
+                with file_lock(self.directory/'state.lock',blocking=False):
+                    return self._read()
+            except OSError as exc:
+                if exc.errno in (errno.EACCES, errno.EAGAIN):
+                    return None
+                raise
+        finally:
+            _mutex.release()
 
     def update(self, change):
         with _mutex, file_lock(self.directory/'state.lock'):
