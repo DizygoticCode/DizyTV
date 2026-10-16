@@ -2616,9 +2616,12 @@ class MainWindow(QMainWindow):
                   or status.endswith('.Stopped'))
         if not terminal:
             return
-        if self.timeshift is not None and self.timeshift_task is None:
+        if (self.timeshift is not None and self.timeshift_task is None
+                and self.timeshift_lag==0):
             if time.monotonic()-self.last_capture_progress<=25:
-                return  # Rolling cache can still recover video.
+                return  # Moving holdback or live DVR watchdog can recover.
+        # Fixed replay does not have an automatic reconnect path; stop Vosk
+        # rather than reading ahead on an ended or failed video.
         self.stop_auto_captions()
         self.status.setText('Stream playback ended; offline speech captions stopped.')
 
@@ -3099,16 +3102,25 @@ class MainWindow(QMainWindow):
         so a cheap periodic scan is safer than a one-shot lookup on Play.
         """
         if not self.player or not self.playback_started:return
-        # Turning captions off does not require enumerating decoder tracks.
-        # Some streams also expose the track list only after startup.
-        if not self.state['settings'].get('subtitles_enabled',True):
-            if not self._subtitle_auto_applied:
-                try:
-                    # VLC may list a stream before its subtitle decoder is
-                    # ready. Retry until it actually accepts the Off request.
-                    if self.player.video_set_spu(-1)==0:
-                        self._subtitle_auto_applied=True
-                except (AttributeError,OSError,RuntimeError):pass
+        # The VLC decoder may re-enable an embedded caption track AFTER a
+        # buffered retune starts, even if video_set_spu(-1) succeeded earlier.
+        # Keep Off pending until tracks are available, and retry when the
+        # decoder's selection or track signature changes.
+        if (self._subtitle_session_all_off or self._subtitle_manual_track==-1 or
+                not self.state['settings'].get('subtitles_enabled',True)):
+            tracks=subtitle_tracks(self.player)
+            signature=tuple(tracks)
+            try:
+                current=self.player.video_get_spu()
+                if (current!=-1 or not self._subtitle_auto_applied or
+                        signature!=self._subtitle_track_signature):
+                    accepted=self.player.video_set_spu(-1)==0
+                    # A decoder without published tracks is not yet ready;
+                    # check again on the next timer, even if it returned 0.
+                    self._subtitle_auto_applied=accepted and bool(tracks)
+                    self._subtitle_track_signature=signature
+            except (AttributeError,OSError,RuntimeError):
+                self._subtitle_auto_applied=False
             return
         if self._subtitle_manual_track is not None:
             return
@@ -3132,7 +3144,8 @@ class MainWindow(QMainWindow):
         self._subtitle_session_all_off=True
         self.stop_auto_captions()
         self._subtitle_manual_track=-1
-        self._subtitle_auto_applied=True
+        self._subtitle_auto_applied=False  # force Off retry after track parsing
+        self._subtitle_track_signature=()
         if self.player and self.playback_started:
             try:self.player.video_set_spu(-1)
             except (AttributeError,OSError,RuntimeError):pass
@@ -3151,7 +3164,8 @@ class MainWindow(QMainWindow):
         if track!=-1:
             self._subtitle_session_all_off=False
         self._subtitle_manual_track=track
-        self._subtitle_auto_applied=True
+        self._subtitle_auto_applied=track!=-1
+        self._subtitle_track_signature=()
         self.status.setText('Subtitles off' if track==-1 else 'Subtitle track '+str(track)+' selected')
 
     def load_subtitle_file(self):
