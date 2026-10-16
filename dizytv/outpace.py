@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -87,7 +88,6 @@ def ensure_ready(address, startup_seconds=25):
         return 'connected'
     # Never try to install or replace software behind an unfamiliar local
     # service. Also refuse to launch if the installed bundle is incomplete.
-    import socket
     try:
         with socket.create_connection(('127.0.0.1', 6878), timeout=0.3):
             raise RuntimeError('Another application owns port 6878. Stop that service '
@@ -120,4 +120,11 @@ def ensure_ready(address, startup_seconds=25):
             raise RuntimeError('Packaged Outpace stopped during startup. '
                                'Inspect macOS permissions and the daemon logs.')
         time.sleep(0.35)
+    # Only stop the helper created by this request; never touch a prior
+    # instance or an unrelated localhost service.
+    process.terminate()
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
     raise RuntimeError('Outpace started but its private localhost API did not become ready.')

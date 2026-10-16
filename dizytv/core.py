@@ -185,7 +185,16 @@ def ace_request_params(stream):
     p = urlparse(stream)
     if p.scheme == 'acestream':
         identifier = p.netloc or p.path.lstrip('/')
-        return {'id': identifier.lower()} if re.fullmatch('[a-fA-F0-9]{40}', identifier) else None
+        if re.fullmatch('[a-fA-F0-9]{40}', identifier):
+            return {'id': identifier.lower()}
+        # Legitimate Ace playlists sometimes use acestream:?infohash=<40hex>.
+        # Accept only this recognised 40-hex selector with no host/path;
+        # never take a transport URL or hostname from a playlist.
+        if not identifier:
+            values=parse_qs(p.query).get('infohash', [])
+            if len(values)==1 and re.fullmatch('[a-fA-F0-9]{40}',values[0]):
+                return {'infohash':values[0].lower()}
+        return None
     if p.scheme not in ('http', 'https') or p.path not in ('/ace/getstream', '/ace/manifest.m3u8'):
         return None
     pairs = parse_qs(p.query, keep_blank_values=False)

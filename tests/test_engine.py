@@ -21,7 +21,9 @@ class EngineTests(unittest.TestCase):
             engine.engine_endpoint('file:///C:/app')
 
     def test_already_running_engine_never_spawns_process(self):
-        with patch.object(engine,'running',return_value=True),patch.object(engine.subprocess,'Popen') as spawn:
+        with patch.object(engine.sys,'platform','win32'), \
+             patch.object(engine,'running',return_value=True), \
+             patch.object(engine.subprocess,'Popen') as spawn:
             self.assertEqual('connected',engine.ensure_ready('http://127.0.0.1:6878'))
             spawn.assert_not_called()
 

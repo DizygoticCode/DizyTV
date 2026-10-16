@@ -310,3 +310,13 @@ class CoreTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AceQuerySelectorTests(unittest.TestCase):
+    def test_query_only_infohash_is_supported_without_accepting_external_host(self):
+        from dizytv.core import ace_request_params, ace_id
+        item='A'*40
+        self.assertEqual({'infohash':'a'*40},ace_request_params('acestream:?infohash='+item))
+        self.assertEqual('a'*40,ace_id('acestream:?infohash='+item))
+        self.assertIsNone(ace_request_params('acestream:?infohash=invalid'))
+        self.assertIsNone(ace_request_params('acestream://evil.example/?infohash='+item))
