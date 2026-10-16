@@ -2061,19 +2061,28 @@ class MainWindow(QMainWindow):
         # Never let QSplitter/QScrollArea compress a category label, filter,
         # dropdown, favourite checkbox or action button below its styled
         # text height.  The panel scrolls VERTICALLY when the window is short.
+        # Remember each widget's real pre-policy minimum. Qt style size hints
+        # change on 80%/100%/150% and Compact/Normal/Large transitions; minima
+        # imposed by an earlier layout must be cleared BEFORE recomputing them.
+        original=getattr(self,'_sidebar_original_min_heights',None)
+        if original is None:
+            original={}
+            self._sidebar_original_min_heights=original
         for widget in sidebar.findChildren(QWidget):
             if not isinstance(widget,(QLabel,QPushButton,QComboBox,
                                       QCheckBox,QLineEdit)):
                 continue
+            initial=original.setdefault(widget,widget.minimumHeight())
+            widget.setMinimumHeight(initial)
             widget.ensurePolished()
             hint=widget.sizeHint().height()
-            if hint>0 and widget.minimumHeight()<hint:
-                widget.setMinimumHeight(hint)
+            if hint>0:
+                widget.setMinimumHeight(max(initial,hint))
+        sidebar.setMinimumHeight(0)
         sidebar.layout().invalidate()
         sidebar.layout().activate()
         required_height=sidebar.layout().minimumSize().height()
-        if sidebar.minimumHeight()!=required_height:
-            sidebar.setMinimumHeight(required_height)
+        sidebar.setMinimumHeight(required_height)
         self.sidebar_scroll.updateGeometry()
         for widget in (self.country_filter,self.genre_filter,self.kind_filter,
                        self.source_filter,self.section_filter,self.sort_picker):
