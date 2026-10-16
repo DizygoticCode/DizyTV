@@ -146,11 +146,15 @@ class TestTimeshift(unittest.TestCase):
                                      session_id='async-shutdown')
             cleanup_entered=Event()
             allow_cleanup=Event()
+            cleanup_finished=Event()
             original_close=session.close
             def slow_cleanup():
                 cleanup_entered.set()
                 allow_cleanup.wait(2)
-                original_close()
+                try:
+                    original_close()
+                finally:
+                    cleanup_finished.set()
             with patch.object(session,'close',side_effect=slow_cleanup):
                 try:
                     session.close_async()  # Must return before background IO ends.
@@ -160,6 +164,7 @@ class TestTimeshift(unittest.TestCase):
                     self.assertFalse(allow_cleanup.is_set())
                 finally:
                     allow_cleanup.set()
+            self.assertTrue(cleanup_finished.wait(3))
             # The normal cleanup entry point remains safe/idempotent.
             original_close()
             self.assertFalse(session.window.directory.exists())
