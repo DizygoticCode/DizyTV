@@ -209,7 +209,12 @@ def ensure_ready(address, startup_seconds=25, executable_path='', directory=None
         from .outpace import register_playback_intent
         register_playback_intent(directory)
     if sys.platform=='darwin' and host in ('127.0.0.1','localhost','::1') and port==6878:
-        from .outpace import ensure_ready as ensure_outpace
+        from .outpace import api_ready, ensure_ready as ensure_outpace
+        if api_ready(address) or running(address):
+            # An existing original Ace engine or local proxy takes precedence:
+            # a listening non-Outpace server must never be replaced by Outpace.
+            # Playback session preparation chooses the matching API later.
+            return 'connected'
         return ensure_outpace(address,startup_seconds)
     if sys.platform.startswith('linux') and host in ('127.0.0.1','localhost','::1') and port==6878:
         from .outpace import api_ready, packaged_binary, ensure_ready as ensure_outpace
