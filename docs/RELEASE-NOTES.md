@@ -2,6 +2,14 @@
 
 For current downloads and instructions, start with the [README](../README.md).
 
+## 0.1.18-alpha — integrated dependencies (development candidate, not published)
+
+- **Windows:** propose to bundle original checksum-pinned VideoLAN VLC **3.0.24** native runtime and plugins alongside the existing packaged FFmpeg 8.1.2, English Vosk model and Python recogniser. An unchecked Ace option downloads and verifies the **original, unchanged third-party installer** and presents its own licence; no proprietary engine is bundled.
+- **Intel/Apple Silicon Mac:** propose native bundled VideoLAN 3.0.24, FFmpeg executable from its pinned wheel, offline English Vosk model and independently AGPL-licensed **Outpace 0.2.0** for compatible public Ace swarms. No Docker required.
+- **Ubuntu/Debian Linux amd64:** distro-installed VLC + FFmpeg via APT, bundled Vosk English and pinned native Outpace. Original proprietary Ace installation remains an explicit opt-in only where the publisher's Linux package is verified compatible.
+- **Source diagnosis and lifecycle:** safer HTML-vs-HLS, DNS/TLS/refused/reset error reporting and manual saved alternate choice; tighter native video/audio smoke tests and owned Outpace helper shutdown that does not block Qt or interrupt active recordings.
+- **Release gate:** revised native CI blocks a repeated build for an already published tag; new version is reserved but **no 0.1.18 installers exist until five native builds, legal review and field acceptance pass**. Android remains Kotlin/libVLC without the desktop Vosk features. Continuous Windows hang issue #32 still requires operator verification.
+
 ## 0.1.17-alpha — Vosk sync, responsive desktop and playback lifecycle
 
 - **Desktop (Windows, macOS, Linux):** independently configurable locally generated Vosk subtitle text delay (0–10 seconds, 250 ms steps) and opt-in video/audio holdback (0–30 seconds) via existing on-device rolling HLS timeshift. Audio and video remain together; holdback is segment-granular, requires a compatible HLS/MPEG-TS stream and is not automatically calibrated.

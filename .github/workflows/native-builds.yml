@@ -55,12 +55,12 @@ jobs:
       - name: Verify APK signature and checksum
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.17-alpha-android-universal-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/DizyTV-0.1.18-alpha-android-universal-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/*.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.17-alpha-android
+          name: DizyTV-0.1.18-alpha-android
           path: dist/
           if-no-files-found: error
           retention-days: 30
@@ -190,7 +190,7 @@ jobs:
             Start-Sleep -Seconds 3
             $old.Refresh()
             if ($old.HasExited) { throw 'Old worker did not start' }
-            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.17-alpha-windows-x64.exe').Path
+            $installer = (Resolve-Path 'dist/DizyTV-Setup-0.1.18-alpha-windows-x64.exe').Path
             $install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="' + $target + '"')) -PassThru -Wait
             if ($install.ExitCode -ne 0) { throw "Upgrade failed with running idle worker: exit $($install.ExitCode)" }
             $old.Refresh()
@@ -253,12 +253,12 @@ jobs:
           trap - EXIT
           # Validate the exact release filename in each native build, not only
           # in publish-alpha after waiting for every other platform to finish.
-          test -s "dist/DizyTV-0.1.17-alpha-${{ matrix.target }}.pkg"
-          pkgutil --payload-files "dist/DizyTV-0.1.17-alpha-${{ matrix.target }}.pkg"
+          test -s "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg"
+          pkgutil --payload-files "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg"
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.17-alpha-${{ matrix.target }}
+          name: DizyTV-0.1.18-alpha-${{ matrix.target }}
           path: |
             dist/*.exe
             dist/*.pkg
@@ -311,11 +311,11 @@ jobs:
         run: python scripts/package_linux.py
       - name: Verify packaged app and .deb metadata
         run: |
-          test -s dist/DizyTV-0.1.17-alpha-linux-amd64.deb
-          dpkg-deb --contents dist/DizyTV-0.1.17-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
-          dpkg-deb --field dist/DizyTV-0.1.17-alpha-linux-amd64.deb
+          test -s dist/DizyTV-0.1.18-alpha-linux-amd64.deb
+          dpkg-deb --contents dist/DizyTV-0.1.18-alpha-linux-amd64.deb | grep -F '/opt/dizytv/DizyTV'
+          dpkg-deb --field dist/DizyTV-0.1.18-alpha-linux-amd64.deb
           mkdir smoke-installed
-          dpkg-deb --extract dist/DizyTV-0.1.17-alpha-linux-amd64.deb smoke-installed
+          dpkg-deb --extract dist/DizyTV-0.1.18-alpha-linux-amd64.deb smoke-installed
           test -x smoke-installed/usr/bin/dizytv
           test -f smoke-installed/usr/share/applications/dizytv.desktop
           test -x smoke-installed/opt/dizytv/_internal/outpace/outpace
@@ -327,13 +327,13 @@ jobs:
           fi
           smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
           smoke-installed/opt/dizytv/DizyTV --verify-native-components
-          sha256sum dist/DizyTV-0.1.17-alpha-linux-amd64.deb > dist/DizyTV-0.1.17-alpha-linux-amd64.deb.sha256
+          sha256sum dist/DizyTV-0.1.18-alpha-linux-amd64.deb > dist/DizyTV-0.1.18-alpha-linux-amd64.deb.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: DizyTV-0.1.17-alpha-linux-amd64
+          name: DizyTV-0.1.18-alpha-linux-amd64
           path: |
-            dist/DizyTV-0.1.17-alpha-linux-amd64.deb
-            dist/DizyTV-0.1.17-alpha-linux-amd64.deb.sha256
+            dist/DizyTV-0.1.18-alpha-linux-amd64.deb
+            dist/DizyTV-0.1.18-alpha-linux-amd64.deb.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -348,7 +348,7 @@ jobs:
       - name: Download verified installers
         uses: actions/download-artifact@v4
         with:
-          pattern: DizyTV-0.1.17-alpha-*
+          pattern: DizyTV-0.1.18-alpha-*
           path: native-artifacts
       - name: Collect native files and generate release checksums
         shell: bash
@@ -357,11 +357,11 @@ jobs:
           mkdir -p release
           find native-artifacts -type f \( -name '*.exe' -o -name '*.apk' -o -name '*.pkg' -o -name '*.deb' \) -exec cp -- '{}' release/ \;
           for asset in \
-            DizyTV-Setup-0.1.17-alpha-windows-x64.exe \
-            DizyTV-0.1.17-alpha-android-universal-debug.apk \
-            DizyTV-0.1.17-alpha-macos-arm64.pkg \
-            DizyTV-0.1.17-alpha-macos-x86_64.pkg \
-            DizyTV-0.1.17-alpha-linux-amd64.deb; do
+            DizyTV-Setup-0.1.18-alpha-windows-x64.exe \
+            DizyTV-0.1.18-alpha-android-universal-debug.apk \
+            DizyTV-0.1.18-alpha-macos-arm64.pkg \
+            DizyTV-0.1.18-alpha-macos-x86_64.pkg \
+            DizyTV-0.1.18-alpha-linux-amd64.deb; do
             test -s "release/$asset" || { echo "Missing installer: $asset" >&2; exit 1; }
           done
           test "$(find release -type f | wc -l)" -eq 5
@@ -373,13 +373,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.1.17-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'v0.1.17-alpha already exists; refusing to silently replace published binaries.'
+          if gh release view v0.1.18-alpha --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.1.18-alpha already exists; refusing to silently replace published binaries.'
             exit 0
           fi
-          gh release create v0.1.17-alpha release/* \
+          gh release create v0.1.18-alpha release/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'DizyTV 0.1.17 alpha — Vosk sync and desktop playback fixes' \
+            --title 'DizyTV 0.1.18 alpha — integrated desktop playback dependencies' \
             --prerelease \
-          --notes 'DizyTV 0.1.17 alpha introduces desktop Vosk subtitle delay and opt-in held-back video/audio buffering, CC Off lifecycle and recovery fixes, cancellable and safely removable optional Vosk language models, responsive top toolbar and sidebar controls, and optional local hang diagnostics. Windows/macOS/Linux use the PySide6 desktop application; Android remains a separate Kotlin/Gradle implementation and does not claim these desktop-only features. Five native CI jobs gate the Windows x64 EXE, Android debug APK, macOS Apple Silicon and Intel PKGs, Ubuntu/Debian x64 DEB, and SHA256SUMS.txt. Published installers are alpha builds: Windows is unsigned, macOS packages unnotarized, Android debug-signed, and genuine live IPTV, Ace peers, stream stalls and Qt hangs still need physical-device validation. The optional timeshift does not guarantee automatic subtitle synchronisation or full freeze resolution.'
+          --notes 'DizyTV 0.1.18 alpha integrates private VideoLAN VLC 3.0.24 with Windows and macOS playback, packaged FFmpeg and English Vosk for desktop, Linux APT-managed VLC/FFmpeg, native AGPL-licensed Outpace for Mac/Linux compatible Ace swarms, optional explicit-consent original Ace Stream installer bootstraps on publisher-supported hosts, source diagnostics and safer shutdown. No proprietary Ace Stream binary is redistributed. Android remains a distinct Kotlin/libVLC app without desktop offline speech parity. Live IPTV availability, actual Ace peers, Windows Qt freezes and platform-specific media/video behaviour require human acceptance checks. Development installers remain unsigned/unnotarized; verify checksums and source/licensing terms.'

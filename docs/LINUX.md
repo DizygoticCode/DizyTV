@@ -17,7 +17,7 @@ proof of a live video frame.
 
 On a desktop Ubuntu/Debian-compatible host with a supported libVLC package:
 ```sh
-sudo apt install ./DizyTV-0.1.17-alpha-linux-amd64.deb
+sudo apt install ./DizyTV-0.1.18-alpha-linux-amd64.deb
 dizytv
 ```
 

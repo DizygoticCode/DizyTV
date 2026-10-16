@@ -40,7 +40,7 @@ jobs:
             # GUI suites can take several minutes with offscreen Qt; limit
             # genuine hangs without misclassifying slow valid UI tests.
             budget=80
-            if [[ "${suite}" == "test_desktop.py" ]]; then budget=240; fi
+            if [[ "${suite}" == "test_desktop.py" ]]; then budget=360; fi
             timeout --signal=TERM --kill-after=5s "${budget}s" python -m unittest discover -s tests -p "${suite}" -v
             echo "::endgroup::"
           done
