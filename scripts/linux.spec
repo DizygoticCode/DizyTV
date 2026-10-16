@@ -3,12 +3,18 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 root = Path(SPEC).resolve().parent.parent
+outpace = root / 'vendor' / 'outpace'
+helper = outpace / 'outpace'
+licence = outpace / 'LICENSE'
+if not helper.is_file() or not licence.is_file():
+    raise RuntimeError('Bundled Linux Outpace or original AGPL licence is missing')
 a = Analysis(
     [str(root / 'dizytv' / '__main__.py')],
     pathex=[str(root)],
-    binaries=collect_dynamic_libs('vosk'),
+    binaries=[*collect_dynamic_libs('vosk'), (str(helper), 'outpace')],
     datas=[(str(root / 'assets'), 'assets'),
            (str(root / 'vendor' / 'speech'), 'speech'),
+           (str(licence), 'outpace'),
            *collect_data_files('tzdata')],
     hiddenimports=['vlc', 'vosk', 'dizytv.linux_ace_bootstrap'],
 )

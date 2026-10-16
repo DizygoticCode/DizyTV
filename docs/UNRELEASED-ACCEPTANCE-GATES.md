@@ -12,7 +12,7 @@ acceptance criteria are met. Work branches #34, #35 and
 | Windows | Private upstream VideoLAN staged | Existing pinned 8.1.2 | Existing pinned model | Unchecked opt-in bootstrap of original signed publisher installer, validation pending |
 | Mac Intel | Private VLC DMG staged | Original native wheel executable staged | Model staged | Pin/build Outpace v0.2.0 native helper under AGPL, source/real swarm verification pending |
 | Mac Apple Silicon | Same native arm64 process | Same native arm64 process | Model staged | Same on-demand Outpace |
-| Linux amd64 | APT libvlc5/plugins | APT ffmpeg dependency | Model staged | In-app **explicit opt-in original Ace downloader**; vendor only lists Ubuntu 22.04/Python 3.10, while DizyTV builds target Ubuntu 24.04. The Ubuntu 24.04 requirement remains unresolved. |
+| Linux amd64 | APT libvlc5/plugins | APT ffmpeg dependency | Model staged | Pinned native AGPL Outpace helper plus explicit opt-in original Ace downloader (vendor original only supports Ubuntu 22.04); real swarm testing pending |
 | Android | Existing bundled libVLC | Android speech integration not implemented | Native offline Vosk not implemented | Original vendor engine remains a separate third-party Android installation and cannot be silently installed by a debug APK |
 
 Linux Ace uses the original exact publisher URL and recorded SHA-256
@@ -25,7 +25,7 @@ third-party manifests, **not a publisher signature**; vendor EULA, user
 consent, runtime compatibility and permitted use still apply. Unsupported
 distributions fail safely and can use a trusted separately installed engine.
 
-The .deb bootstrap lives in \`dizytv/linux_ace_bootstrap.py\`, included
+The .deb additionally bundles original Outpace 0.2.0 on Linux x64, built from upstream pinned commit under AGPL. It is a public-swarm reimplementation, not the original proprietary engine.\n\nThe .deb bootstrap lives in \`dizytv/linux_ace_bootstrap.py\`, included
 by the main application's **Tools → Set up Ace Stream engine** action.
 It is not a Debian \`postinst\` hook: unattended APT installs and upgrades
 must never trigger a third-party network download or P2P executable.

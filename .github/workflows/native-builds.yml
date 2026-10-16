@@ -239,7 +239,7 @@ jobs:
   package-linux:
     name: Ubuntu 24.04 x64 • .deb
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -260,6 +260,20 @@ jobs:
         run: python -m dizytv --smoke-test --data-dir smoke-source
       - name: Stage English Vosk model for .deb
         run: python scripts/stage_speech_other.py
+      - name: Build pinned native AGPL Outpace for Ubuntu 24.04
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream=e61be2aeb4e4ef3b4e6b42b22fe35f91271a7d5b
+          git clone --quiet --depth 1 --branch v0.2.0 https://github.com/jamezrin/outpace.git "$RUNNER_TEMP/outpace-src"
+          cd "$RUNNER_TEMP/outpace-src"
+          test "$(git rev-parse HEAD)" = "$upstream"
+          cargo build --locked --release -p ace-engine --bin outpace
+          test -x target/release/outpace
+          mkdir -p "$GITHUB_WORKSPACE/vendor/outpace"
+          cp target/release/outpace "$GITHUB_WORKSPACE/vendor/outpace/outpace"
+          cp LICENSE "$GITHUB_WORKSPACE/vendor/outpace/LICENSE"
+          chmod 0755 "$GITHUB_WORKSPACE/vendor/outpace/outpace"
       - name: Build native Linux executable
         run: python scripts/build_desktop.py
       - name: Package .deb
@@ -273,6 +287,9 @@ jobs:
           dpkg-deb --extract dist/DizyTV-0.1.17-alpha-linux-amd64.deb smoke-installed
           test -x smoke-installed/usr/bin/dizytv
           test -f smoke-installed/usr/share/applications/dizytv.desktop
+          test -x smoke-installed/opt/dizytv/_internal/outpace/outpace
+          test -f smoke-installed/opt/dizytv/_internal/outpace/LICENSE
+          smoke-installed/opt/dizytv/_internal/outpace/outpace --version
           if find smoke-installed/opt/dizytv -name 'libvlc*.so*' -print -quit | grep -q .; then
             echo 'Linux package must use the system libVLC libraries and matching plugins' >&2
             exit 1

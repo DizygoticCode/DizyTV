@@ -29,6 +29,17 @@ class OutpaceTests(unittest.TestCase):
             ):
                 self.assertIsNone(outpace.packaged_binary())
 
+    def test_linux_bundled_native_binary_without_mac_requirement(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            helper=root/'outpace'/'outpace'
+            helper.parent.mkdir()
+            helper.write_bytes(b'fixture')
+            helper.chmod(0o755)
+            with patch.object(outpace.sys,'platform','linux'), patch.object(
+                outpace.sys,'_MEIPASS',root,create=True):
+                self.assertEqual(helper,outpace.packaged_binary())
+
     def test_reject_remote_or_nonloopback_urls_before_executing(self):
         for url in ('https://127.0.0.1:6878', 'http://192.168.1.3:6878',
                     'http://127.0.0.1:6879', 'http://user:password@localhost:6878',

@@ -106,7 +106,7 @@ def engine_diagnostics(address,timeout=3):
     host,port=engine_endpoint(address)
     if host not in ('127.0.0.1','localhost','::1'):
         return 'Configured engine is remote; automatic local startup is unavailable.'
-    if sys.platform=='darwin' and port==6878:
+    if (sys.platform=='darwin' or sys.platform.startswith('linux')) and port==6878:
         from .outpace import api_ready
         if api_ready(address):
             return ('Outpace native engine is running locally. This verifies its API, '
@@ -133,7 +133,7 @@ def start_playback_session(stream, address, timeout=20):
     a content/peer error. We never pass an unverified outside URL to VLC.
     """
     from .core import ace_request_params, http_url, stream_url
-    if sys.platform=='darwin':
+    if sys.platform=='darwin' or sys.platform.startswith('linux'):
         host,port=engine_endpoint(address)
         if host in ('127.0.0.1','localhost','::1') and port==6878:
             from .outpace import api_ready, playback_url
@@ -205,6 +205,16 @@ def ensure_ready(address, startup_seconds=25, executable_path=''):
     if sys.platform=='darwin' and host in ('127.0.0.1','localhost','::1') and port==6878:
         from .outpace import ensure_ready as ensure_outpace
         return ensure_outpace(address,startup_seconds)
+    if sys.platform.startswith('linux') and host in ('127.0.0.1','localhost','::1') and port==6878:
+        from .outpace import api_ready, packaged_binary, ensure_ready as ensure_outpace
+        if api_ready(address):
+            return 'connected'
+        if running(address):
+            # Preserve a legitimate externally installed proprietary engine;
+            # never start a competing helper on the same listening port.
+            return 'connected'
+        if packaged_binary() is not None:
+            return ensure_outpace(address,startup_seconds)
     if running(address):
         return 'connected'
     if host not in ('127.0.0.1','localhost','::1') or port!=6878:

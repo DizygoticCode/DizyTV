@@ -64,7 +64,9 @@ class EngineTests(unittest.TestCase):
     def test_linux_launcher_starts_only_for_local_engine(self):
         from pathlib import Path
         with patch.object(engine.sys,'platform','linux'), \
-             patch.object(engine,'running',side_effect=[False,True]), \
+             patch.object(engine,'running',side_effect=[False,False,True]), \
+             patch('dizytv.outpace.api_ready',return_value=False), \
+             patch('dizytv.outpace.packaged_binary',return_value=None), \
              patch.object(engine,'linux_engine_path',return_value=Path('/opt/acestream/start-engine')), \
              patch.object(engine.subprocess,'Popen') as spawn:
             self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
@@ -75,6 +77,23 @@ class EngineTests(unittest.TestCase):
             self.assertEqual('--client-console',spawn.call_args.args[0][1])
             self.assertEqual('/opt/acestream',
                              Path(spawn.call_args.kwargs['cwd']).as_posix())
+
+    def test_linux_package_prefers_outpace_but_respects_other_local_engine(self):
+        from pathlib import Path
+        from dizytv import outpace
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(outpace,'api_ready',return_value=False), \
+             patch.object(engine,'running',return_value=False), \
+             patch.object(outpace,'packaged_binary',return_value=Path('/opt/dizytv/outpace')):
+            with patch.object(outpace,'ensure_ready',return_value='started') as start:
+                self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
+                start.assert_called_once()
+        with patch.object(engine.sys,'platform','linux'), \
+             patch.object(outpace,'api_ready',return_value=False), \
+             patch.object(engine,'running',return_value=True), \
+             patch.object(outpace,'ensure_ready') as start:
+            self.assertEqual('connected',engine.ensure_ready('http://127.0.0.1:6878'))
+            start.assert_not_called()
 
     def test_linux_remote_engine_is_connect_only(self):
         with patch.object(engine.sys,'platform','linux'), \

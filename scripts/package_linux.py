@@ -1,8 +1,9 @@
 """Package the Linux x86_64 PyInstaller build as an installable .deb.
 
 The executable links against system libVLC and its plugins, rather than bundling
-an unmanaged or incompatible Ace Stream binary. An optional publisher
-bootstrap is embedded in the application but never runs during APT install.
+an unmanaged or incompatible proprietary Ace Stream binary. Native AGPL Outpace
+is bundled instead, with a separate optional original-vendor bootstrap
+that never runs during APT install.
 """
 from __future__ import annotations
 
@@ -21,6 +22,9 @@ if os.uname().machine not in ('x86_64','amd64'):
     raise SystemExit('Linux .deb currently targets amd64 only')
 if not (TARGET/'_internal'/'speech'/'vosk-model-small-en-us-0.15'/'am').is_dir():
     raise SystemExit('Bundled English Vosk speech model missing from .deb')
+if not (TARGET/'_internal'/'outpace'/'outpace').is_file() or not (
+        TARGET/'_internal'/'outpace'/'LICENSE').is_file():
+    raise SystemExit('Bundled AGPL Outpace native helper or licence missing from .deb')
 icon=ROOT/'assets'/'branding'/'dizytv-logo.png'
 output=ROOT/'dist'/f'DizyTV-{VERSION}-linux-amd64.deb'
 
@@ -54,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='dizytv-deb-') as folder:
         'Depends: libvlc5, vlc-plugin-base, vlc-plugin-video-output, ffmpeg, libgl1, libxcb-cursor0, libxkbcommon-x11-0\n'
         'Description: DizyTV native live television player\n'
         ' Local TV player with XMLTV guides and recordings.\n'
-        ' Uses system libVLC and FFmpeg; optional in-app Ace bootstrap.\n')
+        ' Uses system libVLC and FFmpeg, bundled AGPL Outpace, and optional Ace bootstrap.\n')
     # The package becomes root-owned: a restrictive build umask must not leave
     # users unable to read its libraries or traverse its installation paths.
     root.chmod(0o755)

@@ -1,4 +1,4 @@
-"""Packaged macOS Outpace daemon: a separate AGPL-3.0-or-later program.
+"""Packaged macOS/Linux Outpace daemon: a separate AGPL-3.0-or-later program.
 
 DizyTV never downloads an arbitrary executable from a playlist, exposes the
 HTTP API on a LAN interface, or starts a bundled daemon for a remote endpoint.
@@ -24,7 +24,9 @@ LOCAL_HOSTS = frozenset(('localhost', '127.0.0.1', '::1'))
 
 def packaged_binary():
     """Only trust the compiled application's own private Outpace binary."""
-    if sys.platform != 'darwin' or not hasattr(sys, '_MEIPASS'):
+    if sys.platform != 'darwin' and not sys.platform.startswith('linux'):
+        return None
+    if not hasattr(sys, '_MEIPASS'):
         return None
     root = Path(sys._MEIPASS)
     candidate = root / 'outpace' / 'outpace'
@@ -98,7 +100,7 @@ def ensure_ready(address, startup_seconds=25):
         pass
     binary = packaged_binary()
     if binary is None:
-        raise RuntimeError('The packaged macOS Outpace binary is missing. '
+        raise RuntimeError('The packaged macOS/Linux Outpace binary is missing. '
                            'Install a verified DizyTV PKG containing Outpace.')
     environment = dict(os.environ)
     environment['OUTPACE_BIND'] = '127.0.0.1:6878'

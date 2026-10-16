@@ -12,7 +12,12 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from scripts.stage_windows_speech import MODEL_NAME, MODEL_URL, MODEL_SHA256, fetch_verified
+# Support both the direct CI command (python scripts/stage_speech_other.py)
+# and the package-style import used by unit tests.
+if __package__:
+    from .stage_windows_speech import MODEL_NAME, MODEL_URL, MODEL_SHA256, fetch_verified
+else:
+    from stage_windows_speech import MODEL_NAME, MODEL_URL, MODEL_SHA256, fetch_verified
 
 ROOT=Path(__file__).resolve().parent.parent
 DEST=ROOT/'vendor'/'speech'

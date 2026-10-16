@@ -18,23 +18,23 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 DEST = ROOT / "vendor" / "vlc"
-VERSION = "3.0.21"
-BASE = "https://download.videolan.org/pub/videolan/vlc/3.0.21"
+VERSION = "3.0.24"
+BASE = "https://download.videolan.org/pub/videolan/vlc/3.0.24"
 ARCHIVES = {
     "windows-x64": (
-        BASE + "/win64/vlc-3.0.21-win64.zip",
-        "a0b7ec02b50adf6417eed014fb8df50af39690505a4225b85b3dc2ed17d14843",
+        BASE + "/win64/vlc-3.0.24-win64.zip",
+        "fcf30850371ad10c9373cc4f0f4501e7dee49e3e9ae9f20c72fb2661a1ca6323",
         100 * 1024 * 1024,
     ),
     "macos-arm64": (
-        BASE + "/macosx/vlc-3.0.21-arm64.dmg",
-        "15dd65bf6489da9ec6a67f5585c74c40a58993acff41a82958a916dd74178044",
-        80 * 1024 * 1024,
+        BASE + "/macosx/vlc-3.0.24-universal.dmg",
+        "2c8e89f7f42e53c2fb0e87b6dfa39b49f1364b25080aaa2e476ac74c0d7beb3c",
+        128 * 1024 * 1024,
     ),
     "macos-x86_64": (
-        BASE + "/macosx/vlc-3.0.21-intel64.dmg",
-        "d431fd051c3dc7af02bd313c6d05d90cf604b70ed3ec5bba6fd4c49ef3e638d9",
-        80 * 1024 * 1024,
+        BASE + "/macosx/vlc-3.0.24-universal.dmg",
+        "2c8e89f7f42e53c2fb0e87b6dfa39b49f1364b25080aaa2e476ac74c0d7beb3c",
+        128 * 1024 * 1024,
     ),
 }
 
@@ -44,22 +44,27 @@ def fetch_pinned(target, destination, opener=urlopen):
         url, headers={"User-Agent": "DizyTV-build/0.1"})
     digest = hashlib.sha256()
     count = 0
-    with opener(request, timeout=100) as source, destination.open("wb") as output:
-        final = source.geturl()
-        if final != url and not final.startswith("https://"):
-            raise RuntimeError("VLC download redirected to an insecure origin")
-        while True:
-            block = source.read(1024 * 1024)
-            if not block:
-                break
-            count += len(block)
-            if count > limit:
-                raise RuntimeError("VLC archive exceeded size limit")
-            digest.update(block)
-            output.write(block)
-    if digest.hexdigest() != expected:
+    try:
+        with opener(request, timeout=100) as source, destination.open("xb") as output:
+            final = source.geturl()
+            from urllib.parse import urlsplit
+            parsed=urlsplit(final)
+            if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
+                raise RuntimeError("VLC download redirected to an insecure origin")
+            while True:
+                block = source.read(1024 * 1024)
+                if not block:
+                    break
+                count += len(block)
+                if count > limit:
+                    raise RuntimeError("VLC archive exceeded size limit")
+                digest.update(block)
+                output.write(block)
+        if digest.hexdigest() != expected:
+            raise RuntimeError("VLC archive SHA-256 mismatch for " + target)
+    except Exception:
         destination.unlink(missing_ok=True)
-        raise RuntimeError("VLC archive SHA-256 mismatch for " + target)
+        raise
 
 def stage_windows_zip(archive, destination):
     # Preserve original layout and licence notices, not just a stripped DLL.
@@ -70,7 +75,7 @@ def stage_windows_zip(archive, destination):
         for entry in info:
             name = PurePosixPath(entry.filename.replace("\\", "/"))
             parts = name.parts
-            if (not parts or parts[0] != "vlc-3.0.21"
+            if (not parts or parts[0] != "vlc-3.0.24"
                     or any(p in ("", ".", "..") for p in parts)
                     or name.is_absolute()):
                 raise RuntimeError("Unsafe VLC archive member")
@@ -115,6 +120,11 @@ def stage_macos_dmg(archive, destination):
     private = destination / "VLC.app" / "Contents" / "MacOS"
     if not (private / "lib" / "libvlccore.dylib").is_file():
         raise RuntimeError("VLC macOS bundle missing libvlccore")
+    architectures=subprocess.run(
+        ["lipo", "-archs", str(private / "lib" / "libvlc.dylib")],
+        check=True, capture_output=True, text=True).stdout.split()
+    if not {"arm64", "x86_64"}.issubset(set(architectures)):
+        raise RuntimeError("Official universal VLC does not contain both Mac architectures")
     if not any((private / location).is_dir() for location in ("plugins", "modules")) and not (
             private.parent / "Frameworks" / "plugins").is_dir():
         raise RuntimeError("VLC macOS plugin directory is missing")
@@ -136,7 +146,7 @@ def main():
             stage_windows_zip(archive, DEST)
         else:
             stage_macos_dmg(archive, DEST)
-    print("Pinned VLC 3.0.21 runtime staged for " + target)
+    print("Pinned VLC 3.0.24 runtime staged for " + target)
 
 if __name__ == "__main__":
     main()

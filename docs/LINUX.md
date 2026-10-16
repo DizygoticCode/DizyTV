@@ -6,7 +6,7 @@ The Qt/PySide6 application and Python playback core use the same codebase as
 Windows and macOS. Linux uses PyInstaller to produce an ELF executable packaged
 inside an installable Debian package. System **libVLC 3** and its video codecs
 are used for playback. Ace Stream is a **separate installed engine** which
-returns an HTTP playback session to DizyTV's embedded libVLC player. DizyTV does not redistribute the proprietary engine. The forthcoming .deb embeds an opt-in original-vendor bootstrap.
+returns an HTTP playback session to DizyTV's embedded libVLC player. DizyTV does not redistribute the proprietary engine. The forthcoming .deb bundles a native AGPL-licensed Outpace helper for compatible public Ace swarms, plus an opt-in original-vendor bootstrap.
 
 The first supported build target is Ubuntu 24.04 x86-64 (other Debian-family
 distros need testing). Wayland-native video embedding may require XWayland/X11
@@ -30,7 +30,7 @@ The package does not install/enable an Ace server during APT installation. On th
 
 The **unreleased** Linux .deb includes an in-app bootstrap under **Tools → Set up Ace Stream engine**, not the proprietary software itself. Users can review the vendor licence and P2P warning, then explicitly approve the download. DizyTV fetches the original Ubuntu 22.04 tarball directly from the official publisher over HTTPS; checks a fixed recorded SHA-256; rejects off-publisher redirects, oversized/unsafe archives and partial files; and atomically installs only into the user's `~/.local/opt/acestream`. It never runs downloaded scripts during installation, does not silently add a service, and never overwrites an existing engine. Downloads are optional and cancellable.
 
-**Compatibility limitation:** Ace Stream currently lists an Ubuntu 22.04 x86-64/Python 3.10 archive. DizyTV's normal Linux CI target is **Ubuntu 24.04**. The bootstrap refuses unsupported operating systems rather than executing an unverified 22.04 engine on them. **Ubuntu 24.04 Ace one-install support is not complete.** A trusted local or remote engine can still be configured, and ordinary HTTP/HLS playback needs no Ace software. The recorded SHA-256 is independently documented, not a cryptographic publisher signature.
+**Compatibility limitation:** Ace Stream currently lists an Ubuntu 22.04 x86-64/Python 3.10 archive. DizyTV's normal Linux CI target is **Ubuntu 24.04**. The bootstrap refuses unsupported operating systems rather than executing an unverified 22.04 engine on them. **The Ubuntu 24.04 proprietary Ace Engine bootstrap remains unsupported; a separately licensed Outpace engine is bundled instead, with real peer playback still requiring device validation.** A trusted local or remote engine can still be configured, and ordinary HTTP/HLS playback needs no Ace software. The recorded SHA-256 is independently documented, not a cryptographic publisher signature.
 
 These features are in development on `wip/complete-dependency-gates` and **not** in the published v0.1.17-alpha .deb.
 

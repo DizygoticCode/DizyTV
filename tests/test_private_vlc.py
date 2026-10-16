@@ -47,17 +47,23 @@ class PrivateVLCTests(unittest.TestCase):
             root=Path(folder)
             archive=root/'vlc.zip'
             with zipfile.ZipFile(archive,'w') as z:
-                z.writestr('vlc-3.0.21/libvlc.dll',b'libvlc')
-                z.writestr('vlc-3.0.21/libvlccore.dll',b'vlccore')
-                z.writestr('vlc-3.0.21/plugins/codec/codec.dll',b'module')
-                z.writestr('vlc-3.0.21/COPYING.txt',b'licence')
+                z.writestr('vlc-3.0.24/libvlc.dll',b'libvlc')
+                z.writestr('vlc-3.0.24/libvlccore.dll',b'vlccore')
+                z.writestr('vlc-3.0.24/plugins/codec/codec.dll',b'module')
+                z.writestr('vlc-3.0.24/COPYING.txt',b'licence')
             stage_windows_zip(archive,root/'install')
             self.assertTrue((root/'install'/'plugins'/'codec'/'codec.dll').exists())
             self.assertTrue((root/'install'/'COPYING.txt').exists())
             with zipfile.ZipFile(archive,'a') as z:
-                z.writestr('vlc-3.0.21/../bad.txt',b'bad')
+                z.writestr('vlc-3.0.24/../bad.txt',b'bad')
             with self.assertRaisesRegex(RuntimeError,'Unsafe'):
                 stage_windows_zip(archive,root/'invalid')
+
+    def test_vlc_release_is_security_current_and_mac_both_architectures(self):
+        from scripts.stage_private_vlc import VERSION
+        self.assertEqual("3.0.24",VERSION)
+        self.assertEqual(ARCHIVES["macos-arm64"][:2],ARCHIVES["macos-x86_64"][:2])
+        self.assertIn("universal",ARCHIVES["macos-arm64"][0])
 
     def test_wrong_digest_refuses_download_before_install(self):
         class Fake:
