@@ -37,20 +37,22 @@ def verify_media_pipeline(ffmpeg_binary, vlc_module, timeout=12):
                 raise RuntimeError('Bundled libVLC rejected the video fixture')
             deadline=time.monotonic()+timeout
             decoded=0
+            audio=0
             while time.monotonic()<deadline:
                 # python-vlc 3.x get_stats REQUIRES a MediaStats out-parameter
                 # and returns a boolean; calling it without arguments fails.
                 stats=vlc_module.MediaStats()
                 if media.get_stats(stats):
                     decoded=max(decoded, int(stats.decoded_video))
-                    if decoded>=3:
+                    audio=max(audio, int(stats.decoded_audio))
+                    if decoded>=3 and audio>=1:
                         return decoded
                 state=str(player.get_state())
                 if state.endswith('.Error'):
                     break
                 time.sleep(0.15)
             raise RuntimeError(
-                'Bundled libVLC did not decode three video frames from an offline MPEG-TS fixture')
+                'Bundled libVLC did not decode both video and audio from an offline MPEG-TS fixture')
         finally:
             if player is not None:
                 player.stop()

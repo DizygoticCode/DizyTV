@@ -16,6 +16,7 @@ class FakeMedia:
     def get_stats(self, stats):
         self.stats_calls+=1
         stats.decoded_video=4
+        stats.decoded_audio=2
         return self.available
     def release(self):
         self.released=True
@@ -59,7 +60,7 @@ class NativeMediaProbeTests(unittest.TestCase):
         inst=FakeInstance(media,player)
         vlc=SimpleNamespace(
             Instance=lambda *args:inst,
-            MediaStats=lambda:SimpleNamespace(decoded_video=0))
+            MediaStats=lambda:SimpleNamespace(decoded_video=0,decoded_audio=0))
         def pretend_encode(args, **kwargs):
             Path(args[-1]).write_bytes(b'REAL_FFMPEG_NOT_RUN'+b'\0'*8192)
             return subprocess.CompletedProcess(args,0)
@@ -77,7 +78,7 @@ class NativeMediaProbeTests(unittest.TestCase):
         inst=FakeInstance(media,player)
         vlc=SimpleNamespace(
             Instance=lambda *args:inst,
-            MediaStats=lambda:SimpleNamespace(decoded_video=0))
+            MediaStats=lambda:SimpleNamespace(decoded_video=0,decoded_audio=0))
         def pretend_encode(args, **kwargs):
             Path(args[-1]).write_bytes(b'\0'*8192)
             return subprocess.CompletedProcess(args,0)
