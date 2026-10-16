@@ -312,8 +312,18 @@ class OutpaceTests(unittest.TestCase):
             legacy_json.assert_not_called()
             self.assertIn('Outpace',engine.engine_diagnostics(address))
 
+    def test_engine_mac_preserves_installed_engine_without_launching_outpace(self):
+        with patch.object(engine.sys,'platform','darwin'), \
+             patch.object(outpace,'api_ready',return_value=False), \
+             patch.object(engine,'running',return_value=True), \
+             patch.object(outpace,'ensure_ready') as start:
+            self.assertEqual('connected',engine.ensure_ready('http://127.0.0.1:6878'))
+            start.assert_not_called()
+
     def test_engine_mac_auto_start_and_remote_fallback(self):
         with patch.object(engine.sys,'platform','darwin'), \
+             patch.object(outpace,'api_ready',return_value=False), \
+             patch.object(engine,'running',return_value=False), \
              patch.object(outpace,'ensure_ready',return_value='started') as start:
             self.assertEqual('started',engine.ensure_ready('http://127.0.0.1:6878'))
             start.assert_called_once()
