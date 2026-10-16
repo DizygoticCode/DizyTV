@@ -1679,6 +1679,9 @@ class MainWindow(QMainWindow):
         self._auto_caption_text=''
         self._auto_caption_updated=0
         self._auto_caption_started_at=0
+        self._auto_caption_restart_requested=False
+        self._auto_caption_retry_budget=0
+        self._active_holdback_ms=0
         self._auto_caption_queue=CaptionDelayQueue()
         self._auto_caption_timer=QTimer(self)
         self._auto_caption_timer.setInterval(80)
@@ -2807,20 +2810,45 @@ class MainWindow(QMainWindow):
                             'A separate speech connection cannot anticipate audio.')
 
     def auto_caption_finished(self,serial,reason):
-        # Cancellation invalidates the UI caption serial immediately, but
-        # retain the worker until its (possibly slow) model load really ends.
+        # Invalidate old Qt signals immediately; this also removes the overlay
+        # even if FFmpeg exits spontaneously after a source stops.
         if serial!=self._auto_caption_worker_serial:return
         was_stopping=self._auto_caption_stopping
+        queued_restart=self._auto_caption_restart_requested
+        current=(serial==self._auto_caption_seq)
         self._auto_caption_worker=None
         self._auto_caption_worker_serial=None
         self._auto_caption_stopping=False
+        self._auto_caption_restart_requested=False
         self._auto_caption_signals=None
         self._auto_caption_timer.stop()
         self._auto_caption_queue.clear()
+        self._auto_caption_text=''
         self.destroy_auto_caption_overlay()
-        if reason and not was_stopping:self.status.setText(reason)
+        if queued_restart and not current and self.player and self.playback_started:
+            QTimer.singleShot(0,self.toggle_auto_captions)
+        elif current and not was_stopping and self._auto_caption_retry_budget>0:
+            # Unexpected FFmpeg loss: bounded retries, never infinite reconnect
+            # loops. The retry checks the same session and requires live video.
+            QTimer.singleShot(2500,lambda:self.retry_auto_captions(serial))
+            if reason:self.status.setText(reason+' Retrying Vosk if video is still playing…')
+        elif reason and not was_stopping:self.status.setText(reason)
+
+    def retry_auto_captions(self,serial):
+        if (serial!=self._auto_caption_seq or self._auto_caption_worker is not None
+                or not self.player or not self.playback_started
+                or self._auto_caption_retry_budget<=0):
+            return
+        try:state=str(self.player.get_state())
+        except (AttributeError,OSError,RuntimeError):return
+        if not state.endswith('.Playing'):
+            return
+        self._auto_caption_retry_budget-=1
+        self.toggle_auto_captions(automated=True)
 
     def stop_auto_captions(self):
+        self._auto_caption_restart_requested=False
+        self._auto_caption_retry_budget=0
         self._auto_caption_seq+=1
         self._auto_caption_timer.stop()
         self._auto_caption_queue.clear()
@@ -2831,10 +2859,11 @@ class MainWindow(QMainWindow):
         self._auto_caption_text=''
         self.destroy_auto_caption_overlay()
 
-    def toggle_auto_captions(self):
+    def toggle_auto_captions(self, automated=False):
         if self._auto_caption_worker is not None:
             if self._auto_caption_stopping:
-                self.status.setText('Previous offline caption model is still shutting down. Please wait.')
+                self._auto_caption_restart_requested=True
+                self.status.setText('Restarting Vosk automatically when the previous speech worker finishes cleanup…')
                 return
             self.stop_auto_captions()
             self.status.setText('Stopping local speech captions; waiting for speech model cleanup…')
@@ -2862,6 +2891,8 @@ class MainWindow(QMainWindow):
             self.status.setText('Local captions unavailable: '+str(exc)+
                                 ' Open Settings to check optional model/FFmpeg overrides.')
             return
+        if not automated:
+            self._auto_caption_retry_budget=2
         self._auto_caption_seq+=1
         serial=self._auto_caption_seq
         signals=CaptionSignals(self)
@@ -2941,6 +2972,16 @@ class MainWindow(QMainWindow):
             self._subtitle_track_signature=signature
         except (AttributeError,OSError,RuntimeError):pass
 
+    def disable_all_subtitles(self):
+        """CC Off disables both independent caption engines immediately."""
+        self.stop_auto_captions()
+        self._subtitle_manual_track=-1
+        self._subtitle_auto_applied=True
+        if self.player and self.playback_started:
+            try:self.player.video_set_spu(-1)
+            except (AttributeError,OSError,RuntimeError):pass
+        self.status.setText('All subtitles off (broadcast + offline Vosk).')
+
     def choose_subtitle_track(self,track):
         if not self.player or not self.playback_started:return
         if track!=-1 and track not in {key for key,_ in subtitle_tracks(self.player)}:return
@@ -2982,8 +3023,10 @@ class MainWindow(QMainWindow):
         tracks=subtitle_tracks(self.player)
         menu.addSection('Broadcast subtitle tracks')
         if self.player and self.playback_started:
-            action=menu.addAction('Off')
-            action.triggered.connect(lambda:self.choose_subtitle_track(-1))
+            action=menu.addAction('Off — all subtitles (including Vosk)')
+            action.triggered.connect(self.disable_all_subtitles)
+            embedded_only=menu.addAction('Off — broadcast captions only')
+            embedded_only.triggered.connect(lambda:self.choose_subtitle_track(-1))
             for key,name in tracks:
                 action=menu.addAction('CC  '+name)
                 action.setCheckable(True)
@@ -3002,10 +3045,11 @@ class MainWindow(QMainWindow):
         appearance=menu.addAction('Subtitle size, font, colour, position…')
         appearance.triggered.connect(self.settings)
         menu.addSection('Speech-generated captions')
-        auto=menu.addAction('Stopping local speech captions…' if self._auto_caption_stopping
-                            else ('Stop local speech captions' if self._auto_caption_worker
-                                  else 'Generate live subtitles (offline Vosk + FFmpeg)'))
-        auto.setEnabled(not self._auto_caption_stopping)
+        auto=menu.addAction('Restart Vosk when cleanup finishes'
+                            if self._auto_caption_stopping else
+                            ('Stop local speech captions' if self._auto_caption_worker
+                             else 'Generate live subtitles (offline Vosk + FFmpeg)'))
+        auto.setEnabled(not self._auto_caption_stopping or not self._auto_caption_restart_requested)
         auto.triggered.connect(self.toggle_auto_captions)
         menu.addSection('Vosk text timing (not embedded subtitles)')
         delay=self.state['settings'].get('auto_caption_delay_ms',0)
@@ -3022,8 +3066,8 @@ class MainWindow(QMainWindow):
         reset.triggered.connect(lambda:self.change_auto_caption_delay())
         menu.addSection('Video/audio holdback via local timeshift')
         video_delay=self.state['settings'].get('auto_caption_video_delay_ms',0)
-        local_ready=(self.timeshift is not None and self.player is not None and
-                     bool(self.playback_started))
+        local_ready=(self.timeshift is not None and self.timeshift_task is None
+                     and self.player is not None and bool(self.playback_started))
         current_video=menu.addAction('Target video delay: '+str(video_delay)+' ms')
         current_video.setEnabled(False)
         advance=menu.addAction('Less VIDEO delay (−1 second)')
@@ -3212,6 +3256,7 @@ class MainWindow(QMainWindow):
         self.pool.start(diagnostic)
 
     def close_timeshift(self):
+        self._active_holdback_ms=0
         prior=self.timeshift
         self.timeshift=None
         self.timeshift_task=None
@@ -3223,6 +3268,9 @@ class MainWindow(QMainWindow):
             prior.close()
 
     def play_stream(self,url):
+        # The new stream may wait many seconds for the DVR: old subtitles must
+        # disappear at channel-switch REQUEST time, not after the new buffer.
+        self.stop_auto_captions()
         # Capture/loopback starts off the GUI thread; unsupported sources fail
         # open to ordinary live video. No cache is created unless opted in.
         self.close_timeshift()
@@ -3255,7 +3303,8 @@ class MainWindow(QMainWindow):
                 return
             self.timeshift_task=None
             self.play_url(local_url)
-            self.timeshift_lag=requested_delay_ms/1000 if requested_delay_ms else 0
+            self._active_holdback_ms=requested_delay_ms
+            self.timeshift_lag=0  # Fixed replay lag; moving live holdback is separate.
             self.seek_notice.setText('Temporary on-device timeshift is recording; up to '+str(session.window.minutes)+
                                      ' minutes'+(' • video ~'+str(round(self.timeshift_lag,1))+'s behind LIVE for Vosk sync'
                                                  if self.timeshift_lag>0 else ''))
@@ -3280,19 +3329,18 @@ class MainWindow(QMainWindow):
         """
         old=self.store.read()['settings'].get('auto_caption_video_delay_ms',0)
         target=0 if change_ms is None else max(0,min(30000,old+change_ms))
-        if self.timeshift is None or self.player is None or not self.playback_started:
-            self.status.setText('Video holdback needs active local timeshift playback. '
+        if (self.timeshift is None or self.timeshift_task is not None
+                or self.player is None or not self.playback_started):
+            self.status.setText('Video holdback needs fully started local timeshift playback. '
                                 'Enable “Keep a temporary on-device rolling buffer” in Settings, '
                                 'then restart the channel. No stream was interrupted.')
             return
-        available=self.timeshift.window.latest_seconds()
-        # Two complete segments behind the held-back edge give libVLC enough
-        # margin to continue playing while new HLS parts appear.
-        needed=target/1000 + 2*4.0
-        if target>0 and available<needed:
-            self.status.setText('Timeshift buffer has '+str(round(available,1))+
-                                's; needs about '+str(round(needed,1))+
-                                's for this video delay. Try again shortly.')
+        # Readiness is about PLAYABLE fragments after filtering, not total
+        # buffered seconds (long 10-second segments may leave zero video).
+        playable=len(self.timeshift.window.holdback_entries(target/1000))
+        if target>0 and playable<3:
+            self.status.setText('Waiting for buffered playback: '+str(playable)+
+                                ' playable segments; at least 3 required.')
             return
         actual=target/1000 if target>0 else 0.0
         try:
@@ -3300,11 +3348,14 @@ class MainWindow(QMainWindow):
                         self.timeshift.live_url())
             # Do not stop Vosk while retuning ONLY the current DVR replay URL.
             self.play_url(target_url,preserve_captions=True)
-            if not self.playback_started:return
+            if not self.playback_started:
+                self.stop_auto_captions()
+                return
         except (OSError,RuntimeError,ValueError) as exc:
             self.status.setText('Could not adjust video delay: '+str(exc)[:160])
             return
-        self.timeshift_lag=actual
+        self._active_holdback_ms=target
+        self.timeshift_lag=0
         self.state=self.store.update(lambda s:s['settings'].update(auto_caption_video_delay_ms=target))
         self.seek_notice.setText('DVR video/audio ~'+str(round(actual,1))+
                                  's behind live; selected target '+str(target)+' ms. '
