@@ -13,6 +13,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -20,6 +21,34 @@ from urllib.request import urlopen
 
 
 LOCAL_HOSTS = frozenset(('localhost', '127.0.0.1', '::1'))
+
+# Track only child processes created by this DizyTV instance. Never kill a
+# pre-existing listener or the system-installed proprietary Ace engine.
+_OWNED_PROCESS = None
+_SHUTTING_DOWN = False
+_PROCESS_LOCK = threading.Lock()
+
+
+def stop_owned_daemon(*,preserve_recordings=False):
+    """Non-blocking shutdown when the GUI exits, respecting active recordings.
+
+    A helper may be serving a detached recorder after the viewer closes.
+    Preserve it in that case and never wait for a subprocess on Qt's thread.
+    """
+    global _OWNED_PROCESS, _SHUTTING_DOWN
+    with _PROCESS_LOCK:
+        _SHUTTING_DOWN = True
+        if preserve_recordings or _OWNED_PROCESS is None:
+            return False
+        process = _OWNED_PROCESS
+        _OWNED_PROCESS = None
+    try:
+        if process.poll() is None:
+            process.terminate()  # sends SIGTERM; do not block in wait()
+            return True
+    except (OSError, RuntimeError):
+        pass
+    return False
 
 
 def packaged_binary():
@@ -85,7 +114,11 @@ def playback_url(stream, address):
 
 
 def ensure_ready(address, startup_seconds=25):
+    global _OWNED_PROCESS
     base = local_api_address(address)
+    with _PROCESS_LOCK:
+        if _SHUTTING_DOWN:
+            raise RuntimeError('DizyTV is closing; no new Outpace helper may start')
     if api_ready(base):
         return 'connected'
     # Never try to install or replace software behind an unfamiliar local
@@ -114,17 +147,30 @@ def ensure_ready(address, startup_seconds=25):
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, close_fds=True,
                                cwd=str(binary.parent), env=environment)
+    with _PROCESS_LOCK:
+        closing = _SHUTTING_DOWN
+        if not closing:
+            _OWNED_PROCESS = process
+    if closing:
+        process.terminate()
+        raise RuntimeError('DizyTV closed while starting the Outpace helper')
     deadline = time.monotonic() + startup_seconds
     while time.monotonic() < deadline:
         if api_ready(base):
             return 'started'
         if process.poll() is not None:
+            with _PROCESS_LOCK:
+                if _OWNED_PROCESS is process:
+                    _OWNED_PROCESS = None
             raise RuntimeError('Packaged Outpace stopped during startup. '
                                'Inspect macOS permissions and the daemon logs.')
         time.sleep(0.35)
     # Only stop the helper created by this request; never touch a prior
     # instance or an unrelated localhost service.
     process.terminate()
+    with _PROCESS_LOCK:
+        if _OWNED_PROCESS is process:
+            _OWNED_PROCESS = None
     try:
         process.wait(timeout=3)
     except subprocess.TimeoutExpired:

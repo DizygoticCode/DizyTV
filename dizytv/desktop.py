@@ -4420,6 +4420,19 @@ class MainWindow(QMainWindow):
         self.stop_playback()
         if self.player:self.player.release(); self.player=None
         if self.vlc_instance:self.vlc_instance.release(); self.vlc_instance=None
+        # Only stop the Outpace child that DizyTV itself launched. Do not
+        # disrupt an active/due-soon detached recording, or wait on the Qt UI.
+        if sys.platform=='darwin' or sys.platform.startswith('linux'):
+            from .outpace import stop_owned_daemon
+            latest=self.store.try_read()
+            jobs=(latest or self.state).get('jobs',[])
+            now=time.time()
+            pending=(latest is None or any(
+                job.get('status') in ('recording','starting','paused') or
+                (job.get('status')=='queued' and
+                 float(job.get('start',0)) <= now+300)
+                for job in jobs))
+            stop_owned_daemon(preserve_recordings=pending)
         super().closeEvent(event)
 
 

@@ -13,6 +13,33 @@ CID = '0123456789abcdef0123456789abcdef01234567'
 
 
 class OutpaceTests(unittest.TestCase):
+    def setUp(self):
+        self.previous_owned=outpace._OWNED_PROCESS
+        self.previous_shutdown=outpace._SHUTTING_DOWN
+        outpace._OWNED_PROCESS=None
+        outpace._SHUTTING_DOWN=False
+
+    def tearDown(self):
+        outpace._OWNED_PROCESS=self.previous_owned
+        outpace._SHUTTING_DOWN=self.previous_shutdown
+
+    def test_close_does_not_touch_external_engine_or_active_recording(self):
+        self.assertFalse(outpace.stop_owned_daemon())
+        # Re-enable the test fixture after the first shutdown.
+        outpace._SHUTTING_DOWN=False
+        owned=Mock()
+        owned.poll.return_value=None
+        outpace._OWNED_PROCESS=owned
+        self.assertFalse(outpace.stop_owned_daemon(preserve_recordings=True))
+        owned.terminate.assert_not_called()
+        self.assertIs(outpace._OWNED_PROCESS,owned)
+        outpace._SHUTTING_DOWN=False
+        self.assertTrue(outpace.stop_owned_daemon())
+        owned.terminate.assert_called_once()
+        self.assertIsNone(outpace._OWNED_PROCESS)
+        with self.assertRaisesRegex(RuntimeError,'closing'):
+            outpace.ensure_ready('http://127.0.0.1:6878')
+
     def test_mac_packaged_path_only_and_original_name(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
