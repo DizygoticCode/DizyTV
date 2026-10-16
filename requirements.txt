@@ -7,3 +7,4 @@ vosk==0.3.40
 requests==2.32.5
 srt==3.5.3
 tqdm==4.67.1
+imageio-ffmpeg==0.6.0; sys_platform == "darwin"

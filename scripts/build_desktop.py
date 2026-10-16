@@ -19,7 +19,8 @@ shutil.copyfile(ROOT/'THIRD-PARTY-NOTICES.md',licences/'NOTICES.md')
 # HTTP support distributions. colorama is Windows-only (tqdm dependency).
 licence_packages=('python-vlc','tzdata','pyinstaller','vosk',
                   'requests','srt','tqdm','charset-normalizer','idna',
-                  'urllib3','certifi','Pillow','cffi','pycparser')
+                  'urllib3','certifi','Pillow','cffi','pycparser',
+                  *((('imageio-ffmpeg',) if sys.platform=='darwin' else ())))
 for package in (*licence_packages,'colorama'):
     try:wheel=distribution(package)
     except PackageNotFoundError:
@@ -70,8 +71,13 @@ if sys.platform=='darwin':
     licence=outpace/'LICENSE'
     if not helper.is_file() or not licence.is_file():
         raise RuntimeError('Required macOS Outpace binary and licence are missing')
+    speech=ROOT/'vendor'/'speech'
+    if not (speech/'ffmpeg').is_file() or not (speech/'vosk-model-small-en-us-0.15'/'am').is_dir() or not (speech/'vosk-model-small-en-us-0.15'/'conf').is_dir():
+        raise RuntimeError('macOS package needs local FFmpeg and English Vosk model')
     args += ['--add-binary',str(helper)+os.pathsep+'outpace',
              '--add-data',str(licence)+os.pathsep+'outpace',
+             '--add-binary',str(speech/'ffmpeg')+os.pathsep+'speech',
+             '--add-data',str(speech/'vosk-model-small-en-us-0.15')+os.pathsep+'speech/vosk-model-small-en-us-0.15',
              '--windowed','--icon','assets/branding/dizytv.icns',
              '--osx-bundle-identifier','dev.dizygotic.dizytv']
 elif os.name=='nt':

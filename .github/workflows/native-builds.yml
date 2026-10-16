@@ -72,6 +72,9 @@ jobs:
       - name: Stage checksum-pinned Windows speech assets
         if: runner.os == 'Windows'
         run: python scripts/stage_windows_speech.py
+      - name: Stage bundled English Vosk and native Mac FFmpeg
+        if: runner.os == 'macOS'
+        run: python scripts/stage_desktop_speech.py
       - name: Compile pinned Outpace 0.2.0 for the native macOS architecture
         if: runner.os == 'macOS'
         shell: bash
@@ -173,6 +176,13 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
+          # Verify self-contained offline English transcription files.
+          ffmpeg="$(find dist/DizyTV.app/Contents -type f -name ffmpeg -print -quit)"
+          test -x "$ffmpeg"
+          "$ffmpeg" -version
+          model="$(find dist/DizyTV.app/Contents -type d -name vosk-model-small-en-us-0.15 -print -quit)"
+          test -n "$model"
+          test -d "$model/am" && test -d "$model/conf"
           # Assert the actual PKG app has the separately licensed native helper.
           helper="$(find dist/DizyTV.app/Contents -type f -name outpace -perm -111 -print -quit)"
           test -n "$helper"
@@ -226,13 +236,15 @@ jobs:
       - name: Install Linux libVLC, Qt runtime libraries, and Debian packager
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
+          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output ffmpeg libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
       - name: Install pinned Python dependencies
         run: python -m pip install -r requirements.txt
       - name: Full unit and desktop UI tests
         run: python -m unittest discover -s tests -v
       - name: Source smoke startup
         run: python -m dizytv --smoke-test --data-dir smoke-source
+      - name: Stage bundled English Vosk for Ubuntu
+        run: python scripts/stage_desktop_speech.py
       - name: Build native Linux executable
         run: python scripts/build_desktop.py
       - name: Package .deb
@@ -245,6 +257,8 @@ jobs:
           mkdir smoke-installed
           dpkg-deb --extract dist/DizyTV-0.1.17-alpha-linux-amd64.deb smoke-installed
           test -x smoke-installed/usr/bin/dizytv
+          test -d smoke-installed/opt/dizytv/_internal/speech/vosk-model-small-en-us-0.15/am
+          test -d smoke-installed/opt/dizytv/_internal/speech/vosk-model-small-en-us-0.15/conf
           test -f smoke-installed/usr/share/applications/dizytv.desktop
           if find smoke-installed/opt/dizytv -name 'libvlc*.so*' -print -quit | grep -q .; then
             echo 'Linux package must use the system libVLC libraries and matching plugins' >&2

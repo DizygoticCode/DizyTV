@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='dizytv-deb-') as folder:
         f'Version: {VERSION}\n'
         'Section: video\nPriority: optional\nArchitecture: amd64\n'
         'Maintainer: DizygoticCode <https://github.com/DizygoticCode/DizyTV>\n'
-        'Depends: libvlc5, vlc-plugin-base, vlc-plugin-video-output, libgl1, libxcb-cursor0, libxkbcommon-x11-0\n'
+        'Depends: libvlc5, vlc-plugin-base, vlc-plugin-video-output, ffmpeg, libgl1, libxcb-cursor0, libxkbcommon-x11-0\n'
         'Description: DizyTV native live television player\n'
         ' Local TV player with XMLTV guides and recordings.\n'
         ' Uses system libVLC and separately installed Ace Stream engine.\n')
