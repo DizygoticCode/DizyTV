@@ -116,20 +116,25 @@ class RollingWindow:
                 return item.seq
         return entries[0].seq
 
-    def playlist(self, from_seq=None, holdback_seconds=0):
-        """A moving live playlist can intentionally omit the newest segments."""
-        if not isinstance(holdback_seconds,(float,int)) or isinstance(holdback_seconds,bool) or not 0<=holdback_seconds<=30:
+    def holdback_entries(self, holdback_seconds):
+        """Full moving video/A/V holdback, counting actual fragment durations."""
+        if (not isinstance(holdback_seconds,(float,int)) or isinstance(holdback_seconds,bool)
+                or not 0 <= holdback_seconds <= 30):
             raise ValueError('Invalid local video holdback')
-        entries = self.snapshot()
+        entries=self.snapshot()
         if holdback_seconds:
             cut=len(entries)
             excluded=0.0
-            # HLS/MPEG-TS is segment-granular: if a viewer requests 5s and
-            # segments are 4s each, hold back at least 8s, never only 4s.
-            while cut and excluded<holdback_seconds:
+            # Round UP in complete fragments, never show data newer than target.
+            while cut and excluded < holdback_seconds:
                 cut-=1
                 excluded+=entries[cut].duration
             entries=entries[:cut]
+        return entries
+
+    def playlist(self, from_seq=None, holdback_seconds=0):
+        """A moving live playlist can intentionally omit the newest segments."""
+        entries = self.holdback_entries(holdback_seconds)
         if from_seq is None:
             # Join near live; use a replay URL to start farther back.
             # A 3-fragment live playlist gives VLC almost no margin when
@@ -440,17 +445,18 @@ class RollingTimeshift:
         url=self.start(timeout=timeout)
         if seconds_back==0:
             return url
-        deadline=time.monotonic()+min(55,max(15,seconds_back+15))
-        needed=seconds_back+2*SEGMENT_SECONDS
-        while self.window.latest_seconds()<needed and not self.stop_event.is_set():
+        deadline=time.monotonic()+min(80,max(30,seconds_back+45))
+        # Total seconds alone are insufficient: a single 10s segment with a
+        # 1s holdback produces an EMPTY manifest. Check the actual number of
+        # playable fragments AFTER removing the newest delayed segments.
+        while len(self.window.holdback_entries(seconds_back))<3 and not self.stop_event.is_set():
             if time.monotonic()>=deadline:
                 break
             self.stop_event.wait(0.25)
         if self.stop_event.is_set():
             raise RuntimeError('Timeshift was cancelled before delayed playback')
-        available=self.window.latest_seconds()
-        if available<needed:
-            raise RuntimeError('Not enough local DVR segments for Vosk video delay; try live playback')
+        if len(self.window.holdback_entries(seconds_back))<3:
+            raise RuntimeError('Not enough playable DVR segments for Vosk video delay; try live playback')
         return self.holdback_url(seconds_back)
 
     def close(self):
