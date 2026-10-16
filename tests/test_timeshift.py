@@ -61,6 +61,26 @@ class TestTimeshift(unittest.TestCase):
                 window.playlist(holdback_seconds=-1)
             window.close()
 
+    def test_holdback_has_stable_playable_segments_during_short_origin_stall(self):
+        # Broadcaster temporarily stops publishing new HLS segments. The local
+        # playlist must keep advertising already-cached ones, not expose the
+        # still-newest (possibly unavailable) source edge or become empty.
+        with tempfile.TemporaryDirectory() as root:
+            window=RollingWindow(root,free=lambda:1024**4)
+            for _ in range(6):
+                window.append(PACKET*10,4)
+            initial=window.playlist(holdback_seconds=8)
+            self.assertEqual(4,initial.count('#EXTINF:'))
+            self.assertNotIn('s/4.ts',initial)
+            self.assertNotIn('s/5.ts',initial)
+            self.assertEqual(initial,window.playlist(holdback_seconds=8))
+            window.append(PACKET*10,4)  # Origin resumes after short stall.
+            resumed=window.playlist(holdback_seconds=8)
+            self.assertIn('s/4.ts',resumed)
+            self.assertNotIn('s/5.ts',resumed)
+            self.assertNotIn('s/6.ts',resumed)
+            window.close()
+
     def test_holdback_loopback_url_enforces_bounded_delay_and_no_public_access(self):
         from http.server import ThreadingHTTPServer
         from threading import Thread
