@@ -13,7 +13,7 @@ from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QDesktopServi
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QCheckBox, QSplitter,
     QTabWidget, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView,
-    QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
+    QDialog, QDialogButtonBox, QFormLayout, QLayout, QComboBox, QSpinBox, QDoubleSpinBox,
     QPlainTextEdit, QFileDialog, QMessageBox, QInputDialog, QMenu, QSlider, QToolButton, QSizePolicy, QAbstractItemView, QProgressBar)
 
 from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_job,
@@ -1765,7 +1765,7 @@ class MainWindow(QMainWindow):
         sidebar=QWidget();sidebar.setObjectName('appSidebar');side=QVBoxLayout(sidebar);side.setContentsMargins(10,10,10,10);side.setSpacing(7)
         # Keep each filter/checkbox/button at its full vertical size. When
         # space runs out, the sidebar scrolls instead of crushing text rows.
-        side.setSizeConstraint(QVBoxLayout.SetMinimumSize)
+        side.setSizeConstraint(QLayout.SetMinimumSize)
         self.search=QLineEdit(); self.search.setPlaceholderText('Filter current channels'); self.search.textChanged.connect(self.render_channels); side.addWidget(self.search)
         self.country_filter=QComboBox(); self.genre_filter=QComboBox()
         self.kind_filter=QComboBox(); self.source_filter=QComboBox()
@@ -2028,11 +2028,13 @@ class MainWindow(QMainWindow):
         # Never let QSplitter/QScrollArea compress a category label, filter,
         # dropdown, favourite checkbox or action button below its styled
         # text height.  The panel scrolls VERTICALLY when the window is short.
-        for widget in sidebar.findChildren((QLabel,QPushButton,QComboBox,
-                                            QCheckBox,QLineEdit)):
+        for widget in sidebar.findChildren(QWidget):
+            if not isinstance(widget,(QLabel,QPushButton,QComboBox,
+                                      QCheckBox,QLineEdit)):
+                continue
             widget.ensurePolished()
             hint=widget.sizeHint().height()
-            if hint>0 and widget.minimumHeight()!=hint:
+            if hint>0 and widget.minimumHeight()<hint:
                 widget.setMinimumHeight(hint)
         sidebar.layout().invalidate()
         sidebar.layout().activate()
