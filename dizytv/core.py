@@ -160,7 +160,7 @@ def default_state():
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
                          'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': '',
                          'auto_caption_language': 'English (bundled)',
-                         'auto_caption_delay_ms': 0,
+                         'auto_caption_delay_ms': 0, 'auto_caption_video_delay_ms': 0,
                          'channel_sort': 'Name A–Z'},
             'channels': [], 'favourites': [], 'mappings': {}, 'jobs': [], 'disabled_channels': []}
 
@@ -427,7 +427,7 @@ def validate_state(state):
     if not isinstance(state['settings'], dict):
         raise ValueError('Invalid settings')
     settings = state['settings']
-    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','http_buffer_ms','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language','auto_caption_delay_ms','channel_sort'} - set(settings):
+    if set(default_state()['settings']) - {'playlist_urls','timeshift_enabled','timeshift_minutes','timeshift_max_bytes','timeshift_dir','ui_scale','button_size','engine_executable','guide_scale','theme','vlc_decoder','http_buffer_ms','subtitles_enabled','subtitle_size','subtitle_colour','subtitle_position','subtitle_font','subtitle_language','auto_caption_model_dir','auto_caption_ffmpeg_path','auto_caption_language','auto_caption_delay_ms','auto_caption_video_delay_ms','channel_sort'} - set(settings):
         raise ValueError('Backup is missing required settings')
     for key in ('playlist_url', 'engine_url'):
         http_url(settings[key])
@@ -464,6 +464,7 @@ def validate_state(state):
     if settings.get('auto_caption_language','English (bundled)') not in LANGUAGE_MODELS:
         raise ValueError('Invalid offline caption language')
     _integer(settings.get('auto_caption_delay_ms',0), 0, 10000, 'offline caption delay')
+    _integer(settings.get('auto_caption_video_delay_ms',0), 0, 30000, 'caption video holdback')
     if settings.get('channel_sort','Name A–Z') not in CHANNEL_SORT_MODES:
         raise ValueError('Invalid channel sorting mode')
     for key in ('auto_caption_model_dir','auto_caption_ffmpeg_path'):
