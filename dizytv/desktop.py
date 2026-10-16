@@ -3580,9 +3580,20 @@ class MainWindow(QMainWindow):
             try:
                 compatibility()
             except RuntimeError as exc:
-                QMessageBox.warning(self,'DizyTV — Linux Ace compatibility',
-                    str(exc)+'\n\nOfficial Linux products: https://docs.acestream.net/products/\n'
-                    'The DizyTV .deb still works for ordinary HTTP/HLS channels.')
+                from .outpace import packaged_binary
+                helper=packaged_binary()
+                if helper is not None:
+                    QMessageBox.information(
+                        self,'DizyTV — bundled Outpace',
+                        'The original proprietary Ace engine is not verified for this Linux release.\n\n'
+                        'DizyTV includes the separately AGPL-licensed Outpace engine for '
+                        'compatible public Ace swarms. It starts automatically when you '
+                        'select a compatible Ace channel; no additional install is required.\n\n'
+                        'Original engine compatibility: '+str(exc))
+                else:
+                    QMessageBox.warning(self,'DizyTV — Linux Ace compatibility',
+                        str(exc)+'\n\nOfficial Linux products: https://docs.acestream.net/products/\n'
+                        'The DizyTV .deb still works for ordinary HTTP/HLS channels.')
                 return
             answer=QMessageBox.question(
                 self,'Install original Ace Stream engine?',

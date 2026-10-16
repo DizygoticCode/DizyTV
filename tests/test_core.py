@@ -313,6 +313,14 @@ if __name__ == '__main__':
 
 
 class AceQuerySelectorTests(unittest.TestCase):
+    def test_playlist_preserves_infohash_type_for_outpace(self):
+        from dizytv.core import parse_playlist,ace_request_params
+        content='a'*40
+        channels=parse_playlist(
+            '#EXTM3U\n#EXTINF:-1,Infohash channel\nacestream:?infohash='+content+'\n')
+        self.assertEqual(len(channels),1)
+        self.assertEqual({'infohash':content},ace_request_params(channels[0]['stream']))
+
     def test_query_only_infohash_is_supported_without_accepting_external_host(self):
         from dizytv.core import ace_request_params, ace_id
         item='A'*40

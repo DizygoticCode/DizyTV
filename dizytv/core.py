@@ -251,7 +251,10 @@ def parse_playlist(text):
                                  'group': attrs.get('group-title', '')[:512],
                                  'tvg_id': attrs.get('tvg-id', '')[:512],
                                  'chno': attrs.get('tvg-chno','')[:12],
-                                 'stream': ('acestream://' + aid if urlparse(line).scheme == 'acestream' else line),
+                                 'stream': (('acestream:?infohash='+aid
+                                              if 'infohash' in (ace_request_params(line) or {})
+                                              else 'acestream://'+aid)
+                                             if urlparse(line).scheme=='acestream' else line),
                                  **channel_categories(attrs,line,name)})
             attrs, name = {}, ''
     if not channels:
