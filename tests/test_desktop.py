@@ -1283,16 +1283,18 @@ class DesktopTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
             if sys.platform.startswith('linux'):
+                window.state['settings']['engine_executable']='/home/test/custom/start-engine'
                 # Unsupported host displays an actionable explanation; it
                 # must not open a modal dialog in unattended CI or download
                 # proprietary software without explicit consent.
-                with patch('dizytv.engine.linux_engine_path',return_value=None), \
+                with patch('dizytv.engine.linux_engine_path',return_value=None) as find_engine, \
                      patch('dizytv.linux_ace_bootstrap.compatibility',
                            side_effect=RuntimeError('requires Ubuntu 22.04')), \
                      patch('dizytv.outpace.packaged_binary',return_value=None), \
                      patch('dizytv.desktop.QMessageBox.warning') as warning, \
                      patch('dizytv.desktop.QDesktopServices.openUrl') as open_url:
                     window.open_ace_stream_setup()
+                    find_engine.assert_called_once_with('/home/test/custom/start-engine')
                     warning.assert_called_once()
                     self.assertIn('Ubuntu 22.04',warning.call_args.args[2])
                     open_url.assert_not_called()
