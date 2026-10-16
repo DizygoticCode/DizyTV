@@ -1305,6 +1305,23 @@ class DesktopTests(unittest.TestCase):
                                      open_url.call_args.args[0].toString())
             window.close()
 
+    def test_ace_setup_rejects_missing_configured_linux_launcher(self):
+        if not sys.platform.startswith('linux'):
+            self.skipTest('Linux-specific original Ace launcher')
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.state['settings']['engine_executable']='/missing/engine/start-engine'
+            with patch('dizytv.engine.linux_engine_path',
+                       side_effect=RuntimeError('Select an executable Linux Ace Stream start-engine script')) as find, \
+                 patch('dizytv.desktop.QMessageBox.warning') as warning, \
+                 patch('dizytv.linux_ace_bootstrap.install_original') as install:
+                window.open_ace_stream_setup()
+                find.assert_called_once_with('/missing/engine/start-engine')
+                warning.assert_called_once()
+                self.assertIn('start-engine',warning.call_args.args[2])
+                install.assert_not_called()
+            window.close()
+
     def test_alt_source_reveals_channel_when_filtered_out(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
