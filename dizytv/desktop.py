@@ -815,7 +815,7 @@ class Settings(QDialog):
         self.cc_size.setObjectName('subtitleSize')
         self.cc_size.setRange(12,64)
         self.cc_size.setSuffix(' px')
-        self.cc_size.setValue(self.original.get('subtitle_size',28))
+        self.cc_size.setValue(self.original.get('subtitle_size',20))
         form.addRow('Subtitle text size',self.cc_size)
         self.cc_colour=QComboBox()
         self.cc_colour.setObjectName('subtitleColour')
@@ -864,6 +864,18 @@ class Settings(QDialog):
                           'across separate IPTV stream connections is not reliable.')
         delay_note.setWordWrap(True)
         form.addRow(delay_note)
+        preset=QPushButton('Apply recommended Vosk + IPTV buffer settings')
+        preset.setObjectName('applyRecommendedVoskBuffer')
+        preset.setToolTip('Opt in to a temporary on-device DVR buffer, 5-second video/audio holdback and 20 px captions. Save to keep; all values remain editable.')
+        preset.clicked.connect(self.apply_recommended_vosk_settings)
+        form.addRow('Recommended profile',preset)
+        preset_note=QLabel('Suggested starting point: 20 px subtitle text, 0 ms additional Vosk text delay '
+                           'and 5000 ms video/audio delay. This enables the optional rolling on-device '
+                           'timeshift buffer (which uses disk space). Your changes are only saved when '
+                           'you click Save. Vosk transcription still starts only when requested. '
+                           'Not all streams support buffered playback.')
+        preset_note.setWordWrap(True)
+        form.addRow(preset_note)
         model_actions=QWidget()
         model_actions_layout=QHBoxLayout(model_actions)
         model_actions_layout.setContentsMargins(0,0,0,0)
@@ -947,6 +959,15 @@ class Settings(QDialog):
         form.addRow(warning)
         note=QLabel('Timers use UTC and do not move when timezone or guide correction changes.\nDesktop recording requires an awake computer. VLC 3 and the Ace engine must be installed separately.\nLinux uses an installed native Ace start-engine script and system libVLC. Mac playback can connect to a reachable engine.'); note.setWordWrap(True); form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); root.addWidget(buttons)
+    def apply_recommended_vosk_settings(self):
+        """Explicit, editable Vosk synchronisation preset; no writes until Save."""
+        self.cc_size.setValue(20)
+        self.caption_delay.setValue(0)
+        self.caption_video_delay.setValue(5000)
+        # The 5s video delay requires a device-local rolling DVR; this is
+        # opt-in only via the labelled button, never silently on upgrade.
+        self.timeshift_enabled.setChecked(True)
+
     def add_free_playlists(self):
         existing=[u.strip() for u in self.playlists.toPlainText().splitlines() if u.strip()]
         combined=list(dict.fromkeys(existing+DEFAULT_PLAYLIST_URLS))
@@ -2716,7 +2737,7 @@ class MainWindow(QMainWindow):
         backdrop='rgba(255,255,255,222)' if colour=='#000000' else 'rgba(0,0,0,190)'
         font={'Sans':'Arial','Serif':'Georgia','Monospace':'Consolas'}.get(
             settings.get('subtitle_font','Sans'),'Arial')
-        size=settings.get('subtitle_size',28)
+        size=settings.get('subtitle_size',20)
         label.setStyleSheet(
             'QLabel#autoCaptionText {font-family:"'+font+'";font-size:'+str(size)+'px;'
             'font-weight:700;color:'+colour+';background:'+backdrop+';'
@@ -2726,7 +2747,7 @@ class MainWindow(QMainWindow):
     def position_auto_caption_overlay(self):
         overlay=self._auto_caption_overlay
         if overlay is None or self.video.width()<1 or self.video.height()<1:return
-        size=self.state['settings'].get('subtitle_size',28)
+        size=self.state['settings'].get('subtitle_size',20)
         width=max(100,int(self.video.width()*.86))
         height=max(64,min(self.video.height()//2,size*3+26))
         margin=POSITIONS.get(self.state['settings'].get('subtitle_position','Bottom'),16)
