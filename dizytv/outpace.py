@@ -174,21 +174,52 @@ def reap_handed_off_daemon(directory, address='http://127.0.0.1:6878'):
             if (job.get('status') in ('queued', 'starting', 'recording') and
                     job.get('start', now + 10) <= now + 5 and job.get('end', 0) > now and
                     ace_request_params(channels.get(job.get('channel_id'), {}).get('stream', '')) is not None):
+                if 'idle_since' in data:
+                    from .storage import atomic_json
+                    data.pop('idle_since')
+                    atomic_json(marker, data)
                 return False
         base = local_api_address(address)
         with urlopen(base + '/streams', timeout=0.75) as response:
             if response.status != 200:
                 return False
             payload = response.read(32769)
-        if len(payload) > 32768 or json.loads(payload).get('streams') != []:
+        if len(payload) > 32768:
             return False
-        # Recheck to prevent terminating a recycled PID after network I/O.
-        if _process_identity(pid, binary) != identity:
+        sessions = json.loads(payload).get('streams')
+        if not isinstance(sessions, list):
+            return False
+        from .storage import atomic_json, file_lock
+        if sessions:
+            if 'idle_since' in data:
+                data.pop('idle_since')
+                atomic_json(marker, data)
+            return False
+        idle_since = data.get('idle_since')
+        if not isinstance(idle_since, (int, float)) or idle_since > now:
+            data['idle_since'] = now
+            atomic_json(marker, data)
+            return False
+        if now - idle_since < IDLE_GRACE_SECONDS:
+            return False
+        # The final native-session check is serialized against other DizyTV
+        # clients reserving an attach lease; a URL is not an active session.
+        with file_lock(Path(directory) / 'outpace-attach.lock'):
+            if _playback_intent_pending(directory):
+                return False
+            with urlopen(base + '/streams', timeout=0.75) as check:
+                if check.status != 200:
+                    return False
+                latest = check.read(32769)
+            if len(latest) > 32768 or json.loads(latest).get('streams') != []:
+                return False
+            # Recheck identity, since a PID could be recycled during I/O.
+            if _process_identity(pid, binary) != identity:
+                marker.unlink(missing_ok=True)
+                return False
+            os.kill(pid, signal.SIGTERM)
             marker.unlink(missing_ok=True)
-            return False
-        os.kill(pid, signal.SIGTERM)
-        marker.unlink(missing_ok=True)
-        return True
+            return True
     except (OSError, ValueError, TypeError, KeyError, AttributeError, URLError,
             HTTPError, TimeoutError):
         return False
