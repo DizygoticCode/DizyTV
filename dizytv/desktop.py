@@ -3568,7 +3568,7 @@ class MainWindow(QMainWindow):
             # Download the original publisher archive only on explicit consent.
             from .linux_ace_bootstrap import compatibility, install_original
             from .engine import linux_engine_path
-            existing=linux_engine_path()
+            existing=linux_engine_path(self.state['settings'].get('engine_executable',''))
             if existing:
                 QMessageBox.information(self,'DizyTV — Ace Stream engine',
                     'An existing Linux Ace engine is already configured:\n'+
