@@ -304,6 +304,19 @@ class DesktopTests(unittest.TestCase):
             w.playback_started=0
             w.close()
 
+    def test_closing_timeshift_uses_nonblocking_background_cleanup(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            session=Mock()
+            w.timeshift=session
+            w.close_timeshift()
+            session.close_async.assert_called_once_with()
+            session.close.assert_not_called()
+            self.assertIsNone(w.timeshift)
+            self.assertIsNone(w.timeshift_task)
+            w.close()
+
     def test_holdback_changes_blocked_while_next_channel_is_still_loading(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
