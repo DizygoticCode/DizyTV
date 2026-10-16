@@ -155,6 +155,46 @@ class DesktopTests(unittest.TestCase):
             window._auto_caption_worker=None
             window.close()
 
+    def test_recommended_vosk_preset_is_explicit_editable_and_does_not_overwrite_old_settings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            window=MainWindow(store,start_worker=False)
+            self.assertFalse(store.read()['settings']['timeshift_enabled'])
+            dialog=Settings(store.read(),window)
+            self.assertEqual(20,dialog.cc_size.value())
+            self.assertEqual(0,dialog.caption_delay.value())
+            self.assertEqual(0,dialog.caption_video_delay.value())
+            action=dialog.findChild(QPushButton,'applyRecommendedVoskBuffer')
+            self.assertIsNotNone(action)
+            # Opening Settings alone must not enable disk buffering.
+            self.assertFalse(dialog.timeshift_enabled.isChecked())
+            action.click()
+            values=dialog.values()
+            self.assertEqual(20,values['subtitle_size'])
+            self.assertEqual(0,values['auto_caption_delay_ms'])
+            self.assertEqual(5000,values['auto_caption_video_delay_ms'])
+            self.assertTrue(values['timeshift_enabled'])
+            self.assertEqual(4000,values['http_buffer_ms'])  # Preset does not change this.
+            self.assertFalse(store.read()['settings']['timeshift_enabled'])
+            # All recommendations are user-editable before Save.
+            dialog.cc_size.setValue(22)
+            dialog.caption_delay.setValue(250)
+            dialog.caption_video_delay.setValue(7000)
+            overrides=dialog.values()
+            self.assertEqual((22,250,7000),
+                             (overrides['subtitle_size'],overrides['auto_caption_delay_ms'],
+                              overrides['auto_caption_video_delay_ms']))
+            dialog.close()
+            # A later app upgrade / Settings visit must retain preferences.
+            store.update(lambda s:s.update(settings=overrides))
+            later=Settings(store.read(),window)
+            self.assertEqual(22,later.cc_size.value())
+            self.assertEqual(250,later.caption_delay.value())
+            self.assertEqual(7000,later.caption_video_delay.value())
+            self.assertTrue(later.timeshift_enabled.isChecked())
+            later.close()
+            window.close()
+
     def test_settings_pair_only_imported_uk_fast_guides_without_duplicates(self):
         from dizytv.sources import (FREE_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
                                    DEFAULT_GUIDE_URLS)
