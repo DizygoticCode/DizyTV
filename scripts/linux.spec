@@ -10,7 +10,7 @@ a = Analysis(
     datas=[(str(root / 'assets'), 'assets'),
            (str(root / 'vendor' / 'speech'), 'speech'),
            *collect_data_files('tzdata')],
-    hiddenimports=['vlc', 'vosk'],
+    hiddenimports=['vlc', 'vosk', 'dizytv.linux_ace_bootstrap'],
 )
 # ctypes analysis automatically finds system VLC. Ship its Python binding,
 # while resolving both native libraries from the same installation as plugins.

@@ -32,3 +32,5 @@ class LinuxBuildTests(unittest.TestCase):
         with patch.dict(sys.modules, {'PyInstaller.utils.hooks': hooks}):
             result = runpy.run_path(str(spec), init_globals=build)
         self.assertEqual(other, result['coll'])
+        self.assertIn('dizytv.linux_ace_bootstrap',
+                      spec.read_text(encoding='utf-8'))

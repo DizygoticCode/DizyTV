@@ -42,7 +42,13 @@ def main():
         subprocess.run([binary,'-version'],check=True,stdout=subprocess.DEVNULL)
         if not model:
             raise RuntimeError('Packaged Vosk model is unavailable')
-        print('Verified packaged VLC, FFmpeg and Vosk')
+        if sys.platform.startswith('linux'):
+            # Assert the original-vendor opt-in installer is embedded within
+            # the installed .deb's executable, without accessing the network.
+            from dizytv.linux_ace_bootstrap import SHA256, OFFICIAL_URL
+            if len(SHA256)!=64 or not OFFICIAL_URL.startswith('https://download.acestream.media/'):
+                raise RuntimeError('Packaged Linux Ace bootstrap is missing or invalid')
+        print('Verified packaged VLC, FFmpeg, Vosk and optional Linux bootstrap')
         return 0
     from dizytv.desktop import run
     return run(args.data_dir,args.smoke_test)
