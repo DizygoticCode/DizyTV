@@ -4438,9 +4438,15 @@ class MainWindow(QMainWindow):
                 job.get('start',now+1) <= now < job.get('end',0) and
                 ace_request_params(channels.get(job.get('channel_id'),{}).get('stream','')) is not None
                 for job in jobs))
-            if pending:
+            # Hand off even an idle GUI-owned helper when a detached worker
+            # exists: another open DizyTV window may still be viewing it.
+            # The worker performs native-session and PID checks off the Qt
+            # thread. Tests/smoke mode without a worker stop it directly.
+            if pending or self.start_worker:
                 from .outpace import handoff_owned_daemon
-                handoff_owned_daemon(self.store.directory)
+                handed_off=handoff_owned_daemon(self.store.directory)
+                if not pending and not handed_off:
+                    stop_owned_daemon()
             else:
                 stop_owned_daemon()
         super().closeEvent(event)
