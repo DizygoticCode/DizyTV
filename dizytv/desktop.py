@@ -38,6 +38,7 @@ from .caption_sync import CaptionDelayQueue
 from .health_history import HealthHistory
 from .duplicates import duplicate_groups
 from .system_usage import SystemSampler
+from .ui_diagnostics import UiHangMonitor
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -1708,6 +1709,10 @@ class MainWindow(QMainWindow):
         self.light_timer.setInterval(850)
         self.light_timer.timeout.connect(self.pulse_live_light)
         self._startup_layout_pending=True
+        self._ui_hang_monitor=None
+        self._ui_heartbeat_timer=QTimer(self)
+        self._ui_heartbeat_timer.setInterval(1000)
+        self._ui_heartbeat_timer.timeout.connect(self.heartbeat_ui)
         self.setWindowTitle('DizyTV'); self.resize(1150,730)
         self.setMinimumSize(480,360)
         self.setWindowIcon(QIcon(str(ASSETS/'branding/dizytv-logo.png')))
@@ -1745,6 +1750,10 @@ class MainWindow(QMainWindow):
         tools_menu.addAction('Check channel health…',self.open_channel_health)
         tools_menu.addAction('Find duplicate channels…',self.open_duplicate_channels)
         tools_menu.addAction('System usage…',self.open_system_usage)
+        tools_menu.addSeparator()
+        self.ui_diagnostics_action=tools_menu.addAction('Log UI hangs locally (opt-in)')
+        self.ui_diagnostics_action.setCheckable(True)
+        self.ui_diagnostics_action.toggled.connect(self.toggle_ui_diagnostics)
         self.tools_button.setMenu(tools_menu)
         top.addWidget(self.tools_button)
         self.header_scroll=QScrollArea()
@@ -1996,6 +2005,8 @@ class MainWindow(QMainWindow):
         self.status=QLabel('Ready  •  Configure sources and recording storage in Settings');self.status.setObjectName('appStatus');layout.addWidget(self.status)
         self.apply_interface_scale()
         self.load_guide(); self.render_channels(); self.tick()
+        if os.environ.get('DIZYTV_UI_DIAGNOSTICS')=='1':
+            self.ui_diagnostics_action.setChecked(True)
         self.light_timer.start()
         self.clock=QTimer(self); self.clock.timeout.connect(self.tick); self.clock.start(5000)
         self.refresh_clock=QTimer(self); self.refresh_clock.timeout.connect(self.refresh_channels); self.refresh_clock.start(6*3600*1000)
@@ -2005,6 +2016,28 @@ class MainWindow(QMainWindow):
             # Previously cached Ace channels hid newly configured public feeds.
             # Always refresh on startup, retaining cached channels until success.
             QTimer.singleShot(200,self.refresh_channels)
+    def heartbeat_ui(self):
+        if self._ui_hang_monitor is not None:
+            self._ui_hang_monitor.heartbeat()
+
+    def toggle_ui_diagnostics(self,enabled):
+        """Log a Python main-thread stack when the Qt loop stops responding."""
+        if enabled:
+            if self._ui_hang_monitor is not None:
+                return
+            self._ui_hang_monitor=UiHangMonitor(self.store.directory/'diagnostics')
+            self._ui_hang_monitor.start()
+            self._ui_heartbeat_timer.start()
+            self.status.setText('UI hang logging enabled locally: '+
+                                str(self._ui_hang_monitor.path)+
+                                ' — inspect stack paths before sharing.')
+        else:
+            self._ui_heartbeat_timer.stop()
+            if self._ui_hang_monitor is not None:
+                self._ui_hang_monitor.stop()
+                self._ui_hang_monitor=None
+            self.status.setText('UI hang logging disabled. Existing local logs are retained.')
+
     def showEvent(self,event):
         super().showEvent(event)
         if self._startup_layout_pending:
@@ -4144,6 +4177,10 @@ class MainWindow(QMainWindow):
             self.status.setText('Backup restored • choose storage and rearm timers explicitly')
         except (OSError,ValueError) as exc:self.error(str(exc))
     def closeEvent(self,event):
+        self._ui_heartbeat_timer.stop()
+        if self._ui_hang_monitor is not None:
+            self._ui_hang_monitor.stop()
+            self._ui_hang_monitor=None
         # Modeless tools may own timers or queued progressive work. Hiding the
         # main window does not close them, so route shutdown through their
         # cancellation/cleanup handlers before stopping the player.
