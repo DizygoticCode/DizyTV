@@ -133,8 +133,11 @@ class TestTimeshift(unittest.TestCase):
             session.window.append(PACKET*10,10)
             self.assertEqual(3,len(session.window.holdback_entries(1)))
             try:
-                with patch.object(session,'start',return_value='http://127.0.0.1/live.m3u8'):
+                with patch.object(session,'start',return_value='http://127.0.0.1/live.m3u8'), \
+                     patch.object(session,'holdback_url',
+                                  return_value='http://127.0.0.1/holdback.m3u8?ms=1000') as holdback:
                     self.assertIn('holdback.m3u8',session.start_delayed(1))
+                    holdback.assert_called_once_with(1)
             finally:
                 session.close()
 
