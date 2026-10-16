@@ -3,7 +3,7 @@
 This checklist governs the next release after **v0.1.17-alpha**. Do not overwrite
 that published release or trigger a new public build until the applicable
 acceptance criteria are met. Work branches #34, #35 and
-\`wip/complete-dependency-gates\` are **not shipped binaries**.
+`wip/complete-dependency-gates` are **not shipped binaries**.
 
 ## One-install delivery status
 
@@ -16,18 +16,20 @@ acceptance criteria are met. Work branches #34, #35 and
 | Android | Existing bundled libVLC | Android speech integration not implemented | Native offline Vosk not implemented | Original vendor engine remains a separate third-party Android installation and cannot be silently installed by a debug APK |
 
 Linux Ace uses the original exact publisher URL and recorded SHA-256
-\`9b6bbd76a55e5a434641afae3b9cf8e6154ce1cf392152ec3aed5ac265432b2e\`
+`9b6bbd76a55e5a434641afae3b9cf8e6154ce1cf392152ec3aed5ac265432b2e`
 for version 3.2.11 Ubuntu 22.04 amd64/Python 3.10. DizyTV never redistributes
-this tarball, automatically runs \`start-engine\` during installation,
+this tarball, automatically runs `start-engine` during installation,
 changes system services, overwrites pre-existing installations, or accepts
 an off-publisher redirect. The checksum is independently recorded in public
 third-party manifests, **not a publisher signature**; vendor EULA, user
 consent, runtime compatibility and permitted use still apply. Unsupported
 distributions fail safely and can use a trusted separately installed engine.
 
-The .deb additionally bundles original Outpace 0.2.0 on Linux x64, built from upstream pinned commit under AGPL. It is a public-swarm reimplementation, not the original proprietary engine.\n\nThe .deb bootstrap lives in \`dizytv/linux_ace_bootstrap.py\`, included
+The .deb additionally bundles original Outpace 0.2.0 on Linux x64, built from upstream pinned commit under AGPL. It is a public-swarm reimplementation, not the original proprietary engine.
+
+The .deb bootstrap lives in `dizytv/linux_ace_bootstrap.py`, included
 by the main application's **Tools → Set up Ace Stream engine** action.
-It is not a Debian \`postinst\` hook: unattended APT installs and upgrades
+It is not a Debian `postinst` hook: unattended APT installs and upgrades
 must never trigger a third-party network download or P2P executable.
 
 ## Mandatory before merge/public release
