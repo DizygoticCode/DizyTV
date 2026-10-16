@@ -155,7 +155,7 @@ def default_state():
                          'timeshift_max_bytes': 4*1024**3, 'timeshift_dir': '',
                          'ui_scale': 100, 'button_size': 'Normal', 'engine_executable': '', 'guide_scale': 100, 'theme': 'Green',
                          'vlc_decoder': 'Auto', 'http_buffer_ms': 4000,
-                         'subtitles_enabled': True, 'subtitle_size': 28,
+                         'subtitles_enabled': True, 'subtitle_size': 20,
                          'subtitle_colour': 'White', 'subtitle_position': 'Bottom',
                          'subtitle_font': 'Sans', 'subtitle_language': 'Auto',
                          'auto_caption_model_dir': '', 'auto_caption_ffmpeg_path': '',
