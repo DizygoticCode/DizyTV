@@ -3234,8 +3234,7 @@ class MainWindow(QMainWindow):
                 return
             self.timeshift_task=None
             self.play_url(local_url)
-            self.timeshift_lag=(min(requested_delay_ms/1000,session.window.latest_seconds())
-                                if requested_delay_ms else 0)
+            self.timeshift_lag=requested_delay_ms/1000 if requested_delay_ms else 0
             self.seek_notice.setText('Temporary on-device timeshift is recording; up to '+str(session.window.minutes)+
                                      ' minutes'+(' • video ~'+str(round(self.timeshift_lag,1))+'s behind LIVE for Vosk sync'
                                                  if self.timeshift_lag>0 else ''))
@@ -3266,12 +3265,17 @@ class MainWindow(QMainWindow):
                                 'then restart the channel. No stream was interrupted.')
             return
         available=self.timeshift.window.latest_seconds()
-        if target>0 and available<1:
-            self.status.setText('Timeshift buffer is still filling; try again shortly.')
+        # Two complete segments behind the held-back edge give libVLC enough
+        # margin to continue playing while new HLS parts appear.
+        needed=target/1000 + 2*4.0
+        if target>0 and available<needed:
+            self.status.setText('Timeshift buffer has '+str(round(available,1))+
+                                's; needs about '+str(round(needed,1))+
+                                's for this video delay. Try again shortly.')
             return
-        actual=min(target/1000,available) if target>0 else 0.0
+        actual=target/1000 if target>0 else 0.0
         try:
-            target_url=(self.timeshift.replay_url(actual) if actual>=1 else
+            target_url=(self.timeshift.holdback_url(actual) if actual>0 else
                         self.timeshift.live_url())
             # Do not stop Vosk while retuning ONLY the current DVR replay URL.
             self.play_url(target_url,preserve_captions=True)
