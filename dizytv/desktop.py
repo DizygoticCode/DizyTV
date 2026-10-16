@@ -3833,8 +3833,10 @@ class MainWindow(QMainWindow):
             self.status.setText('Connecting to Ace Engine and preparing channel; waiting for available peers…')
             def prepare():
                 ensure_ready(self.state['settings']['engine_url'],
-                             executable_path=self.state['settings'].get('engine_executable',''))
-                return start_playback_session(ch['stream'],self.state['settings']['engine_url'])
+                             executable_path=self.state['settings'].get('engine_executable',''),
+                             directory=self.store.directory)
+                return start_playback_session(ch['stream'],self.state['settings']['engine_url'],
+                                              directory=self.store.directory)
             task=Task(prepare)
             self.engine_task=task
             def ready(playback_url):
