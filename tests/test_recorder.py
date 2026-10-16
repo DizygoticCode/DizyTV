@@ -45,9 +45,9 @@ class RecorderTests(unittest.TestCase):
             self.assertNotIn('/ace/getstream',uri)
             start.assert_called_once_with(
                 'http://127.0.0.1:6878',
-                executable_path='/opt/vendor/start-engine')
+                executable_path='/opt/vendor/start-engine',directory=None)
             prepare.assert_called_once_with(
-                'acestream://'+cid,'http://127.0.0.1:6878')
+                'acestream://'+cid,'http://127.0.0.1:6878',directory=None)
         with patch('dizytv.engine.ensure_ready') as start:
             self.assertEqual('https://example.com/clear.ts',
                 recording_playback_url(
@@ -60,7 +60,7 @@ class RecorderTests(unittest.TestCase):
              patch.object(outpace,'stop_idle_owned_daemon') as stop, \
              patch.object(outpace,'reap_handed_off_daemon') as reap:
             release_recorder_outpace()
-            stop.assert_called_once_with()
+            stop.assert_called_once_with(directory=None)
             reap.assert_not_called()
             release_recorder_outpace(Path('/tmp/dizytv-fixture'))
             reap.assert_called_once_with(Path('/tmp/dizytv-fixture'))
