@@ -126,7 +126,7 @@ def engine_diagnostics(address,timeout=3):
                 '. Check the engine, its HTTP port and local firewall.')
 
 
-def start_playback_session(stream, address, timeout=20):
+def start_playback_session(stream, address, timeout=20, directory=None):
     """Ask the engine for the actual VLC URL, not just an open TCP port.
 
     Ace Engine's documented format=json middleware reports a playback_url or
@@ -136,7 +136,10 @@ def start_playback_session(stream, address, timeout=20):
     if sys.platform=='darwin' or sys.platform.startswith('linux'):
         host,port=engine_endpoint(address)
         if host in ('127.0.0.1','localhost','::1') and port==6878:
-            from .outpace import api_ready, playback_url
+            from .outpace import api_ready, playback_url, register_playback_intent
+            # Reserve the gap between preparing a native URL and VLC opening
+            # it; an empty /streams listing is not enough to reap the daemon.
+            register_playback_intent(directory)
             if api_ready(address):
                 return playback_url(stream,address)
     params=ace_request_params(stream)
@@ -195,13 +198,16 @@ def start_playback_session(stream, address, timeout=20):
     return http_url(playback)
 
 
-def ensure_ready(address, startup_seconds=25, executable_path=''):
+def ensure_ready(address, startup_seconds=25, executable_path='', directory=None):
     """Use existing engine, or start a *trusted local* installed launcher.
 
     Remote engines are connect-only. Never auto-install, auto-download, or
     execute an arbitrary playlist URL as a local process.
     """
     host,port=engine_endpoint(address)
+    if (sys.platform=='darwin' or sys.platform.startswith('linux')) and host in ('127.0.0.1','localhost','::1') and port==6878:
+        from .outpace import register_playback_intent
+        register_playback_intent(directory)
     if sys.platform=='darwin' and host in ('127.0.0.1','localhost','::1') and port==6878:
         from .outpace import ensure_ready as ensure_outpace
         return ensure_outpace(address,startup_seconds)
