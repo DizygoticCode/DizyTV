@@ -404,6 +404,30 @@ class RollingTimeshift:
             self.close()
             raise
 
+    def start_delayed(self, seconds_back=0, timeout=18):
+        """Start local DVR, optionally let it fill before exposing replay video.
+
+        The delay keeps audio+video together. Network/Vosk recognition may still
+        have a different live-edge position, so this is manual calibration, not
+        claimed media-PTS automatic synchronization.
+        """
+        if not isinstance(seconds_back,(int,float)) or isinstance(seconds_back,bool) or not 0 <= seconds_back <= 30:
+            raise ValueError('Caption video delay must be 0–30 seconds')
+        url=self.start(timeout=timeout)
+        if seconds_back==0:
+            return url
+        deadline=time.monotonic()+min(45,max(15,seconds_back+12))
+        while self.window.latest_seconds()<seconds_back and not self.stop_event.is_set():
+            if time.monotonic()>=deadline:
+                break
+            self.stop_event.wait(0.25)
+        if self.stop_event.is_set():
+            raise RuntimeError('Timeshift was cancelled before delayed playback')
+        available=self.window.latest_seconds()
+        if available<1:
+            return url
+        return self.replay_url(min(float(seconds_back),available))
+
     def close(self):
         self.stop_event.set()
         if self._server:
