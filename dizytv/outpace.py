@@ -139,7 +139,7 @@ def reap_handed_off_daemon(directory, address='http://127.0.0.1:6878'):
         channels = {c['id']: c for c in state['channels']}
         for job in state['jobs']:
             if (job.get('status') in ('queued', 'starting', 'recording') and
-                    job.get('start', now + 10) <= now + 5 < job.get('end', 0) and
+                    job.get('start', now + 10) <= now + 5 and job.get('end', 0) > now and
                     ace_request_params(channels.get(job.get('channel_id'), {}).get('stream', '')) is not None):
                 return False
         base = local_api_address(address)
