@@ -5,6 +5,7 @@ import re
 import os
 import sys
 import time
+import threading
 from pathlib import Path
 from zoneinfo import available_timezones
 
@@ -32,7 +33,8 @@ from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORL
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
                         subtitle_tracks, suggested_subtitle, external_subtitle_path)
 from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_text, PLAYBACK_USER_AGENT,
-                            LANGUAGE_MODELS, installed_language_model, install_language_model)
+                            LANGUAGE_MODELS, installed_language_model, install_language_model, remove_language_model,
+                            managed_language_model)
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
 from .health_history import HealthHistory
 from .duplicates import duplicate_groups
@@ -357,6 +359,7 @@ def detected_zone():
 class Signals(QObject):
     success = Signal(object)
     failure = Signal(str)
+    progress = Signal(int,int)
 
 
 class Task(QRunnable):
@@ -840,11 +843,22 @@ class Settings(QDialog):
         model_actions_layout.setContentsMargins(0,0,0,0)
         self.model_download=QPushButton('Download selected language model')
         self.model_download.clicked.connect(self.download_caption_language)
+        self.model_cancel=QPushButton('Cancel download')
+        self.model_cancel.setEnabled(False)
+        self.model_cancel.clicked.connect(self.cancel_caption_download)
+        self.model_remove=QPushButton('Remove downloaded model')
+        self.model_remove.clicked.connect(self.remove_caption_language)
         self.model_state=QLabel('')
         self.model_state.setWordWrap(True)
         model_actions_layout.addWidget(self.model_download)
-        model_actions_layout.addWidget(self.model_state,1)
+        model_actions_layout.addWidget(self.model_cancel)
+        model_actions_layout.addWidget(self.model_remove)
         form.addRow('Optional Vosk languages',model_actions)
+        form.addRow('Language model status',self.model_state)
+        self.model_progress=QProgressBar()
+        self.model_progress.setVisible(False)
+        self.model_progress.setRange(0,100)
+        form.addRow('Language download progress',self.model_progress)
         self.caption_language.currentTextChanged.connect(self.refresh_caption_language)
         self.refresh_caption_language()
         self.auto_model_path=QLineEdit(self.original.get('auto_caption_model_dir',''))
@@ -858,6 +872,8 @@ class Settings(QDialog):
         model_layout.addWidget(self.auto_model_path,1)
         model_layout.addWidget(model_btn)
         form.addRow('Offline auto-caption model',model_row)
+        self.auto_model_path.textChanged.connect(self.refresh_caption_language)
+        self.refresh_caption_language()
         self.auto_ffmpeg_path=QLineEdit(self.original.get('auto_caption_ffmpeg_path',''))
         self.auto_ffmpeg_path.setObjectName('autoCaptionFFmpegPath')
         self.auto_ffmpeg_path.setReadOnly(True)
@@ -993,30 +1009,86 @@ class Settings(QDialog):
     def refresh_caption_language(self,*_):
         language=self.caption_language.currentText()
         installed=installed_language_model(language)
-        if language=='English (bundled)' and installed is not None:
-            self.model_download.setEnabled(False)
-            self.model_state.setText('English model is installed.')
+        busy=getattr(self,'download_task',None) is not None
+        selected=(self.auto_model_path.text() if hasattr(self,'auto_model_path')
+                  else self.original.get('auto_caption_model_dir',''))
+        managed=managed_language_model(language, protected_path=selected)
+        self.caption_language.setEnabled(not busy)
+        self.model_download.setEnabled(not busy and installed is None)
+        self.model_cancel.setEnabled(busy and
+                                     getattr(self,'model_cancel_event',None) is not None and
+                                     not self.model_cancel_event.is_set())
+        self.model_remove.setEnabled(not busy and managed is not None)
+        if busy:
+            return
+        if managed is not None:
+            self.model_state.setText('Installed • '+language+' (DizyTV-managed download).')
         elif installed is not None:
-            self.model_download.setEnabled(False)
-            self.model_state.setText('Installed • '+language)
+            self.model_state.setText('Installed • '+language+
+                                     ' (not eligible for removal: custom/external or bundled model).')
         else:
-            self.model_download.setEnabled(True)
-            self.model_state.setText('Not installed • download once to your user data folder.')
+            self.model_state.setText('Not installed • select Download to add '+language+
+                                     ' in DizyTV Settings. No speech data is sent to a cloud service.')
+
+    def update_caption_model_progress(self,received,total):
+        if total>0:
+            self.model_progress.setRange(0,100)
+            self.model_progress.setValue(min(100,round(received*100/total)))
+            self.model_state.setText('Downloading '+self.caption_language.currentText()+
+                                     ' • '+str(round(received/1048576,1))+' / '+
+                                     str(round(total/1048576,1))+' MiB')
+        else:
+            self.model_progress.setRange(0,0)
+            self.model_state.setText('Downloading '+self.caption_language.currentText()+
+                                     ' • '+str(round(received/1048576,1))+' MiB')
+
+    def cancel_caption_download(self):
+        event=getattr(self,'model_cancel_event',None)
+        if event is not None:
+            event.set()
+            self.model_cancel.setEnabled(False)
+            self.model_state.setText('Cancelling language download…')
+
+    def remove_caption_language(self):
+        language=self.caption_language.currentText()
+        if getattr(self,'download_task',None) is not None or language=='English (bundled)':
+            return
+        if QMessageBox.question(self,'Remove speech model',
+                'Delete the downloaded '+language+' model from this device? '
+                'Other downloaded languages and external model folders will not be touched.') != QMessageBox.Yes:
+            return
+        try:
+            removed=remove_language_model(language, protected_path=self.auto_model_path.text())
+        except (OSError,ValueError) as exc:
+            self.model_state.setText('Could not remove model: '+str(exc)[:140])
+            return
+        self.refresh_caption_language()
+        if removed:self.model_state.setText(language+' model removed. You can download it again.')
 
     def download_caption_language(self):
         language=self.caption_language.currentText()
         if getattr(self,'download_task',None) is not None:return
-        self.model_download.setEnabled(False)
-        self.model_state.setText('Downloading '+language+' from official Vosk…')
-        task=Task(lambda:install_language_model(language))
+        cancel=threading.Event()
+        self.model_cancel_event=cancel
+        task=Task(lambda:install_language_model(
+            language,progress=lambda received,total:task.signals.progress.emit(received,total),
+            cancel=cancel))
         self.download_task=task
-        def done(path):
+        self.model_progress.setVisible(True)
+        self.model_progress.setRange(0,0)
+        self.model_state.setText('Downloading '+language+' directly from official Vosk…')
+        self.refresh_caption_language()
+        def complete():
             self.download_task=None
+            self.model_cancel_event=None
+            self.model_progress.setVisible(False)
             self.refresh_caption_language()
+        def done(path):
+            complete()
         def failed(message):
-            self.download_task=None
-            self.model_state.setText('Download failed: '+message[:140])
-            self.model_download.setEnabled(True)
+            complete()
+            self.model_state.setText(('Cancelled: ' if cancel.is_set() else 'Download failed: ')+message[:140])
+        task.signals.progress.connect(self.update_caption_model_progress)
         task.signals.success.connect(done)
         task.signals.failure.connect(failed)
         QThreadPool.globalInstance().start(task)
