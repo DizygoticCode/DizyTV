@@ -232,8 +232,9 @@ def playback_url(stream, address):
     """Use the supported native stream route; avoid experimental /ace/* APIs.
 
     An unrecognised selector fails closed. Outpace's native API resolves
-    content IDs as cid:<id>. An infohash works only if Outpace already holds
-    a verified descriptor for it.
+    content IDs as cid:<id>. A bare infohash is NOT a content ID: the native
+    API rejects it on a fresh daemon unless a descriptor was already resolved.
+    Direct users to select a real content-ID source or their original engine.
     """
     from .core import ace_request_params, http_url
     base = local_api_address(address)
@@ -243,10 +244,13 @@ def playback_url(stream, address):
     if 'id' in params and re.fullmatch(r'[a-fA-F0-9]{40}', params['id']):
         identifier = 'cid:' + params['id']
     elif 'infohash' in params and re.fullmatch(r'[a-fA-F0-9]{40}', params['infohash']):
-        identifier = params['infohash']
+        raise RuntimeError(
+            'This Ace channel provides only a transport infohash. Bundled Outpace '
+            'cannot resolve bare infohashes without a verified descriptor. '
+            'Try a saved content-ID source or configure an original Ace engine.')
     else:
-        raise RuntimeError('Outpace native playback needs a 40-character content ID or '
-                           'a verified transport descriptor. This channel cannot use its native route.')
+        raise RuntimeError('Outpace native playback needs a 40-character content ID. '
+                           'This channel cannot use its native route.')
     return http_url(base + '/streams/ace/' + quote(identifier, safe=':'))
 
 
