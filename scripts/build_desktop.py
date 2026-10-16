@@ -67,10 +67,9 @@ if os.name in ('nt',) or sys.platform=='darwin':
     if os.name=='nt':
         expected=(private_vlc/'libvlc.dll', private_vlc/'libvlccore.dll', private_vlc/'plugins')
     else:
-        contents=private_vlc/'VLC.app'/'Contents'
-        expected=(contents/'MacOS'/'lib'/'libvlc.dylib',
-                  contents/'MacOS'/'lib'/'libvlccore.dylib',
-                  contents/'MacOS')
+        expected=(private_vlc/'lib'/'libvlc.dylib',
+                  private_vlc/'lib'/'libvlccore.dylib',
+                  private_vlc/'plugins')
     if any(not p.exists() for p in expected):
         raise RuntimeError('Native private libVLC missing: refusing an incomplete installer')
     args += ['--add-data',str(private_vlc)+os.pathsep+'vlc']

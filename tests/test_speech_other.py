@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 import zipfile
@@ -24,6 +25,7 @@ class SpeechCrossPlatformTests(unittest.TestCase):
                 stage_model(source,path/'speech')
 
 
+    @unittest.skipIf(os.name=='nt', 'Mac-only wheel staging deliberately refuses Windows')
     def test_macos_ffmpeg_must_come_from_pinned_wheel_not_path_override(self):
         import sys
         import types

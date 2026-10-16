@@ -226,9 +226,14 @@ jobs:
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
           dist/DizyTV.app/Contents/MacOS/DizyTV --verify-native-components
-          test -s dist/DizyTV.app/Contents/Frameworks/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib || \
-            test -s dist/DizyTV.app/Contents/Resources/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib || \
-            test -s dist/DizyTV.app/Contents/MacOS/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib
+          # Check private playback-only libVLC, not a nested full VLC.app.
+          test -s dist/DizyTV.app/Contents/Frameworks/vlc/lib/libvlc.dylib || \
+            test -s dist/DizyTV.app/Contents/Resources/vlc/lib/libvlc.dylib || \
+            test -s dist/DizyTV.app/Contents/MacOS/vlc/lib/libvlc.dylib
+          if find dist/DizyTV.app -type d \( -name VLC.app -o -name Breakpad.framework \) -print -quit | grep -q .; then
+            echo 'Full VLC GUI/Breakpad framework incorrectly staged into the signed DizyTV bundle' >&2
+            exit 1
+          fi
           test -x dist/DizyTV.app/Contents/MacOS/speech/ffmpeg || \
             test -x dist/DizyTV.app/Contents/Resources/speech/ffmpeg || \
             test -x dist/DizyTV.app/Contents/Frameworks/speech/ffmpeg

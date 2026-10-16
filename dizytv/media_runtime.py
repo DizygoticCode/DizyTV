@@ -15,14 +15,10 @@ def runtime_paths(bundle=None, platform=None):
         dll = folder / "libvlc.dll"
         modules = folder / "plugins"
     elif plat == "darwin":
-        contents = root / "vlc" / "VLC.app" / "Contents"
-        folder = contents / "MacOS" / "lib"
+        # Media-only VLC 3.0.24 runtime, not a nested full VLC.app.
+        folder = root / "vlc" / "lib"
         dll = folder / "libvlc.dylib"
-        modules = contents / "MacOS" / "plugins"
-        if not modules.is_dir():
-            modules = contents / "MacOS" / "modules"
-        if not modules.is_dir():
-            modules = contents / "Frameworks" / "plugins"
+        modules = root / "vlc" / "plugins"
     else:
         return None
     if not dll.is_file() or not modules.is_dir():

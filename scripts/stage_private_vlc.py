@@ -115,6 +115,10 @@ def stage_windows_zip(archive, destination):
 def stage_macos_dmg(archive, destination):
     if sys.platform != "darwin":
         raise RuntimeError("Mount macOS VLC DMGs only on a native Mac")
+    # VLC.app is a *complete GUI application*, containing Sparkle, Breakpad,
+    # and several signed nested frameworks. Nesting it inside DizyTV.app
+    # makes PyInstaller's ad-hoc codesign fail (Breakpad.framework invalid).
+    # Only stage the original playback libraries/modules and their data.
     with tempfile.TemporaryDirectory(prefix="dizytv-vlc-mount-") as folder:
         mount = Path(folder) / "mount"
         mount.mkdir()
@@ -122,27 +126,53 @@ def stage_macos_dmg(archive, destination):
                         "-mountpoint", str(mount), str(archive)],
                        check=True, stdout=subprocess.DEVNULL)
         try:
-            original = mount / "VLC.app"
-            lib = original / "Contents" / "MacOS" / "lib" / "libvlc.dylib"
-            if not lib.is_file():
-                raise RuntimeError("Official VLC DMG has no libvlc")
-            # Copy the upstream private bundle intact: dependent dylibs,
-            # plugins, module cache, codesign context and licence notices.
-            shutil.copytree(original, destination / "VLC.app", symlinks=True)
+            original = mount / "VLC.app" / "Contents"
+            macos = original / "MacOS"
+            library = macos / "lib"
+            if not (library / "libvlc.dylib").is_file() or not (
+                    library / "libvlccore.dylib").is_file():
+                raise RuntimeError("Official VLC DMG has no complete libVLC libraries")
+            plugins = next((p for p in (
+                macos / "plugins", macos / "modules",
+                original / "Frameworks" / "plugins") if p.is_dir()), None)
+            if plugins is None:
+                raise RuntimeError("Official VLC DMG has no media plugins")
+            # Preserve the complete original dylib and media plugin trees, but
+            # do not import nested VLC.app GUI executables or frameworks.
+            shutil.copytree(library, destination / "lib", symlinks=False)
+            shutil.copytree(plugins, destination / "plugins", symlinks=False)
+            if (macos / "share").is_dir():
+                shutil.copytree(macos / "share", destination / "share", symlinks=False)
+            source_notices = original / "Resources"
+            legal = destination / "legal"
+            legal.mkdir(parents=True)
+            if source_notices.is_dir():
+                for notice in source_notices.iterdir():
+                    if notice.is_file() and notice.name.lower().startswith(
+                            ("copying", "license", "licence", "authors")):
+                        shutil.copy2(notice, legal / notice.name)
+            (legal / "UPSTREAM.txt").write_text(
+                "Original unmodified playback libraries and plugins from "
+                "VideoLAN VLC " + VERSION + " official universal macOS DMG. "
+                "Licences and corresponding source: "
+                "https://www.videolan.org/vlc/ and "
+                "https://download.videolan.org/pub/videolan/vlc/" + VERSION + "/\\n",
+                encoding="utf-8")
         finally:
             subprocess.run(["hdiutil", "detach", str(mount)],
                            check=True, stdout=subprocess.DEVNULL)
-    private = destination / "VLC.app" / "Contents" / "MacOS"
-    if not (private / "lib" / "libvlccore.dylib").is_file():
-        raise RuntimeError("VLC macOS bundle missing libvlccore")
-    architectures=subprocess.run(
-        ["lipo", "-archs", str(private / "lib" / "libvlc.dylib")],
+    dylib = destination / "lib" / "libvlc.dylib"
+    if not dylib.is_file() or not (destination / "lib" / "libvlccore.dylib").is_file():
+        raise RuntimeError("Staged VLC macOS libraries are missing")
+    if not any((destination / "plugins").rglob("*.dylib")):
+        raise RuntimeError("Staged VLC macOS plugin directory is empty")
+    architectures = subprocess.run(
+        ["lipo", "-archs", str(dylib)],
         check=True, capture_output=True, text=True).stdout.split()
     if not {"arm64", "x86_64"}.issubset(set(architectures)):
         raise RuntimeError("Official universal VLC does not contain both Mac architectures")
-    if not any((private / location).is_dir() for location in ("plugins", "modules")) and not (
-            private.parent / "Frameworks" / "plugins").is_dir():
-        raise RuntimeError("VLC macOS plugin directory is missing")
+    if (destination / "VLC.app").exists() or any(destination.rglob("*.framework")):
+        raise RuntimeError("VLC GUI app/framework mistakenly embedded in DizyTV")
 
 def main():
     if os.name == "nt":

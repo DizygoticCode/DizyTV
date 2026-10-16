@@ -35,10 +35,10 @@ class PrivateVLCTests(unittest.TestCase):
     def test_mac_runtime_points_to_nested_original_VLC_app(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
-            lib=root/'vlc'/'VLC.app'/'Contents'/'MacOS'/'lib'
+            lib=root/'vlc'/'lib'
             lib.mkdir(parents=True)
             (lib/'libvlc.dylib').write_bytes(b'fixture')
-            plugins=lib.parent/'plugins'
+            plugins=root/'vlc'/'plugins'
             plugins.mkdir()
             self.assertEqual(runtime_paths(root,'darwin'),(lib/'libvlc.dylib',plugins))
 
