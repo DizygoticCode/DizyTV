@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import zipfile
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 # Keep the caption audio client identical to VLC's working HTTP identity.
@@ -42,6 +43,7 @@ LANGUAGE_MODELS = {
 }
 MAX_MODEL_ZIP_BYTES = 100 * 1024 * 1024
 MAX_MODEL_EXPANDED_BYTES = 400 * 1024 * 1024
+MANAGED_MODEL_MARKER = '.dizytv-vosk-install.json'
 
 
 def user_models_directory():
@@ -65,7 +67,60 @@ def installed_language_model(language, root=None):
     return model if (model/'am').is_dir() and (model/'conf').is_dir() else None
 
 
-def install_language_model(language, root=None, opener=urlopen):
+
+def managed_language_model(language, root=None, protected_path=''):
+    """Return a model only when this app installed it and no custom path uses it."""
+    if language not in LANGUAGE_MODELS or language == 'English (bundled)':
+        return None
+    folder = (Path(root) if root else user_models_directory()).resolve()
+    target = folder / LANGUAGE_MODELS[language]
+    if target.is_symlink() or not target.is_dir() or target.resolve().parent != folder:
+        return None
+    if protected_path:
+        selected = Path(protected_path).expanduser().resolve()
+        if selected == target or target in selected.parents:
+            return None
+    marker = target / MANAGED_MODEL_MARKER
+    if marker.is_symlink() or not marker.is_file():
+        return None
+    try:
+        metadata = json.loads(marker.read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if metadata != {'installer': 'DizyTV', 'version': 1,
+                    'language': language, 'model': LANGUAGE_MODELS[language]}:
+        return None
+    return target
+
+
+def remove_language_model(language, root=None, protected_path=''):
+    """Remove only a proven DizyTV download; unpublish it before recursive cleanup."""
+    if language not in LANGUAGE_MODELS or language == 'English (bundled)':
+        raise ValueError('The default English model cannot be removed here')
+    folder = (Path(root) if root else user_models_directory()).resolve()
+    target = folder / LANGUAGE_MODELS[language]
+    if target.is_symlink() or target.resolve().parent != folder:
+        raise ValueError('Refusing to remove a model outside DizyTV user storage')
+    if not target.exists():
+        return False
+    if managed_language_model(language, folder, protected_path) is None:
+        raise ValueError('Not a managed download, or selected as an external caption model')
+    if any(item.is_symlink() for item in target.rglob('*')):
+        raise ValueError('Refusing to remove a language model containing links')
+
+    # A failed rename leaves the original model complete. A subsequent cleanup
+    # error may leave a private trash folder, but never a half-installed model
+    # at the public, selected language path.
+    trash = Path(tempfile.mkdtemp(prefix='.vosk-trash-', dir=folder))
+    try:
+        os.replace(target, trash / target.name)
+    except OSError:
+        trash.rmdir()
+        raise
+    shutil.rmtree(trash)
+    return True
+
+def install_language_model(language, root=None, opener=urlopen, progress=None, cancel=None):
     """Download exactly one official small model, with bounded safe extraction.
 
     No user-supplied URL, archive traversal, links, ZIP bombs or partially
@@ -81,23 +136,43 @@ def install_language_model(language, root=None, opener=urlopen):
     if existing is not None:return str(existing)
     folder.mkdir(parents=True,exist_ok=True)
     url='https://alphacephei.com/vosk/models/'+model_name+'.zip'
+    if cancel is not None and cancel.is_set():
+        raise ValueError('Language model download cancelled')
     with tempfile.TemporaryDirectory(prefix='.vosk-download-',dir=folder) as temporary:
         staging=Path(temporary)
         archive=staging/'model.zip'
         request=Request(url,headers={'User-Agent':'DizyTV/0.1'})
         with opener(request,timeout=35) as response, archive.open('wb') as output:
             # Reject unexpected cross-host or insecure redirects.
-            final=response.geturl()
-            if not final.startswith('https://alphacephei.com/vosk/models/'):
-                raise ValueError('Model download redirected away from the official Vosk host')
+            final=urlsplit(response.geturl())
+            if (final.scheme != 'https' or final.hostname != 'alphacephei.com'
+                    or final.port is not None or
+                    final.path != '/vosk/models/'+model_name+'.zip' or
+                    final.username or final.password):
+                raise ValueError('Model download redirected away from the official Vosk file')
+            length = getattr(response, 'headers', None)
+            try:
+                expected = int(length.get('Content-Length', 0)) if length else 0
+            except (ValueError, TypeError):
+                expected = 0
+            if expected > MAX_MODEL_ZIP_BYTES:
+                raise ValueError('Speech model download exceeds the size limit')
             total=0
+            if progress is not None:progress(0, expected)
             while True:
+                if cancel is not None and cancel.is_set():
+                    raise ValueError('Language model download cancelled')
                 chunk=response.read(128*1024)
                 if not chunk:break
                 total+=len(chunk)
                 if total>MAX_MODEL_ZIP_BYTES:
                     raise ValueError('Speech model download exceeds the size limit')
                 output.write(chunk)
+                if progress is not None:progress(total, expected)
+            if expected and total != expected:
+                raise ValueError('Speech model download was incomplete')
+        if cancel is not None and cancel.is_set():
+            raise ValueError('Language model download cancelled')
         with zipfile.ZipFile(archive) as zipped:
             infos=zipped.infolist()
             if len(infos)>5000 or sum(i.file_size for i in infos)>MAX_MODEL_EXPANDED_BYTES:
@@ -111,11 +186,19 @@ def install_language_model(language, root=None, opener=urlopen):
                         or info.flag_bits & 0x1
                         or (info.external_attr>>16)&0o170000==0o120000):
                     raise ValueError('Speech model contains an unsafe archive entry')
+            if cancel is not None and cancel.is_set():
+                raise ValueError('Language model download cancelled')
             extraction=staging/'extracted'
             zipped.extractall(extraction)
+        if cancel is not None and cancel.is_set():
+            raise ValueError('Language model download cancelled')
         candidate=extraction/model_name
         if not (candidate/'am').is_dir() or not (candidate/'conf').is_dir():
             raise ValueError('Downloaded Vosk model is missing acoustic/configuration files')
+        (candidate/MANAGED_MODEL_MARKER).write_text(json.dumps({
+            'installer': 'DizyTV', 'version': 1,
+            'language': language, 'model': model_name,
+        }), encoding='utf-8')
         target=folder/model_name
         if target.exists():
             if installed_language_model(language,folder) is not None:return str(target)
