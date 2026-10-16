@@ -188,6 +188,7 @@ class TestTimeshift(unittest.TestCase):
 
     def test_socket_created_during_close_is_not_leaked(self):
         """A rapid channel switch can cancel HTTP server construction itself."""
+        import time
         from threading import Event, Thread
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as root:
