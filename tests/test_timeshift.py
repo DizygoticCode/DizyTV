@@ -39,6 +39,65 @@ class TestTimeshift(unittest.TestCase):
             self.assertEqual(12,manifest.count('#EXTINF:'))
             w.close()
 
+    def test_moving_holdback_excludes_new_segments_and_catches_up_continuously(self):
+        with tempfile.TemporaryDirectory() as root:
+            window=RollingWindow(root,free=lambda:1024**4)
+            for _ in range(5):
+                window.append(PACKET*10,4)
+            held=window.playlist(holdback_seconds=5)
+            self.assertIn('s/2.ts',held)
+            self.assertNotIn('s/3.ts',held)
+            self.assertNotIn('s/4.ts',held)
+            self.assertEqual(3,held.count('#EXTINF:'))
+            window.append(PACKET*10,4)
+            # A new cached segment advances the held-back edge by one piece:
+            # it doesn't accidentally rewind from an old fixed seq.
+            later=window.playlist(holdback_seconds=5)
+            self.assertIn('s/3.ts',later)
+            self.assertNotIn('s/4.ts',later)
+            self.assertNotIn('s/5.ts',later)
+            self.assertEqual('',window.playlist(holdback_seconds=30))
+            with self.assertRaises(ValueError):
+                window.playlist(holdback_seconds=-1)
+            window.close()
+
+    def test_holdback_loopback_url_enforces_bounded_delay_and_no_public_access(self):
+        from http.server import ThreadingHTTPServer
+        from threading import Thread
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='holdback-token')
+            for _ in range(6):
+                session.window.append(PACKET*10,4)
+            session._server=ThreadingHTTPServer(('127.0.0.1',0),session._handler())
+            Thread(target=session._server.serve_forever,daemon=True).start()
+            try:
+                with urlopen(session.holdback_url(5)) as response:
+                    manifest=response.read().decode()
+                self.assertIn('s/3.ts',manifest)
+                self.assertNotIn('s/4.ts',manifest)
+                with self.assertRaises(Exception):
+                    urlopen(session.base_url+'holdback.m3u8?ms=50001')
+                with self.assertRaises(ValueError):
+                    session.holdback_url(31)
+            finally:
+                session.close()
+
+    def test_start_delayed_uses_reused_buffer_not_second_capture_engine(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as root:
+            session=RollingTimeshift('https://example.com/channel.ts',root,
+                                     session_id='holdback-start')
+            try:
+                with patch.object(session,'start',return_value='http://127.0.0.1/live.m3u8') as start, \
+                     patch.object(session.window,'latest_seconds',return_value=20), \
+                     patch.object(session,'holdback_url',return_value='http://127.0.0.1/holdback.m3u8') as held:
+                    self.assertEqual('http://127.0.0.1/holdback.m3u8',session.start_delayed(5))
+                    start.assert_called_once()
+                    held.assert_called_once_with(5)
+            finally:
+                session.close()
+
     def test_free_space_reserve_blocks_more_data(self):
         with tempfile.TemporaryDirectory() as path:
             w=RollingWindow(path, free=lambda:1024, reserve_bytes=1024**3)
