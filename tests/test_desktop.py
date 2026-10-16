@@ -642,6 +642,27 @@ class DesktopTests(unittest.TestCase):
                                            store.read()['settings']['button_size']))
             w.close()
 
+    def test_sidebar_heights_shrink_after_switch_from_large_to_compact(self):
+        from PySide6.QtWidgets import QComboBox
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda state:state['settings'].update(
+                ui_scale=150,button_size='Large'))
+            w=MainWindow(store,start_worker=False)
+            w.resize(950,600)
+            w.show()
+            for _ in range(3):self.app.processEvents()
+            large=[x.minimumHeight() for x in w.sidebar.findChildren(QComboBox)]
+            self.assertTrue(large)
+            w.state['settings'].update(ui_scale=80,button_size='Compact')
+            w.apply_interface_scale()
+            for _ in range(3):self.app.processEvents()
+            compact=[x.minimumHeight() for x in w.sidebar.findChildren(QComboBox)]
+            self.assertEqual(len(large),len(compact))
+            self.assertTrue(all(smaller<=bigger for smaller,bigger in zip(compact,large)))
+            self.assertTrue(any(smaller<bigger for smaller,bigger in zip(compact,large)))
+            w.close()
+
     def test_modern_streaming_skin_removes_slider_backgrounds_and_keeps_small_window(self):
         from dizytv.desktop import desktop_style
         for theme in ('Green','Dark','Light'):
