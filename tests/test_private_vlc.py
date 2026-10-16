@@ -51,9 +51,13 @@ class PrivateVLCTests(unittest.TestCase):
                 z.writestr('vlc-3.0.24/libvlccore.dll',b'vlccore')
                 z.writestr('vlc-3.0.24/plugins/codec/codec.dll',b'module')
                 z.writestr('vlc-3.0.24/COPYING.txt',b'licence')
+                z.writestr('vlc-3.0.24/lua/http/index.html',b'unneeded GUI')
+                z.writestr('vlc-3.0.24/plugins/plugins.dat',b'plugin cache')
             stage_windows_zip(archive,root/'install')
             self.assertTrue((root/'install'/'plugins'/'codec'/'codec.dll').exists())
             self.assertTrue((root/'install'/'COPYING.txt').exists())
+            self.assertTrue((root/'install'/'plugins'/'plugins.dat').exists())
+            self.assertFalse((root/'install'/'lua'/'http'/'index.html').exists())
             with zipfile.ZipFile(archive,'a') as z:
                 z.writestr('vlc-3.0.24/../bad.txt',b'bad')
             with self.assertRaisesRegex(RuntimeError,'Unsafe'):

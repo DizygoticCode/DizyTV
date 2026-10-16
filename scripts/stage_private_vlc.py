@@ -87,10 +87,25 @@ def stage_windows_zip(archive, destination):
             relative = Path(*parts[1:])
             if not relative.parts:
                 continue
+            # Skip unrelated VLC GUI, themes, skins, installer and Lua UI
+            # resources. Playback only needs the complete native .dll set,
+            # all codec/protocol/output modules and upstream legal notices.
+            # Preserve plugin cache if supplied (VLC can regenerate it).
+            leaf=relative.name.lower()
+            top_level=(len(relative.parts)==1 and
+                (leaf.endswith('.dll') or leaf in (
+                    'copying.txt','copying.lib','authors.txt','thanks.txt',
+                    'readme.txt','news.txt')))
+            plugin=(relative.parts[0]=='plugins' and (
+                leaf.endswith('.dll') or leaf=='plugins.dat'))
+            if not (top_level or plugin):
+                continue
             output = destination / relative
             output.parent.mkdir(parents=True, exist_ok=True)
             with packed.open(entry) as source, output.open("wb") as dst:
                 shutil.copyfileobj(source, dst)
+    if not (destination / 'COPYING.txt').is_file():
+        raise RuntimeError("Original VideoLAN licence notice missing")
     for item in ("libvlc.dll", "libvlccore.dll"):
         if not (destination / item).is_file():
             raise RuntimeError("Incomplete VLC runtime: " + item)
