@@ -28,3 +28,6 @@ class WindowsAceBootstrapTests(unittest.TestCase):
         self.assertNotIn('ReadAllBytes',source)
         self.assertIn('OpenRead',source)
         self.assertIn('$response.Dispose()',source)
+        self.assertIn('Find-ExistingAceEngine',source)
+        self.assertIn('already present',source)
+        self.assertIn("HKCU:\\Software\\ACEStream",source)

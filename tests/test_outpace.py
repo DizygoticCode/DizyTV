@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from dizytv import engine, outpace
+from dizytv import engine, outpace, core  # Load zoneinfo/sysconfig before mocked OS platform
 
 
 CID = '0123456789abcdef0123456789abcdef01234567'

@@ -7,11 +7,40 @@ $official = 'https://download.acestream.media/products/acestream-full/win/latest
 $officialPage = 'https://docs.acestream.media/products/'
 $allowedHosts = @('download.acestream.media','dl.acestream.org')
 $maxBytes = 180MB
+
+function Find-ExistingAceEngine {
+    # Preserve a previously installed original vendor engine. Do not
+    # redownload or overwrite it merely because DizyTV is being upgraded.
+    $folders = @()
+    if ($env:APPDATA) { $folders += (Join-Path $env:APPDATA 'ACEStream\engine') }
+    if ($env:LOCALAPPDATA) { $folders += (Join-Path $env:LOCALAPPDATA 'ACEStream\engine') }
+    foreach ($key in @('HKCU:\Software\ACEStream','HKCU:\Software\Wow6432Node\ACEStream')) {
+        try {
+            $item = Get-ItemProperty -Path $key -ErrorAction Stop
+            if ($item.InstallDir) {
+                $folders += $item.InstallDir
+                $folders += (Join-Path $item.InstallDir 'engine')
+            }
+        } catch { }
+    }
+    foreach ($folder in $folders) {
+        if ((Test-Path -LiteralPath (Join-Path $folder 'ace_engine.exe') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $folder 'ace_console.exe') -PathType Leaf)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 $target = Join-Path $env:TEMP ("dizytv-ace-" + [Guid]::NewGuid().ToString('N') + '.exe')
 $http = $null
 try {
     Write-Host 'Ace Stream is optional third-party P2P software.'
     Write-Host 'DizyTV does not modify its installer or accept the publisher EULA.'
+    if (Find-ExistingAceEngine) {
+        Write-Host 'Official Ace Stream engine is already present; leaving that installation unchanged.'
+        exit 0
+    }
     Add-Type -AssemblyName System.Net.Http
     $handler = New-Object System.Net.Http.HttpClientHandler
     $handler.AllowAutoRedirect = $false

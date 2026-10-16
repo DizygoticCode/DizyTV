@@ -33,14 +33,20 @@ jobs:
       - name: Run each source suite with an independent hang timeout
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          errors=0
           for filename in tests/test_*.py; do
             suite="${filename##*/}"
             echo "::group::${suite}"
-            # GUI suites can take several minutes with offscreen Qt; limit
-            # genuine hangs without misclassifying slow valid UI tests.
             budget=80
             if [[ "${suite}" == "test_desktop.py" ]]; then budget=360; fi
-            timeout --signal=TERM --kill-after=5s "${budget}s" python -m unittest discover -s tests -p "${suite}" -v
+            if ! timeout --signal=TERM --kill-after=5s "${budget}s" python -m unittest discover -s tests -p "${suite}" -v; then
+              echo "::error::Suite ${suite} failed or exceeded ${budget}s"
+              errors=$((errors+1))
+            fi
             echo "::endgroup::"
           done
+          if (( errors != 0 )); then
+            echo "${errors} test suites failed" >&2
+            exit 1
+          fi
