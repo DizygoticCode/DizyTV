@@ -19,16 +19,19 @@ class OutpaceTests(unittest.TestCase):
         self.previous_shutdown=outpace._SHUTTING_DOWN
         self.previous_identity=outpace._OWNED_IDENTITY
         self.previous_binary=outpace._OWNED_BINARY
+        self.previous_idle=outpace._OWNED_IDLE_SINCE
         outpace._OWNED_PROCESS=None
         outpace._SHUTTING_DOWN=False
         outpace._OWNED_IDENTITY=None
         outpace._OWNED_BINARY=None
+        outpace._OWNED_IDLE_SINCE=None
 
     def tearDown(self):
         outpace._OWNED_PROCESS=self.previous_owned
         outpace._SHUTTING_DOWN=self.previous_shutdown
         outpace._OWNED_IDENTITY=self.previous_identity
         outpace._OWNED_BINARY=self.previous_binary
+        outpace._OWNED_IDLE_SINCE=self.previous_idle
 
     def test_close_does_not_touch_external_engine_or_active_recording(self):
         self.assertFalse(outpace.stop_owned_daemon())
@@ -77,10 +80,17 @@ class OutpaceTests(unittest.TestCase):
         with patch.object(outpace,'urlopen',side_effect=OSError('not reachable')):
             self.assertFalse(outpace.stop_idle_owned_daemon())
             process.terminate.assert_not_called()
-        # Once all shared streams are released, this process may release
-        # its own child without preventing the next queued timer restart.
-        with patch.object(outpace,'urlopen',return_value=Response(b'{"streams":[]}')):
-            self.assertTrue(outpace.stop_idle_owned_daemon())
+        # The first empty /streams reply starts the idle timer; it must not
+        # race a VLC client that has prepared its URL but not attached.
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+                outpace,'urlopen',return_value=Response(b'{"streams":[]}')), patch.object(
+                outpace.time,'monotonic',return_value=100):
+            self.assertFalse(outpace.stop_idle_owned_daemon(directory=folder))
+            process.terminate.assert_not_called()
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+                outpace,'urlopen',return_value=Response(b'{"streams":[]}')), patch.object(
+                outpace.time,'monotonic',return_value=132):
+            self.assertTrue(outpace.stop_idle_owned_daemon(directory=folder))
         process.terminate.assert_called_once()
         self.assertIsNone(outpace._OWNED_PROCESS)
         self.assertFalse(outpace._SHUTTING_DOWN)
@@ -118,12 +128,65 @@ class OutpaceTests(unittest.TestCase):
                 self.assertFalse(outpace.reap_handed_off_daemon(folder))
                 terminate.assert_not_called()
                 self.assertTrue(marker.exists())
-                # Once the Ace timer and API sessions are idle, terminate the
-                # verified former GUI child exactly once.
+                # Once jobs are idle, the first empty native snapshot only
+                # starts a grace period; attachment may still be imminent.
                 current['jobs']=[]
+                self.assertFalse(outpace.reap_handed_off_daemon(folder))
+                self.assertTrue(marker.exists())
+                data=json.loads(marker.read_text())
+                self.assertIn('idle_since',data)
+                data['idle_since']=outpace.time.time()-outpace.IDLE_GRACE_SECONDS-2
+                marker.write_text(json.dumps(data))
                 self.assertTrue(outpace.reap_handed_off_daemon(folder))
                 terminate.assert_called_once_with(24321,outpace.signal.SIGTERM)
                 self.assertFalse(marker.exists())
+
+
+    def test_pending_native_attachment_prevents_idle_worker_shutdown(self):
+        class Response:
+            status=200
+            def __enter__(self): return self
+            def __exit__(self,*args): return None
+            def read(self,n): return b'{"streams":[]}'
+        process=Mock()
+        process.poll.return_value=None
+        outpace._OWNED_PROCESS=process
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+                outpace,'urlopen',return_value=Response()):
+            outpace.register_playback_intent(folder)
+            self.assertTrue(outpace._playback_intent_pending(folder))
+            with patch.object(outpace.time,'monotonic',side_effect=[100,132]):
+                self.assertFalse(outpace.stop_idle_owned_daemon(directory=folder))
+                self.assertFalse(outpace.stop_idle_owned_daemon(directory=folder))
+            process.terminate.assert_not_called()
+            with patch.object(outpace.time,'time',
+                              return_value=outpace.time.time()+outpace.ATTACH_GRACE_SECONDS+1):
+                self.assertFalse(outpace._playback_intent_pending(folder))
+            with patch.object(outpace.time,'monotonic',return_value=133), patch.object(
+                    outpace.time,'time',return_value=100000000000):
+                self.assertTrue(outpace.stop_idle_owned_daemon(directory=folder))
+            process.terminate.assert_called_once()
+
+    def test_pending_native_attachment_prevents_handoff_reap(self):
+        class Response:
+            status=200
+            def __enter__(self): return self
+            def __exit__(self,*args): return None
+            def read(self,n): return b'{"streams":[]}'
+        with tempfile.TemporaryDirectory() as folder:
+            marker=Path(folder)/'outpace-handoff.json'
+            marker.write_text(json.dumps({
+                'pid':24321,'binary':'/private/outpace','identity':'b'*64,
+                'idle_since':outpace.time.time()-outpace.IDLE_GRACE_SECONDS-2}))
+            outpace.register_playback_intent(folder)
+            with patch.object(outpace,'_process_identity',return_value='b'*64), \\
+                 patch('dizytv.storage.Store') as store, \\
+                 patch.object(outpace,'urlopen',return_value=Response()), \\
+                 patch.object(outpace.os,'kill') as terminate:
+                store.return_value.try_read.return_value={'jobs':[],'channels':[]}
+                self.assertFalse(outpace.reap_handed_off_daemon(folder))
+                terminate.assert_not_called()
+                self.assertTrue(marker.exists())
 
     def test_handoff_rejects_recycled_pid_and_active_native_sessions(self):
         class Response:
