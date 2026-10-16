@@ -1,0 +1,25 @@
+name: DizyTV Source QA
+on:
+  push:
+    branches:
+      - wip/complete-dependency-gates
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test packages
+        run: python -m pip install -r requirements.txt
+      - name: Validate Python syntax
+        run: python -m compileall -q dizytv scripts tests
+      - name: Run source regression tests
+        run: python -m unittest discover -s tests -v
