@@ -29,7 +29,10 @@ LOCAL_HOSTS = frozenset(('localhost', '127.0.0.1', '::1'))
 _OWNED_PROCESS = None
 _OWNED_IDENTITY = None
 _OWNED_BINARY = None
+_OWNED_IDLE_SINCE = None
 _SHUTTING_DOWN = False
+IDLE_GRACE_SECONDS = 30
+ATTACH_GRACE_SECONDS = 60
 _PROCESS_LOCK = threading.Lock()
 
 
@@ -58,6 +61,36 @@ def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
     except (OSError, RuntimeError):
         pass
     return False
+
+
+
+
+def register_playback_intent(directory):
+    """Hold a short lease while a native playback URL awaits a media client.
+
+    /streams does not show a VLC/recorder that has only prepared a URL.
+    A shared app-data file coordinates viewers and the detached worker.
+    """
+    if directory is None:
+        return
+    from .storage import atomic_json, file_lock
+    folder = Path(directory)
+    with file_lock(folder / 'outpace-attach.lock'):
+        atomic_json(folder / 'outpace-attach.json',
+                    {'until': time.time() + ATTACH_GRACE_SECONDS})
+
+
+def _playback_intent_pending(directory):
+    if directory is None:
+        return False
+    marker = Path(directory) / 'outpace-attach.json'
+    if not marker.exists():
+        return False
+    try:
+        until = json.loads(marker.read_text(encoding='utf-8'))['until']
+        return not isinstance(until, (int, float)) or time.time() < until
+    except (OSError, ValueError, TypeError, KeyError):
+        return True
 
 
 
