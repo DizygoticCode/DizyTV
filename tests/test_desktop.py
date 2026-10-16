@@ -195,6 +195,135 @@ class DesktopTests(unittest.TestCase):
             later.close()
             window.close()
 
+    def test_cc_off_stops_broadcast_and_local_vosk_immediately(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            speech=Mock()
+            player=Mock()
+            w.player=player
+            w.playback_started=1
+            w._auto_caption_worker=speech
+            w._auto_caption_seq=21
+            w._auto_caption_worker_serial=21
+            w.show_auto_caption_text('Old South Park dialogue')
+            self.assertIsNotNone(w._auto_caption_overlay)
+            w.disable_all_subtitles()
+            speech.stop.assert_called_once()
+            player.video_set_spu.assert_called_once_with(-1)
+            self.assertIsNone(w._auto_caption_overlay)
+            self.assertEqual('',w._auto_caption_text)
+            self.assertTrue(w._auto_caption_stopping)
+            self.assertEqual(-1,w._subtitle_manual_track)
+            # Background recogniser signals queued before Off cannot reappear.
+            w.receive_auto_caption(21,'old audio arrives late')
+            self.assertEqual(0,len(w._auto_caption_queue))
+            self.assertIsNone(w._auto_caption_overlay)
+            w.auto_caption_finished(21,'')
+            self.assertIsNone(w._auto_caption_worker)
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_vosk_worker_ends_cleanly_and_one_click_can_restart_it(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.player=Mock()
+            w.player.get_state.return_value='State.Playing'
+            w.playback_started=1
+            w._playback_url='https://example.com/southpark.ts'
+            first=Mock()
+            w._auto_caption_worker=first
+            w._auto_caption_worker_serial=33
+            w._auto_caption_seq=33
+            w._auto_caption_retry_budget=0
+            w.show_auto_caption_text('old subtitles')
+            w.auto_caption_finished(33,'FFmpeg source ended')
+            self.assertIsNone(w._auto_caption_overlay)
+            self.assertIsNone(w._auto_caption_worker)
+            # No first click needed to stop an already-dead speech worker.
+            replacement=Mock()
+            with patch('dizytv.desktop.verify_caption_engine',return_value=('ffmpeg','model')), \
+                 patch('dizytv.desktop.LocalCaptionWorker',return_value=replacement):
+                w.toggle_auto_captions()
+            replacement.start.assert_called_once()
+            self.assertIs(w._auto_caption_worker,replacement)
+            w.stop_auto_captions()
+            replacement.stop.assert_called_once()
+            self.assertIsNone(w._auto_caption_overlay)
+            w.auto_caption_finished(w._auto_caption_worker_serial,'')
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_terminal_video_stops_vosk_without_leaving_ghost_overlay(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            worker=Mock()
+            w._auto_caption_worker=worker
+            w._auto_caption_worker_serial=55
+            w._auto_caption_seq=55
+            w.player=Mock()
+            w.player.get_state.return_value='State.Ended'
+            w.playback_started=1
+            w.show_auto_caption_text('No longer playing')
+            w.stop_caption_on_terminal_playback()
+            worker.stop.assert_called_once()
+            self.assertIsNone(w._auto_caption_overlay)
+            self.assertFalse(w._auto_caption_restart_requested)
+            w.auto_caption_finished(55,'')
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_holdback_changes_blocked_while_next_channel_is_still_loading(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            w=MainWindow(store,start_worker=False)
+            w.timeshift=Mock()
+            w.timeshift_task=Mock()   # new buffer has not begun serving yet
+            w.player=Mock()           # still reflects PREVIOUS channel
+            w.playback_started=1
+            with patch.object(w,'play_url') as start:
+                w.change_auto_caption_video_delay(1000)
+                start.assert_not_called()
+            self.assertEqual(0,store.read()['settings']['auto_caption_video_delay_ms'])
+            w.timeshift=None
+            w.timeshift_task=None
+            w.player=None
+            w.playback_started=0
+            w.close()
+
+    def test_recover_held_back_playback_without_dropping_sync(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            w=MainWindow(Store(folder),start_worker=False)
+            w.timeshift=Mock()
+            w.timeshift.window.snapshot.return_value=[Mock(seq=100)]
+            w.timeshift.window.holdback_entries.return_value=[object()]*4
+            w.timeshift.holdback_url.return_value='http://127.0.0.1/holdback.m3u8?ms=5000'
+            w.player=Mock()
+            w.player.get_state.return_value='State.Buffering'
+            w.playback_started=1
+            w._active_holdback_ms=5000
+            w.timeshift_lag=0
+            w.last_live_recovery=0
+            w.last_good_video=0
+            w.last_capture_progress=0
+            with patch.object(w,'play_url') as reconnect:
+                w.check_live_timeshift(now=110)
+                reconnect.assert_called_once_with(
+                    'http://127.0.0.1/holdback.m3u8?ms=5000',preserve_captions=False)
+            w.timeshift.window.holdback_url.assert_called_once_with(5)
+            w.timeshift.live_url.assert_not_called()
+            w.timeshift=None
+            w.player=None
+            w.playback_started=0
+            w.close()
+
     def test_settings_pair_only_imported_uk_fast_guides_without_duplicates(self):
         from dizytv.sources import (FREE_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
                                    DEFAULT_GUIDE_URLS)
