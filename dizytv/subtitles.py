@@ -58,6 +58,10 @@ def subtitle_tracks(player):
         described=player.video_get_spu_description() or ()
     except (AttributeError,RuntimeError,OSError):
         return []
+    # A live decoder can temporarily provide an invalid description while
+    # reconnecting. Ignore it instead of crashing Qt periodic maintenance.
+    try: described=iter(described)
+    except TypeError: return []
     result=[];seen=set()
     for item in described:
         if isinstance(item,(tuple,list)) and len(item)>=2:
