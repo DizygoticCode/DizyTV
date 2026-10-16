@@ -90,3 +90,20 @@ class DuplicateTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+
+
+class AlternativesTests(unittest.TestCase):
+    def test_only_distinct_same_station_and_region_candidates(self):
+        from dizytv.duplicates import independent_candidates
+        selected={'id':'orig','name':'ITV2 HD','country':'United Kingdom','kind':'TV',
+                  'stream':'https://example.org/one.m3u8'}
+        alt={'id':'other','name':'ITV2 SD','country':'United Kingdom','kind':'TV',
+             'stream':'https://example.org/two.m3u8'}
+        wrong_region={'id':'foreign','name':'ITV2','country':'Ireland','kind':'TV',
+                      'stream':'https://example.org/three.m3u8'}
+        plus_one={'id':'plus','name':'ITV2 +1','country':'United Kingdom','kind':'TV',
+                  'stream':'https://example.org/four.m3u8'}
+        same_stream={'id':'duplicate','name':'ITV2','country':'United Kingdom','kind':'TV',
+                     'stream':selected['stream']}
+        self.assertEqual([alt],independent_candidates(
+            [selected,alt,wrong_region,plus_one,same_stream],selected))

@@ -38,7 +38,7 @@ from .auto_captions import (verify_caption_engine, LocalCaptionWorker, caption_t
 from .channel_browser import channel_sort_key, CHANNEL_SORT_MODES
 from .caption_sync import CaptionDelayQueue
 from .health_history import HealthHistory
-from .duplicates import duplicate_groups
+from .duplicates import duplicate_groups, independent_candidates
 from .system_usage import SystemSampler
 from .ui_diagnostics import UiHangMonitor
 
@@ -1823,6 +1823,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction('Find duplicate channels…',self.open_duplicate_channels)
         tools_menu.addAction('System usage…',self.open_system_usage)
         tools_menu.addAction('Selected channel source…',self.show_channel_source_details)
+        tools_menu.addAction('Try another saved source…',self.try_alternative_source)
         tools_menu.addSeparator()
         self.ui_diagnostics_action=tools_menu.addAction('Log UI hangs locally (opt-in)')
         self.ui_diagnostics_action.setCheckable(True)
@@ -2258,6 +2259,38 @@ class MainWindow(QMainWindow):
         dialog=ChannelHealthDialog(self.store,self.selected,self.pool,self.refresh_disabled_channels,self)
         self.health_dialog=dialog
         dialog.show()
+
+    def try_alternative_source(self):
+        """Only user-selected saved alternatives, never redirect automatically."""
+        selected=self.selected
+        if not selected:
+            QMessageBox.information(self,'DizyTV alternatives','Select a channel first.')
+            return
+        rows=independent_candidates(catalogue(self.state),selected)
+        if not rows:
+            QMessageBox.information(self,'DizyTV alternatives',
+                'No separate saved source is available for this channel, country and programme type. '
+                'A programme guide entry alone does not guarantee a playable stream.')
+            return
+        # Do not expose private M3U URLs or tokens in the picker.
+        labels=[display_channel_name(item['name'])+' — '+
+                safe_source_label((item.get('sources') or [item.get('source','')])[0])+
+                ' [candidate '+str(i+1)+', not verified]' for i,item in enumerate(rows)]
+        label,accepted=QInputDialog.getItem(self,'Try another saved source',
+            'Choose a different imported stream; playback is not guaranteed:',
+            labels,0,False)
+        if not accepted:
+            return
+        alternate=rows[labels.index(label)]
+        # Preserve existing favourites and manual EPG mappings: no state
+        # mutation, and never erase the original selected channel.
+        self.selected=alternate
+        match=next((i for i in range(self.channels.count())
+                    if self.channels.item(i).data(Qt.UserRole)['id']==alternate['id']),None)
+        if match is not None:
+            self.channels.setCurrentRow(match)
+        self.render_now()
+        self.play()
 
     def show_channel_source_details(self):
         """Show playlist provenance without exposing private URLs or tokens."""

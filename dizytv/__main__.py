@@ -17,6 +17,7 @@ def main():
     parser=argparse.ArgumentParser(description='DizyTV native client')
     parser.add_argument('--worker',action='store_true')
     parser.add_argument('--smoke-test',action='store_true')
+    parser.add_argument('--verify-native-components',action='store_true')
     parser.add_argument('--data-dir')
     args=parser.parse_args()
     if args.worker:
@@ -27,6 +28,22 @@ def main():
     # Select the verified private VLC libraries *before* importing python-vlc.
     from dizytv.media_runtime import configure_private_vlc
     configure_private_vlc()
+    if args.verify_native_components:
+        # This is run against the *installed* package, not only a source
+        # checkout. Force the actual dynamic linker and plugin paths to load.
+        import subprocess
+        import vlc
+        from dizytv.auto_captions import verify_caption_engine
+        instance=vlc.Instance('--intf=dummy','--no-video-title-show')
+        if instance is None:
+            raise RuntimeError('Packaged libVLC failed to instantiate')
+        instance.release()
+        binary,model=verify_caption_engine()
+        subprocess.run([binary,'-version'],check=True,stdout=subprocess.DEVNULL)
+        if not model:
+            raise RuntimeError('Packaged Vosk model is unavailable')
+        print('Verified packaged VLC, FFmpeg and Vosk')
+        return 0
     from dizytv.desktop import run
     return run(args.data_dir,args.smoke_test)
 

@@ -107,6 +107,8 @@ jobs:
         run: |
           $process = Start-Process dist/DizyTV/DizyTV.exe -ArgumentList '--smoke-test','--data-dir','smoke-packaged' -PassThru -Wait
           if ($process.ExitCode -ne 0) { throw 'Packaged app failed to launch' }
+          $runtime = Start-Process dist/DizyTV/DizyTV.exe -ArgumentList '--verify-native-components' -PassThru -Wait
+          if ($runtime.ExitCode -ne 0) { throw 'Packaged private VLC/FFmpeg/Vosk failed native load' }
           # The Windows installer must ship both dependencies, even when the CI
           # host already has an FFmpeg executable installed.
           $vlc = 'dist/DizyTV/_internal/vlc'
@@ -189,6 +191,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           dist/DizyTV.app/Contents/MacOS/DizyTV --smoke-test --data-dir smoke-packaged
+          dist/DizyTV.app/Contents/MacOS/DizyTV --verify-native-components
           test -s dist/DizyTV.app/Contents/Frameworks/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib || \
             test -s dist/DizyTV.app/Contents/Resources/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib || \
             test -s dist/DizyTV.app/Contents/MacOS/vlc/VLC.app/Contents/MacOS/lib/libvlc.dylib
@@ -248,7 +251,7 @@ jobs:
       - name: Install Linux libVLC, Qt runtime libraries, and Debian packager
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
+          sudo apt-get install -y libvlc5 vlc-plugin-base vlc-plugin-video-output ffmpeg libgl1 libxcb-cursor0 libxkbcommon-x11-0 dpkg-dev
       - name: Install pinned Python dependencies
         run: python -m pip install -r requirements.txt
       - name: Full unit and desktop UI tests
@@ -275,6 +278,7 @@ jobs:
             exit 1
           fi
           smoke-installed/opt/dizytv/DizyTV --smoke-test --data-dir smoke-packaged
+          smoke-installed/opt/dizytv/DizyTV --verify-native-components
           sha256sum dist/DizyTV-0.1.17-alpha-linux-amd64.deb > dist/DizyTV-0.1.17-alpha-linux-amd64.deb.sha256
       - uses: actions/upload-artifact@v4
         with:
