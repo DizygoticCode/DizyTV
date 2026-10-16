@@ -3318,7 +3318,9 @@ class MainWindow(QMainWindow):
         self.last_capture_progress=time.monotonic()
         self.last_good_video=time.monotonic()
         if prior:
-            prior.close()
+            # Buffer/server cleanup may involve disk IO or socket timeouts.
+            # Never block the Qt event loop, including window shutdown.
+            prior.close_async()
 
     def play_stream(self,url):
         # The new stream may wait many seconds for the DVR: old subtitles must
@@ -3352,7 +3354,7 @@ class MainWindow(QMainWindow):
         self.timeshift_task=job
         def ready(local_url):
             if self.timeshift is not session:
-                session.close()
+                session.close_async()
                 return
             self.timeshift_task=None
             self.play_url(local_url)
@@ -3365,7 +3367,7 @@ class MainWindow(QMainWindow):
             if self.timeshift is not session:return
             self.timeshift=None
             self.timeshift_task=None
-            session.close()
+            session.close_async()
             self.play_url(url)
             self.seek_notice.setText('Timeshift unavailable ('+message+'); playing original stream')
         job.signals.success.connect(ready)
