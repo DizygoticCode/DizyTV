@@ -1279,15 +1279,28 @@ class DesktopTests(unittest.TestCase):
             dialog.close()
             window.close()
 
-    def test_ace_setup_opens_verified_official_provider_without_download(self):
+    def test_ace_setup_is_explicit_and_unsupported_linux_never_downloads(self):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
-            with patch('dizytv.desktop.QDesktopServices.openUrl',return_value=True) as open_url:
-                window.open_ace_stream_setup()
-                self.assertEqual(
-                    'https://wiki.acestream.media/Install_Ubuntu'
-                    if sys.platform.startswith('linux') else 'https://docs.acestream.net/products/',
-                    open_url.call_args.args[0].toString())
+            if sys.platform.startswith('linux'):
+                # Unsupported host displays an actionable explanation; it
+                # must not open a modal dialog in unattended CI or download
+                # proprietary software without explicit consent.
+                with patch('dizytv.engine.linux_engine_path',return_value=None), \
+                     patch('dizytv.linux_ace_bootstrap.compatibility',
+                           side_effect=RuntimeError('requires Ubuntu 22.04')), \
+                     patch('dizytv.outpace.packaged_binary',return_value=None), \
+                     patch('dizytv.desktop.QMessageBox.warning') as warning, \
+                     patch('dizytv.desktop.QDesktopServices.openUrl') as open_url:
+                    window.open_ace_stream_setup()
+                    warning.assert_called_once()
+                    self.assertIn('Ubuntu 22.04',warning.call_args.args[2])
+                    open_url.assert_not_called()
+            else:
+                with patch('dizytv.desktop.QDesktopServices.openUrl',return_value=True) as open_url:
+                    window.open_ace_stream_setup()
+                    self.assertEqual('https://docs.acestream.net/products/',
+                                     open_url.call_args.args[0].toString())
             window.close()
 
     def test_epg_mapping_picker_suggests_regions_and_saves_only_confirmed_choice(self):
