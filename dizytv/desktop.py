@@ -4438,7 +4438,11 @@ class MainWindow(QMainWindow):
                 job.get('start',now+1) <= now < job.get('end',0) and
                 ace_request_params(channels.get(job.get('channel_id'),{}).get('stream','')) is not None
                 for job in jobs))
-            stop_owned_daemon(preserve_recordings=pending)
+            if pending:
+                from .outpace import handoff_owned_daemon
+                handoff_owned_daemon(self.store.directory)
+            else:
+                stop_owned_daemon()
         super().closeEvent(event)
 
 
