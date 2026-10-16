@@ -13,61 +13,240 @@ from .core import safe_filename, stream_url, ace_request_params, ACTIVE
 from .network import SafeRedirect
 from .storage import Store, file_lock
 
+from collections import deque
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlsplit
+import socket
+
+from .core import http_url
+
+MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+MAX_RECORDING_SEGMENT_BYTES = 16 * 1024 * 1024
+MAX_RECORDING_BYTES = 32 * 1024 ** 3
+
+
+class RecordingStopped(ValueError):
+    pass
+
+
+def _open_recording(opener, url):
+    # Keep redirect validation identical for playlists and segments.
+    return opener.open(Request(http_url(url), headers={'User-Agent':'DizyTV/0.1',
+                               'Accept-Encoding':'identity'}), timeout=1.5)
+
+
+def _manifest(text, origin):
+    """Read supported, unencrypted TS HLS. Never dereference keys or byte ranges."""
+    if not text.lstrip('\ufeff').startswith('#EXTM3U'):
+        raise ValueError('The source returned no usable MPEG-TS or HLS playlist')
+    lines = [x.strip() for x in text.splitlines() if x.strip()]
+    if len(lines) > 10000:
+        raise ValueError('HLS manifest has too many entries')
+    for line in lines:
+        if line.startswith('#EXT-X-SESSION-KEY:') or (line.startswith('#EXT-X-KEY:')
+                and not __import__('re').search(r'(?:^|[:,])METHOD=NONE(?:,|$)', line)):
+            raise ValueError('Protected/encrypted HLS recording is unsupported')
+        if line.startswith('#EXT-X-MAP:'):
+            raise ValueError('Fragmented-MP4 HLS recording is unsupported')
+        if line.startswith(('#EXT-X-BYTERANGE:', '#EXT-X-I-FRAMES-ONLY',
+                            '#EXT-X-PART:', '#EXT-X-PRELOAD-HINT:')):
+            raise ValueError('HLS byte-range or low-latency partial recording is unsupported')
+    if any(line.startswith('#EXT-X-STREAM-INF:') for line in lines):
+        for i, line in enumerate(lines[:-1]):
+            if line.startswith('#EXT-X-STREAM-INF:') and not lines[i+1].startswith('#'):
+                return 'variant', [http_url(urljoin(origin,lines[i+1]))], False
+        raise ValueError('HLS master playlist has no playable media variant')
+    number = 0
+    for line in lines:
+        if line.startswith('#EXT-X-MEDIA-SEQUENCE:'):
+            try:
+                number = int(line.split(':',1)[1])
+                if number < 0: raise ValueError()
+            except ValueError:
+                raise ValueError('Invalid HLS media sequence') from None
+    segments = []
+    for line in lines:
+        if line.startswith('#'): continue
+        segments.append((number + len(segments), http_url(urljoin(origin,line))))
+    return 'segments', segments, '#EXT-X-ENDLIST' in lines
+
+
+def _bounded_stream_write(source, output, result, folder, reserve, max_bytes,
+                          cancel, progress, *, chunked=False):
+    """Record whole MPEG-TS packets; never extend beyond reserve/byte limits."""
+    last_progress = 0
+    def write(data):
+        nonlocal last_progress
+        if cancel(): raise RecordingStopped('Recording stopped by user')
+        if not data or data[0] != 0x47 or len(data) % 188:
+            raise ValueError('The source did not return complete MPEG-TS packets')
+        if result['bytes'] + len(data) > max_bytes:
+            raise ValueError('Recording stopped at the size limit')
+        if shutil.disk_usage(folder).free < reserve + len(data):
+            raise ValueError('Recording stopped at the free-space reserve')
+        output.write(data)
+        result['bytes'] += len(data)
+        if time.monotonic() - last_progress > .1:
+            progress(result['bytes'],str(output.name))
+            last_progress = time.monotonic()
+    if chunked:
+        write(source)
+    else:
+        data = source
+        while data:
+            write(data)
+            data = b''
+    return write
+
+
+def _record_hls(url, opener, output, result, folder, end, reserve,
+                max_bytes, cancel, progress):
+    playlist = url
+    variants = set()
+    visited = set()
+    writer = _bounded_stream_write(b'', output, result, folder, reserve,
+                                   max_bytes, cancel, progress)
+    while time.time() < end:
+        if cancel(): raise RecordingStopped('Recording stopped by user')
+        try:
+            with _open_recording(opener, playlist) as response:
+                body = response.read(MAX_MANIFEST_BYTES+1)
+                if len(body)>MAX_MANIFEST_BYTES:
+                    raise ValueError('HLS manifest exceeds 2 MiB')
+                final_url = response.geturl()
+        except (TimeoutError, socket.timeout) as exc:
+            if cancel(): raise RecordingStopped('Recording stopped by user') from None
+            raise ValueError('HLS manifest request timed out') from None
+        kind, rows, ended = _manifest(body.decode('utf-8-sig'),final_url)
+        if kind=='variant':
+            next_playlist=rows[0]
+            if next_playlist in variants or len(variants)>=6:
+                raise ValueError('HLS master variant loop detected')
+            variants.add(next_playlist)
+            playlist=next_playlist
+            continue
+        fresh = 0
+        for sequence, segment_url in rows:
+            if time.time() >= end:break
+            if cancel(): raise RecordingStopped('Recording stopped by user')
+            identity=(playlist,sequence)
+            if identity in visited:continue
+            try:
+                with _open_recording(opener,segment_url) as response:
+                    data=response.read(MAX_RECORDING_SEGMENT_BYTES+1)
+            except (TimeoutError,socket.timeout) as exc:
+                if cancel(): raise RecordingStopped('Recording stopped by user') from None
+                raise ValueError('HLS segment request timed out') from None
+            if not data or len(data)>MAX_RECORDING_SEGMENT_BYTES:
+                raise ValueError('HLS segment is missing or exceeds the size limit')
+            if data[0] != 0x47 or len(data)%188:
+                raise ValueError('HLS segment did not contain complete MPEG-TS packets')
+            writer(data)
+            visited.add(identity)
+            fresh += 1
+            if len(visited)>10000:
+                # Bounded memory; keep the newest sequence identifiers.
+                visited=set(sorted(visited,key=lambda item:item[1])[-5000:])
+        if ended:
+            raise ValueError('HLS playlist ended before the recording timer')
+        if not fresh:
+            # Keep UI/worker cancellable even when the origin has stalled.
+            deadline=min(end,time.time()+.15)
+            while time.time()<deadline:
+                if cancel():raise RecordingStopped('Recording stopped by user')
+                time.sleep(min(.05,max(0,deadline-time.time())))
+
+
+
 
 def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:False,
-                  progress=lambda *_:None):
-    result = {'status':'failed', 'bytes':0, 'error':'', 'path':''}
+                  progress=lambda *_:None, max_bytes=MAX_RECORDING_BYTES):
+    """Record clear MPEG-TS directly or from supported HLS, preserving partial video."""
+    result = {'status':'failed','bytes':0,'error':'','path':''}
     outpath = None
     try:
-        folder = Path(directory)
+        folder=Path(directory)
         if not directory or not folder.is_dir():
             raise ValueError('Choose an available recording folder in Settings')
         if shutil.disk_usage(folder).free <= reserve:
             raise ValueError('Free space is below the configured reserve')
-        if cancel():
-            raise ValueError('Recording stopped by user')
-        name = safe_filename(title, int(time.time()))
-        outpath = folder/(Path(name).stem + '_' + uuid.uuid4().hex[:8] + '.ts.part')
-        request = Request(url, headers={'User-Agent':'DizyTV/0.1'})
-        with build_opener(SafeRedirect).open(request, timeout=10) as response, outpath.open('xb') as output:
-            content = response.headers.get('Content-Type','').lower()
-            if any(kind in content for kind in ('mpegurl','text/','json','html')):
-                raise ValueError('Recording requires a direct MPEG-TS stream; use the Ace engine output')
-            started = False
-            last_progress = 0
-            while time.time() < end:
-                if cancel():
-                    raise ValueError('Recording stopped by user')
-                if shutil.disk_usage(folder).free <= reserve:
-                    raise ValueError('Recording stopped at the free-space reserve')
-                chunk = response.read1(65536)
-                if not chunk:
-                    raise ValueError('Stream ended before the recording timer')
-                if not started:
-                    if chunk[0] != 0x47:
-                        raise ValueError('The source did not return MPEG-TS packets')
-                    started = True
-                output.write(chunk)
-                result['bytes'] += len(chunk)
-                if time.time() - last_progress > 1:
-                    progress(result['bytes'], str(outpath)); last_progress = time.time()
-            output.flush(); os.fsync(output.fileno())
-        result['status'] = 'completed' if result['bytes'] else 'failed'
-    except Exception as exc:
-        result['error'] = str(exc)[:1024]
-        result['status'] = 'partial' if result['bytes'] else ('cancelled' if 'stopped by user' in result['error'] else 'failed')
+        if cancel():raise RecordingStopped('Recording stopped by user')
+        if not isinstance(max_bytes,int) or max_bytes<=0:
+            raise ValueError('Invalid recording size limit')
+        name=safe_filename(title,int(time.time()))
+        outpath=folder/(Path(name).stem+'_'+uuid.uuid4().hex[:8]+'.ts.part')
+        opener=build_opener(SafeRedirect)
+        with _open_recording(opener,url) as response, outpath.open('xb') as output:
+            content=response.headers.get('Content-Type','').lower()
+            # Sniff a bounded prefix: some providers serve HLS as octet-stream.
+            head=response.read(8)
+            hls=('mpegurl' in content or urlsplit(response.geturl()).path.lower().endswith('.m3u8')
+                 or head.startswith(b'#EXTM3U'))
+            if hls:
+                # The first response has already been fetched. Parsing the manifest
+                # again is safe; the source may be a short-lived live playlist.
+                _record_hls(response.geturl(),opener,output,result,folder,end,
+                            reserve,max_bytes,cancel,progress)
+            else:
+                if any(k in content for k in ('text/','json','html')) or head[:1]!=b'\x47':
+                    raise ValueError('Recording requires a direct MPEG-TS stream or clear TS/HLS playlist')
+                pending=head
+                last_progress=0
+                while time.time()<end:
+                    if cancel():raise RecordingStopped('Recording stopped by user')
+                    try:
+                        chunk=response.read1(65536)
+                    except (TimeoutError,socket.timeout):
+                        if cancel():raise RecordingStopped('Recording stopped by user') from None
+                        raise ValueError('Direct MPEG-TS source timed out') from None
+                    if not chunk and not pending:
+                        raise ValueError('Stream ended before the recording timer')
+                    pending+=chunk
+                    usable=len(pending)//188*188
+                    if usable:
+                        data=pending[:usable]
+                        if any(data[n]!=0x47 for n in range(0,len(data),188)):
+                            raise ValueError('Source returned invalid MPEG-TS packet alignment')
+                        if result['bytes']+len(data)>max_bytes:
+                            raise ValueError('Recording stopped at the size limit')
+                        if shutil.disk_usage(folder).free < reserve+len(data):
+                            raise ValueError('Recording stopped at the free-space reserve')
+                        output.write(data)
+                        result['bytes']+=len(data)
+                        pending=pending[usable:]
+                        if time.monotonic()-last_progress>.1:
+                            progress(result['bytes'],str(outpath))
+                            last_progress=time.monotonic()
+                if pending and result['bytes']==0:
+                    raise ValueError('Source ended with incomplete MPEG-TS packets')
+            output.flush()
+            os.fsync(output.fileno())
+        result['status']='completed' if result['bytes'] else 'failed'
+    except RecordingStopped as exc:
+        result['error']=str(exc)
+        result['status']='partial' if result['bytes'] else 'cancelled'
+    except HTTPError as exc:
+        # HTTPError reason/URL can contain credentials. Do not display either.
+        result['error']='Recording source returned HTTP '+str(exc.code)
+        result['status']='partial' if result['bytes'] else 'failed'
+    except (URLError,OSError,ValueError,UnicodeError) as exc:
+        if isinstance(exc, URLError):
+            result['error']='Recording source connection failed'
+        else:
+            result['error']=str(exc)[:250]
+        result['status']='partial' if result['bytes'] else 'failed'
     finally:
         if outpath and outpath.exists():
             if result['bytes']:
-                final = outpath.with_suffix('')
+                final=outpath.with_suffix('')
                 try:
-                    outpath.rename(final); result['path'] = str(final)
+                    outpath.rename(final)
+                    result['path']=str(final)
                 except OSError:
-                    result['path'] = str(outpath)
+                    result['path']=str(outpath)
             else:
                 outpath.unlink(missing_ok=True)
     return result
-
 
 def due_jobs(store, now=None):
     now = int(time.time()) if now is None else now
