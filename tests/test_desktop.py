@@ -1303,6 +1303,35 @@ class DesktopTests(unittest.TestCase):
                                      open_url.call_args.args[0].toString())
             window.close()
 
+    def test_alt_source_reveals_channel_when_filtered_out(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            original=dict(id='a'*40,name='Example News',stream='https://example.com/one.ts',
+                          group='News',genre='News',country='United Kingdom',kind='TV',
+                          transport='HTTP',source='Original source',sources=['Original source'])
+            alternative=dict(original,id='b'*40,stream='https://example.com/two.ts',
+                             source='Another source',sources=['Another source'])
+            store.update(lambda state:state.update(channels=[original,alternative]))
+            window=MainWindow(store,start_worker=False)
+            window.selected=original
+            # Simulate the old source being the only visible row under a
+            # playlist filter, while the second candidate is in the cache.
+            window.channels.clear()
+            window.channels.addItem(original['name'])
+            window.channels.item(0).setData(Qt.UserRole,original)
+            window.channels.setCurrentRow(0)
+            with patch('dizytv.desktop.independent_candidates',return_value=[alternative]), \
+                 patch('dizytv.desktop.QInputDialog.getItem',
+                       side_effect=lambda *args:(args[3][0],True)), \
+                 patch.object(window,'play') as play:
+                window.try_alternative_source()
+                self.assertEqual(alternative['id'],window.selected['id'])
+                self.assertEqual(alternative['id'],
+                    window.channels.currentItem().data(Qt.UserRole)['id'])
+                play.assert_called_once()
+            window.close()
+
     def test_epg_mapping_picker_suggests_regions_and_saves_only_confirmed_choice(self):
         from PySide6.QtWidgets import QDialog, QLineEdit, QListWidget
         from dizytv.core import parse_playlist

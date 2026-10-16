@@ -213,7 +213,11 @@ def ensure_ready(address, startup_seconds=25, executable_path=''):
             # Preserve a legitimate externally installed proprietary engine;
             # never start a competing helper on the same listening port.
             return 'connected'
-        if packaged_binary() is not None:
+        # Honour a trusted original-vendor start-engine launcher (including
+        # the user's explicit Settings choice) before the bundled Outpace
+        # fallback. Otherwise valid proprietary Ace streams break on Linux.
+        launcher=linux_engine_path(executable_path)
+        if launcher is None and packaged_binary() is not None:
             return ensure_outpace(address,startup_seconds)
     if running(address):
         return 'connected'

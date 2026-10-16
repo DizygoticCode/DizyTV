@@ -7,9 +7,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from dizytv.recorder import record_stream, due_jobs, claim_job, finish_job
+from dizytv.recorder import (record_stream, due_jobs, claim_job, finish_job,
+                             recording_playback_url, release_recorder_outpace)
 from dizytv.storage import Store, file_lock
 from dizytv.core import make_job
+from dizytv import recorder
 
 PACKETS = (b'\x47' + bytes(187)) * 20
 
@@ -29,6 +31,36 @@ class Source(BaseHTTPRequestHandler):
 
 
 class RecorderTests(unittest.TestCase):
+    def test_scheduled_ace_recording_starts_engine_and_uses_outpace_native_url(self):
+        cid='a'*40
+        channel={'stream':'acestream://'+cid}
+        settings={'engine_url':'http://127.0.0.1:6878',
+                  'engine_executable':'/opt/vendor/start-engine'}
+        from dizytv import recorder
+        with patch('dizytv.engine.ensure_ready',return_value='started') as start, \
+             patch('dizytv.engine.start_playback_session',
+                   return_value='http://127.0.0.1:6878/streams/ace/cid:'+cid) as prepare:
+            uri=recording_playback_url(channel,settings)
+            self.assertIn('/streams/ace/cid:',uri)
+            self.assertNotIn('/ace/getstream',uri)
+            start.assert_called_once_with(
+                'http://127.0.0.1:6878',
+                executable_path='/opt/vendor/start-engine')
+            prepare.assert_called_once_with(
+                'acestream://'+cid,'http://127.0.0.1:6878')
+        with patch('dizytv.engine.ensure_ready') as start:
+            self.assertEqual('https://example.com/clear.ts',
+                recording_playback_url(
+                    {'stream':'https://example.com/clear.ts'},settings))
+            start.assert_not_called()
+
+    def test_recording_worker_releases_only_owned_helper(self):
+        from dizytv import outpace
+        with patch.object(recorder.sys,'platform','linux'), \
+             patch.object(outpace,'stop_owned_daemon') as stop:
+            release_recorder_outpace()
+            stop.assert_called_once_with(allow_restart=True)
+
     def test_atomic_claim_respects_cancellation_and_removal(self):
         now=2000000000
         with tempfile.TemporaryDirectory() as directory:

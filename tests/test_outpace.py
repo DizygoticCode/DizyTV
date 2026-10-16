@@ -40,6 +40,16 @@ class OutpaceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'closing'):
             outpace.ensure_ready('http://127.0.0.1:6878')
 
+    def test_recorder_can_stop_owned_helper_and_start_later_timers(self):
+        owned=Mock()
+        owned.poll.return_value=None
+        outpace._OWNED_PROCESS=owned
+        outpace._SHUTTING_DOWN=False
+        self.assertTrue(outpace.stop_owned_daemon(allow_restart=True))
+        owned.terminate.assert_called_once()
+        self.assertFalse(outpace._SHUTTING_DOWN)
+        self.assertIsNone(outpace._OWNED_PROCESS)
+
     def test_mac_packaged_path_only_and_original_name(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

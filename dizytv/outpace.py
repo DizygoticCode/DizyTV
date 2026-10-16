@@ -29,15 +29,18 @@ _SHUTTING_DOWN = False
 _PROCESS_LOCK = threading.Lock()
 
 
-def stop_owned_daemon(*,preserve_recordings=False):
+def stop_owned_daemon(*,preserve_recordings=False,allow_restart=False):
     """Non-blocking shutdown when the GUI exits, respecting active recordings.
 
     A helper may be serving a detached recorder after the viewer closes.
     Preserve it in that case and never wait for a subprocess on Qt's thread.
+    The detached recording worker can release *its own* helper with
+    allow_restart=True so that later queued jobs can start it again.
     """
     global _OWNED_PROCESS, _SHUTTING_DOWN
     with _PROCESS_LOCK:
-        _SHUTTING_DOWN = True
+        if not allow_restart:
+            _SHUTTING_DOWN = True
         if preserve_recordings or _OWNED_PROCESS is None:
             return False
         process = _OWNED_PROCESS

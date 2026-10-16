@@ -4427,10 +4427,16 @@ class MainWindow(QMainWindow):
             latest=self.store.try_read()
             jobs=(latest or self.state).get('jobs',[])
             now=time.time()
+            from .core import ace_request_params
+            channels={c['id']:c for c in (latest or self.state).get('channels',[])}
+            # Keep the GUI-owned helper only when a *currently active Ace*
+            # recording still needs it. Future timers start an engine from
+            # the detached recorder when due; ordinary HTTP jobs do not need
+            # Outpace, and paused/cancelled jobs must not pin a P2P daemon.
             pending=(latest is None or any(
-                job.get('status') in ('recording','starting','paused') or
-                (job.get('status')=='queued' and
-                 float(job.get('start',0)) <= now+300)
+                job.get('status') in ('recording','starting') and
+                job.get('start',now+1) <= now < job.get('end',0) and
+                ace_request_params(channels.get(job.get('channel_id'),{}).get('stream','')) is not None
                 for job in jobs))
             stop_owned_daemon(preserve_recordings=pending)
         super().closeEvent(event)
