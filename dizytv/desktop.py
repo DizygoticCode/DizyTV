@@ -22,7 +22,7 @@ from .core import (parse_playlist, parse_xmltv, format_time, stream_url, make_jo
 from .network import download
 from .sources import (configured_playlists, refresh_catalogue, DEFAULT_GUIDE_URLS,
                       DEFAULT_PLAYLIST_URLS, OPTIONAL_FAST_PLAYLISTS, FAST_GUIDE_BY_PLAYLIST,
-                      OPTIONAL_UK_RETRANSMISSIONS, OPTIONAL_SHOW_LOOP_PLAYLISTS, source_label)
+                      OPTIONAL_UK_RETRANSMISSIONS, OPTIONAL_SHOW_LOOP_PLAYLISTS, source_label, safe_source_label)
 from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
@@ -1822,6 +1822,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction('Check channel health…',self.open_channel_health)
         tools_menu.addAction('Find duplicate channels…',self.open_duplicate_channels)
         tools_menu.addAction('System usage…',self.open_system_usage)
+        tools_menu.addAction('Selected channel source…',self.show_channel_source_details)
         tools_menu.addSeparator()
         self.ui_diagnostics_action=tools_menu.addAction('Log UI hangs locally (opt-in)')
         self.ui_diagnostics_action.setCheckable(True)
@@ -2257,6 +2258,23 @@ class MainWindow(QMainWindow):
         dialog=ChannelHealthDialog(self.store,self.selected,self.pool,self.refresh_disabled_channels,self)
         self.health_dialog=dialog
         dialog.show()
+
+    def show_channel_source_details(self):
+        """Show playlist provenance without exposing private media URLs or tokens."""
+        channel=self.selected
+        if not channel:
+            QMessageBox.information(self,'DizyTV channel source','Select a channel first.')
+            return
+        origins=list(dict.fromkeys(x for x in
+                 (channel.get('sources') or [channel.get('source','')]) if x))
+        labels=[safe_source_label(origin) for origin in origins] or ['Unknown source']
+        message=('Channel: '+display_channel_name(channel['name'])+
+                 '\nImported playlist: '+', '.join(labels)+
+                 '\n\nAn EPG programme listing is independent of the video stream. '+
+                 'A working guide does not establish a working playback URL. '+
+                 'Network errors do not prove a feed is permanently dead. '+
+                 'Custom provider URLs and credentials are deliberately hidden.')
+        QMessageBox.information(self,'DizyTV — Channel source details',message)
 
     def show_source_status(self):
         state=self.store.read(); counts={}
@@ -2782,7 +2800,13 @@ class MainWindow(QMainWindow):
                 if not self.seek_slider.isSliderDown():
                     self.seek_slider.setValue(max(0,1000-int(self.timeshift_lag/max(1,available)*1000)))
             else:
-                self.seek_notice.setText('DVR window available' if seekable else 'LIVE — no local time-shift enabled')
+                # A nonzero seekable flag can survive a failed retune. Never
+                # advertise usable DVR/video while VLC has no live playback.
+                playing_state=str(self.player.get_state())
+                if not playing_state.endswith(('.Playing','.Paused')):
+                    self.seek_notice.setText('Playback not confirmed — seekability does not mean video is decoding.')
+                else:
+                    self.seek_notice.setText('DVR seeking supported (picture not verified)' if seekable else 'LIVE — no local time-shift enabled')
         # VLC can be in State.Playing with audible audio and a black video
         # surface. Inspect decoded/displayed frames separately after startup.
         if (self.player and self.playback_started and not self._video_issue_notified
@@ -3535,12 +3559,15 @@ class MainWindow(QMainWindow):
         self.source_check_serial+=1
         serial=self.source_check_serial
         channel=self.selected['id']
-        diagnostic=Task(lambda:probe_stream(self.selected['stream']))
+        url=self.selected['stream']
+        origins=self.selected.get('sources') or [self.selected.get('source','')]
+        origin_label=safe_source_label(origins[0] if origins else '')
+        diagnostic=Task(lambda:probe_stream(url))
         self.source_check=diagnostic
         def ready(message):
             if (serial==self.source_check_serial and self.selected and
                     self.selected['id']==channel):
-                self.status.setText(message)
+                self.status.setText(origin_label+': '+message)
         diagnostic.signals.success.connect(ready)
         diagnostic.signals.failure.connect(lambda _message:None)
         self.pool.start(diagnostic)

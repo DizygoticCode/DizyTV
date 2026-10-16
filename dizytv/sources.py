@@ -110,6 +110,21 @@ def source_label(url):
     return parsed.hostname or "Custom playlist"
 
 
+def safe_source_label(url):
+    """Show recognised catalogue names without disclosing custom origin hosts.
+
+    Custom M3U URLs can embed private DNS hostnames, IPs, usernames and tokens.
+    They must not appear in error dialogs or diagnostic logs.
+    """
+    recognised={entry[1] for entry in (*FREE_PLAYLISTS,*OPTIONAL_FAST_PLAYLISTS,
+                 *OPTIONAL_UK_RETRANSMISSIONS,*OPTIONAL_SHOW_LOOP_PLAYLISTS)}
+    parsed=urlparse(url or '')
+    if url in recognised or url in DIRECTORY_META or (
+            parsed.hostname=='iptv-org.github.io' and parsed.path.startswith('/iptv/')):
+        return source_label(url)
+    return 'Custom playlist'
+
+
 def configured_playlists(settings):
     """Older installations transparently gain free presets, keeping custom URL first."""
     urls = settings.get("playlist_urls")
