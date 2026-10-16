@@ -28,6 +28,7 @@ def verify_media_pipeline(ffmpeg_binary, vlc_module, timeout=12):
         if instance is None:
             raise RuntimeError('Bundled libVLC could not load its plugins')
         player=None
+        media=None
         try:
             player=instance.media_player_new()
             media=instance.media_new_path(str(fixture))
@@ -37,9 +38,11 @@ def verify_media_pipeline(ffmpeg_binary, vlc_module, timeout=12):
             deadline=time.monotonic()+timeout
             decoded=0
             while time.monotonic()<deadline:
-                stats=media.get_stats()
-                if stats is not None:
-                    decoded=max(decoded, int(getattr(stats,'decoded_video',0) or 0))
+                # python-vlc 3.x get_stats REQUIRES a MediaStats out-parameter
+                # and returns a boolean; calling it without arguments fails.
+                stats=vlc_module.MediaStats()
+                if media.get_stats(stats):
+                    decoded=max(decoded, int(stats.decoded_video))
                     if decoded>=3:
                         return decoded
                 state=str(player.get_state())
@@ -52,4 +55,6 @@ def verify_media_pipeline(ffmpeg_binary, vlc_module, timeout=12):
             if player is not None:
                 player.stop()
                 player.release()
+            if media is not None:
+                media.release()
             instance.release()
