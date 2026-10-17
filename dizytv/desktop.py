@@ -27,7 +27,7 @@ from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
 from .timeshift import RollingTimeshift
-from .stream_diagnostics import probe_stream
+from .stream_diagnostics import probe_stream, regional_access_notice
 from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
@@ -1942,6 +1942,13 @@ class MainWindow(QMainWindow):
         self.channel_banner.setWordWrap(True)
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
+        self.regional_notice=QLabel('')
+        self.regional_notice.setObjectName('regionalAccessNotice')
+        self.regional_notice.setAccessibleName('Possible regional access restriction')
+        self.regional_notice.setWordWrap(True)
+        self.regional_notice.setStyleSheet('QLabel { padding: 8px; border: 1px solid #bd9240; border-radius: 6px; }')
+        self.regional_notice.hide()
+        live_layout.addWidget(self.regional_notice)
         self.video=QFrame(); self.video.setStyleSheet('background:black;')
         # The offscreen Qt CI plugin cannot safely reparent native video
         # windows. Real Windows/macOS players still use a native libVLC surface.
@@ -2511,6 +2518,7 @@ class MainWindow(QMainWindow):
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
         self.channels.blockSignals(False); self.render_guide()
     def choose_channel(self,item,*_):
+        self.regional_notice.hide()
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
     def render_now(self):
         if not self.selected:return
@@ -3449,6 +3457,7 @@ class MainWindow(QMainWindow):
         elif os.name=='nt':self.player.set_hwnd(win)
         else:self.player.set_xwindow(win)
     def play_url(self,url,preserve_captions=False):
+        self.regional_notice.hide()
         # Only the in-place DVR caption-sync controls use preserve_captions;
         # channel tuning, record recovery and ordinary seeks retain old reset.
         if not preserve_captions:
@@ -3695,6 +3704,12 @@ class MainWindow(QMainWindow):
             if (serial==self.source_check_serial and self.selected and
                     self.selected['id']==channel):
                 self.status.setText(origin_label+': '+message)
+                notice=regional_access_notice(message)
+                if notice:
+                    self.regional_notice.setText(notice)
+                    self.regional_notice.show()
+                else:
+                    self.regional_notice.hide()
         diagnostic.signals.success.connect(ready)
         diagnostic.signals.failure.connect(lambda _message:None)
         self.pool.start(diagnostic)
@@ -3820,6 +3835,7 @@ class MainWindow(QMainWindow):
         is_ace=ace_id(ch['stream']) is not None
         if is_ace and self.engine_task is not None:
             self.status.setText('Ace Stream engine startup is already in progress…'); return
+        self.regional_notice.hide()
         # The viewer has requested a new channel NOW. Remove old Vosk words
         # before an Ace engine/TV source may spend seconds connecting.
         self.stop_auto_captions()
@@ -4305,6 +4321,7 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def stop_playback(self):
+        self.regional_notice.hide()
         self._play_request_serial+=1
         self.engine_task=None
         self.source_check_serial+=1
