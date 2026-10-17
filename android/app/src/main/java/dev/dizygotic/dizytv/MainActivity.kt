@@ -338,12 +338,13 @@ class MainActivity:Activity() {
                 body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
             }
         }
-        accessNotice=text(accessMessage,12f).apply {
+        val notice=text(accessMessage,12f).apply {
             setTextColor(Color.rgb(255,211,129))
             background=rounded(panel,Color.rgb(178,136,52))
             visibility=if(accessMessage.isEmpty()) View.GONE else View.VISIBLE
         }
-        body.addView(accessNotice)
+        accessNotice=notice
+        body.addView(notice)
         val layout=VLCVideoLayout(this); video=layout
         body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
         val controls=row()

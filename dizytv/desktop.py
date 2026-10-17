@@ -2861,6 +2861,10 @@ class MainWindow(QMainWindow):
             if warning:
                 self._video_issue_notified=True
                 self.status.setText('Video diagnostic: '+warning)
+        # A recovered stream must clear an earlier access-denied notice.
+        if (self.regional_notice.isVisible() and self.player and self.playback_started
+                and str(self.player.get_state()).endswith('.Playing')):
+            self.regional_notice.hide()
         if self.player and self.playback_started and not self.playback_reported:
             state=str(self.player.get_state())
             if state.endswith('.Playing'):
