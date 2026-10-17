@@ -3,11 +3,18 @@ on:
   push:
     branches:
       - wip/complete-dependency-gates
+  pull_request:
+    paths:
+      - 'dizytv/**'
+      - 'android/**'
+      - 'tests/**'
+      - 'docs/**'
+      - '.github/workflows/source-qa.yml'
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: dizytv-source-only-qa
+  group: dizytv-source-only-qa-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   source-tests:
@@ -50,3 +57,19 @@ jobs:
             echo "${errors} test suites failed" >&2
             exit 1
           fi
+
+  android-unit-tests:
+    name: Android source unit tests (no installer build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Compile and run JVM unit tests, without building APKs
+        run: gradle -p android testDebugUnitTest --console=plain

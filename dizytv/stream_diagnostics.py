@@ -7,6 +7,24 @@ from urllib.request import Request, build_opener
 from .network import SafeRedirect
 from .core import http_url
 
+def regional_access_notice(probe_message):
+    """Show a safe, qualified hint only for HTTP 403/451 evidence.
+
+    Never interpolate a provider response, URL, credential or network address.
+    Neither result proves geoblocking.
+    """
+    if probe_message.startswith('HTTP 403:'):
+        return ('Possible regional restriction (HTTP 403). The broadcaster denied access, '
+                'but sign-in or subscription rules may also cause this. '
+                'Check official viewing territories and any VPN connection you already use. '
+                'DizyTV does not change your location.')
+    if probe_message.startswith('HTTP 451:'):
+        return ('Possible regional or legal restriction (HTTP 451). '
+                'Check the broadcaster\'s authorised viewing territories. '
+                'DizyTV does not change your location.')
+    return ''
+
+
 def explain_status(code):
     if code in (401,403):
         return f'HTTP {code}: stream access denied (possible geo restriction, expired token or authentication). Check official availability.'
@@ -14,6 +32,8 @@ def explain_status(code):
         return f'HTTP {code}: the playlist or stream endpoint is missing or no longer available.'
     if code==429:
         return 'HTTP 429: the stream host is rate-limiting requests; try again later.'
+    if code==451:
+        return 'HTTP 451: the host reports a legal access restriction; check official broadcast availability.'
     if code>=500:
         return f'HTTP {code}: the stream provider is currently reporting a server error.'
     if code>=400:
