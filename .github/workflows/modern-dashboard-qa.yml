@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: modern-dashboard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   desktop-source:
     name: Qt desktop source and legacy UI regression tests
