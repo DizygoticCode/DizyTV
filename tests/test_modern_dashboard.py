@@ -42,8 +42,8 @@ class DashboardTests(unittest.TestCase):
                     self.assertTrue(
                         any(b.text() == action
                             for b in window.dashboard_navigation_buttons.values()))
-                self.assertIs(window.dashboard_hero.widget(0).findChild(
-                    type(window.video), 'missing') or window.video, window.video)
+                self.assertIs(window.video.parentWidget(),
+                              window.dashboard_hero.widget(0))
                 self.assertTrue(window.seek_slider is not None)
                 self.assertTrue(window.subtitle_button is not None)
                 self.assertTrue(window.controls_scroll.widget() is not None)
@@ -57,7 +57,6 @@ class DashboardTests(unittest.TestCase):
             try:
                 self.assertIsNot(window.dashboard_grid, window.grid)
                 self.assertEqual(len(window.dashboard_grid.rows), len(window.grid.rows))
-                self.assertIs(window.dashboard_grid.channel_clicked, window.dashboard_grid.channel_clicked)
                 # Retain the original full guide and recorder route.
                 navigate(window, 'guide')
                 self.assertEqual(1, window.tabs.currentIndex())
