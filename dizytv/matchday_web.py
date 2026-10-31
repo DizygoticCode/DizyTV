@@ -15,6 +15,8 @@ from .matchday import safe_public_url
 
 def _private_host(host):
     host = (host or '').lower().rstrip('.')
+    if '%' in host:
+        return True
     if (not host or host in ('localhost',) or host.endswith(
             ('.localhost', '.local', '.internal', '.test'))):
         return True
