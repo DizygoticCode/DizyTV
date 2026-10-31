@@ -143,6 +143,19 @@ def cached_fixtures(folder, fetch=None, refresh=False, now=None, offline=False):
         pass
     if offline:
         return (prior['fixtures'] if prior else []), [], bool(prior)
+    # Persist the attempt *before* the network work, including unsuccessful
+    # batches. Otherwise an offline user can repeatedly hit the shared free
+    # provider without any successful fixture cache being written.
+    attempt_path = Path(folder) / 'matchday-last-attempt.json'
+    try:
+        if attempt_path.is_file() and attempt_path.stat().st_size < 1000:
+            attempt = json.loads(attempt_path.read_text('utf-8'))
+            elapsed = now - attempt.get('at', 0)
+            if 0 <= elapsed < 120:
+                return (prior['fixtures'] if prior else []), ['Refresh cooldown active'], bool(prior)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    atomic_json(attempt_path, {'at': now}, max_bytes=1000)
     try:
         fixtures, errors = collect_fixtures(fetch=fetch)
         if errors and prior and not fixtures:
