@@ -2077,6 +2077,11 @@ class MainWindow(QMainWindow):
         for label,handler in [('Stop / cancel',self.cancel_job),('Rearm restored timer',self.rearm_job),('Play file',self.play_file),('Delete file',self.delete_file)]:
             b=QPushButton(label); b.clicked.connect(handler); rec_buttons.addWidget(b)
         rec_layout.addLayout(rec_buttons); hint=QLabel('One recording at a time. Closing this window leaves the recorder running.\nAfter a reboot, open DizyTV to resume future timers. This alpha does not wake a sleeping computer.'); hint.setWordWrap(True); rec_layout.addWidget(hint); self.tabs.addTab(recordings,'Recordings')
+        # Separate fixture/source browsing: do not alter the existing EPG,
+        # channel favourites, saved playlists or recording-tab index (2).
+        from .matchday_ui import MatchdayPage
+        self.matchday_page=MatchdayPage(self.store,self.play_matchday_hls)
+        self.tabs.addTab(self.matchday_page,'⚽ Matchday')
         self.global_search_button=QPushButton('⌕  Search channels and programmes  •  Ctrl+K');self.global_search_button.setObjectName('globalSearch')
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
@@ -4414,6 +4419,23 @@ class MainWindow(QMainWindow):
         populate()
         self.guide_popup=dialog
         dialog.show()
+
+    def play_matchday_hls(self,url):
+        """Play an explicitly user-authorised direct HLS URL in native VLC.
+
+        No channel selection, phantom EPG programme, scheduled recording or
+        third-party iframe transport is constructed here.
+        """
+        from .matchday import safe_public_url
+        try:
+            safe_public_url(url)
+            if not url.lower().split('?',1)[0].endswith('.m3u8'):
+                raise ValueError('Matchday native VLC supports direct HLS only')
+            self.stop_playback()
+            self.selected=None
+            self.play_url(url)
+        except (ValueError,OSError,RuntimeError) as exc:
+            self.status.setText('Matchday source unavailable: '+str(exc))
 
     def stop_playback(self):
         self.regional_notice.hide()
