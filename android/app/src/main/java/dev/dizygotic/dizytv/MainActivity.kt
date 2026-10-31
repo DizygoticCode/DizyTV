@@ -291,12 +291,18 @@ class MainActivity:Activity() {
         })
         list.addView(button(if(matchdayRefreshing) "Refreshing fixtures…" else "Refresh free fixtures") {
             if(matchdayRefreshing)return@button
+            val last=prefs.getLong("last_refresh",0L)
+            if(System.currentTimeMillis()-last in 0 until 120000L) {
+                status.text="Free API refresh is limited to every two minutes to avoid rate limits."
+                return@button
+            }
             matchdayRefreshing=true;status.text="Fetching limited free football fixture metadata…"
             executor.execute {
                 val result=runCatching { MatchdayFixtures.refresh() }
                 handler.post {
                     matchdayRefreshing=false
                     result.onSuccess { (fixtures, errors)->
+                        if(fixtures.isNotEmpty()) prefs.edit().putLong("last_refresh",System.currentTimeMillis()).apply()
                         if(fixtures.isNotEmpty()) {
                             matchdayFixtures=fixtures
                             val cache=JSONArray()
