@@ -33,10 +33,12 @@ object MatchdayFixtures {
             if(!id.matches(Regex("[0-9]{1,16}")) || home.isEmpty() || away.isEmpty()) continue
             val stamp=raw.optString("strTimestamp").trim()
             val kickoff=runCatching {
-                if(stamp.endsWith("Z") || stamp.contains("+")) Instant.parse(
-                    if(stamp.endsWith("Z")) stamp else stamp.substringBefore("+")+"Z"
-                ).epochSecond
-                else Instant.from(DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneOffset.UTC).parse(stamp)).epochSecond
+                // Offset timestamps must preserve the supplied instant.
+                if(stamp.endsWith("Z")) Instant.parse(stamp).epochSecond
+                else if(Regex("[+-][0-9]{2}:[0-9]{2}$").containsMatchIn(stamp))
+                    java.time.OffsetDateTime.parse(stamp).toInstant().epochSecond
+                else java.time.LocalDateTime.parse(stamp)
+                    .toEpochSecond(ZoneOffset.UTC)
             }.getOrNull()?:continue
             results.add(JSONObject().put("id",id).put("competition",leagues[leagueId])
                 .put("home",home).put("away",away).put("kickoff",kickoff))
