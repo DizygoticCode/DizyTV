@@ -134,7 +134,10 @@ def cached_fixtures(folder, fetch=None, refresh=False, now=None, offline=False):
             candidate = json.loads(path.read_text('utf-8'))
             if isinstance(candidate, dict) and isinstance(candidate.get('fixtures'), list):
                 prior = candidate
-                if not refresh and 0 <= now - candidate.get('fetched_at', 0) < CACHE_AGE:
+                # A manual refresh must not hammer the shared 30 req/min
+                # free API. Allow a new request after two minutes at most.
+                age = now - candidate.get('fetched_at', 0)
+                if 0 <= age < (120 if refresh else CACHE_AGE):
                     return prior['fixtures'], [], True
     except (OSError, ValueError, TypeError):
         pass
