@@ -91,7 +91,9 @@ class MatchdayTests(unittest.TestCase):
                'https://example.com/a?token=xyz', 'https://example.com/a#frag',
                'https://private.local/a', 'https://example.com:444/a',
                'https://127.1/live.m3u8', 'https://0177.0.0.1/live.m3u8',
-               'https://0x7f.0.0.1/live.m3u8']
+               'https://0x7f.0.0.1/live.m3u8',
+               'https://%31%32%37.0.0.1/watch', 'https://127%2e0%2e0%2e1/watch',
+               'https://%6cocalhost/watch']
         for url in bad:
             with self.subTest(url=url), self.assertRaises(ValueError):
                 safe_public_url(url)
