@@ -11,7 +11,7 @@ import time
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QSizePolicy, QSplitter, QVBoxLayout, QWidget,
+    QSizePolicy, QSplitter, QToolButton, QVBoxLayout, QWidget,
 )
 
 
@@ -192,8 +192,41 @@ def install_dashboard(window, live_layout, root_layout):
     nav.adjustSize()
     nav_scroll.setWidget(nav)
     nav_scroll.setFixedHeight(nav.sizeHint().height() + 4)
-    root_layout.insertWidget(1, nav_scroll)
+    nav_shell = QWidget()
+    nav_shell.setObjectName('dashboardNavShell')
+    nav_shell_row = QHBoxLayout(nav_shell)
+    nav_shell_row.setContentsMargins(0, 0, 0, 0)
+    nav_shell_row.setSpacing(3)
+    previous = QToolButton()
+    previous.setText('‹')
+    previous.setObjectName('mediaScrollArrow')
+    previous.setToolTip('Earlier navigation sections')
+    previous.setFixedWidth(29)
+    more = QToolButton()
+    more.setText('›')
+    more.setObjectName('mediaScrollArrow')
+    more.setToolTip('More navigation sections')
+    more.setFixedWidth(29)
+    nav_shell_row.addWidget(previous)
+    nav_shell_row.addWidget(nav_scroll, 1)
+    nav_shell_row.addWidget(more)
+    bar = nav_scroll.horizontalScrollBar()
+    def sync_nav(*_):
+        overflow = bar.maximum() > bar.minimum()
+        previous.setVisible(overflow)
+        more.setVisible(overflow)
+        previous.setEnabled(bar.value() > bar.minimum())
+        more.setEnabled(bar.value() < bar.maximum())
+    previous.clicked.connect(lambda: bar.setValue(max(bar.minimum(), bar.value() - 220)))
+    more.clicked.connect(lambda: bar.setValue(min(bar.maximum(), bar.value() + 220)))
+    bar.rangeChanged.connect(sync_nav)
+    bar.valueChanged.connect(sync_nav)
+    root_layout.insertWidget(1, nav_shell)
     window.dashboard_nav_scroll = nav_scroll
+    window.dashboard_nav_shell = nav_shell
+    window.dashboard_nav_previous = previous
+    window.dashboard_nav_more = more
+    sync_nav()
 
     hero = QSplitter(Qt.Horizontal)
     hero.setObjectName('dashboardHero')
