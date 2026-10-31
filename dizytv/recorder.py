@@ -137,7 +137,25 @@ def _record_hls(url, opener, output, result, folder, end, reserve,
             if identity in visited:continue
             try:
                 with _open_recording(opener,segment_url) as response:
-                    data=response.read(MAX_RECORDING_SEGMENT_BYTES+1)
+                    # A slow live HTTP response can continuously trickle data
+                    # without triggering its socket timeout. Bounded read1()
+                    # chunks let us inspect Cancel, deadline and byte ceilings
+                    # between reads, without saving an incomplete segment.
+                    pieces=[]
+                    received=0
+                    while True:
+                        if cancel():
+                            raise RecordingStopped('Recording stopped by user')
+                        if time.time() >= end:
+                            return
+                        chunk=response.read1(min(65536,MAX_RECORDING_SEGMENT_BYTES+1-received))
+                        if not chunk:
+                            break
+                        pieces.append(chunk)
+                        received+=len(chunk)
+                        if received>MAX_RECORDING_SEGMENT_BYTES:
+                            raise ValueError('HLS segment is missing or exceeds the size limit')
+                    data=b''.join(pieces)
             except (TimeoutError,socket.timeout) as exc:
                 if cancel(): raise RecordingStopped('Recording stopped by user') from None
                 raise ValueError('HLS segment request timed out') from None
@@ -208,8 +226,11 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
                     except (TimeoutError,socket.timeout):
                         if cancel():raise RecordingStopped('Recording stopped by user') from None
                         raise ValueError('Direct MPEG-TS source timed out') from None
-                    if not chunk and not pending:
-                        raise ValueError('Stream ended before the recording timer')
+                    if not chunk:
+                        # EOF must terminate even if 1–187 incomplete bytes
+                        # remain. Keep already written whole packets as partial.
+                        raise ValueError('Stream ended before the recording timer'
+                                         +(' with incomplete MPEG-TS packets' if pending else ''))
                     pending+=chunk
                     usable=len(pending)//188*188
                     if usable:
