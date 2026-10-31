@@ -108,7 +108,11 @@ class MainActivity:Activity() {
         }
         indexedGuide=guide
     }
-    private val executor=Executors.newSingleThreadExecutor(); private val handler=Handler(Looper.getMainLooper())
+    private val executor=Executors.newSingleThreadExecutor()
+    // Optional fixture metadata must never queue behind or block VLC, Ace,
+    // scheduled recording and local timeshift operations.
+    private val matchdayExecutor=Executors.newSingleThreadExecutor()
+    private val handler=Handler(Looper.getMainLooper())
     private val ticker=object:Runnable { override fun run() { val changed=updateZone(); if(page=="Recordings" || changed && page=="Guide") render(); handler.postDelayed(this,5000) } }
     private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
     // Modern streaming-player palette: rounded controls without stock grey blocks.
@@ -189,7 +193,7 @@ class MainActivity:Activity() {
         clearTimeshift()
         super.onPause()
     }
-    override fun onDestroy() { clearTimeshift();handler.removeCallbacks(playbackTicker); handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); super.onDestroy() }
+    override fun onDestroy() { clearTimeshift();handler.removeCallbacks(playbackTicker); handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); matchdayExecutor.shutdownNow(); super.onDestroy() }
     private fun updateZone():Boolean {
         val zone=store.read().getJSONObject("settings").getString("timezone")
         val effective=Domain.zone(zone); val key=effective.id+effective.rules.getOffset(Instant.now()).id; val changed=key!=displayedZone; displayedZone=key
@@ -264,7 +268,8 @@ class MainActivity:Activity() {
             && !host.endsWith(".internal") && !host.endsWith(".test")
             && uri.userInfo==null && uri.query==null && uri.fragment==null
             && uri.port in listOf(-1,443)
-            && !host.matches(Regex("[0-9.]+")) && !host.contains(":")) {
+            && !host.matches(Regex("[0-9.]+")) && !host.contains(":")
+            && !host.split('.').all { it.matches(Regex("(?i)(0x[0-9a-f]+|[0-9]+)")) }) {
             "Only public HTTPS links without tokens or private hosts are accepted"
         }
         return url
@@ -296,13 +301,15 @@ class MainActivity:Activity() {
                 status.text="Free API refresh is limited to every two minutes to avoid rate limits."
                 return@button
             }
+            // Reserve the request budget before fetching, even if all 11
+            // provider requests time out or return empty results.
+            prefs.edit().putLong("last_refresh",System.currentTimeMillis()).apply()
             matchdayRefreshing=true;status.text="Fetching limited free football fixture metadata…"
-            executor.execute {
+            matchdayExecutor.execute {
                 val result=runCatching { MatchdayFixtures.refresh() }
                 handler.post {
                     matchdayRefreshing=false
                     result.onSuccess { (fixtures, errors)->
-                        if(fixtures.isNotEmpty()) prefs.edit().putLong("last_refresh",System.currentTimeMillis()).apply()
                         if(fixtures.isNotEmpty()) {
                             matchdayFixtures=fixtures
                             val cache=JSONArray()
