@@ -2167,7 +2167,7 @@ class MainWindow(QMainWindow):
         # vertically if the window is too short, without consuming extra video
         # space merely because category labels have wide text.
         self.sidebar_scroll.updateGeometry()
-        for area in (self.header_scroll,self.controls_scroll):
+        for area in (self.header_scroll,self.controls_scroll,self.dashboard_nav_scroll):
             child=area.widget()
             if child is None:
                 continue
@@ -2189,7 +2189,8 @@ class MainWindow(QMainWindow):
             extra=(scrollbar.sizeHint().height()
                    if area is self.header_scroll and scrollbar.maximum()>scrollbar.minimum()
                    else 0)
-            desired=base_height+(12 if area is self.header_scroll else 6)+extra
+            desired=base_height+(12 if area is self.header_scroll else
+                                 4 if area is self.dashboard_nav_scroll else 6)+extra
             if area.height()!=desired:
                 area.setFixedHeight(desired)
             area.updateGeometry()
@@ -2583,11 +2584,12 @@ class MainWindow(QMainWindow):
         self.channel_banner.setStyleSheet(
             'background:'+theme_color('#304d36',theme)+';color:'+
             ('#1e293b' if theme=='Light' else '#ffffff')+';padding:8px;')
-        for scroll in (self.header_scroll,self.controls_scroll):
+        for scroll in (self.header_scroll,self.controls_scroll,self.dashboard_nav_scroll):
             widget=scroll.widget()
             if widget:
                 widget.adjustSize()
-                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
+                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else
+                                                            4 if scroll is self.dashboard_nav_scroll else 6))
         QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
 
     def scroll_player_buttons(self,step):
@@ -4239,7 +4241,10 @@ class MainWindow(QMainWindow):
             overlay.close()
             overlay.deleteLater()
         self.video.setParent(None)
-        self.live_layout.insertWidget(2,self.video,1)
+        if hasattr(self,'dashboard_player_layout'):
+            self.dashboard_player_layout.addWidget(self.video,1)
+        else:
+            self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
         self._rebind_video()
         if self._auto_caption_overlay is not None:
