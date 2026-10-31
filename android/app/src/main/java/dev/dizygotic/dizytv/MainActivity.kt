@@ -47,6 +47,9 @@ class MainActivity:Activity() {
     private var liveAction:Button?=null
     private var liveDotBright=false
     private val navigationButtons=mutableMapOf<String,Button>()
+    // An optional category shortcut over the existing channel catalogue; no
+    // media/recording/settings data is copied or migrated for the new skin.
+    private var dashboardSection=""
     private val playbackTicker=object:Runnable {
         override fun run() {
             if(page=="Live") {
@@ -150,12 +153,28 @@ class MainActivity:Activity() {
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState); store=DeviceStore(this); lib=LibVLC(this,arrayListOf("--no-video-title-show","--network-caching=1500")); player=MediaPlayer(lib)
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(dp(10),dp(8),dp(10),dp(8)) }
-        val brand=row();brandRow=brand;brand.gravity=android.view.Gravity.CENTER_VERTICAL;val image=ImageView(this);image.setImageResource(R.drawable.dizytv_logo);brand.addView(image,LinearLayout.LayoutParams(dp(54),dp(54)));brand.addView(text("DizyTV",24f).apply { typeface=Typeface.DEFAULT_BOLD });root.addView(brand)
+        val brand=row();brandRow=brand;brand.gravity=android.view.Gravity.CENTER_VERTICAL
+        brand.background=rounded(panel)
+        brand.setPadding(dp(8),dp(2),dp(8),dp(2))
+        val image=ImageView(this);image.setImageResource(R.drawable.dizytv_logo)
+        brand.addView(image,LinearLayout.LayoutParams(dp(54),dp(54)))
+        brand.addView(text("DizyTV",24f).apply { typeface=Typeface.DEFAULT_BOLD })
+        brand.addView(text("LIVE  •  GUIDE  •  DVR",11f).apply {
+            setTextColor(accent);gravity=android.view.Gravity.END
+        },LinearLayout.LayoutParams(0,-2,1f))
+        root.addView(brand)
         zoneLabel=text(""); root.addView(zoneLabel)
-        val nav=HorizontalScrollView(this); mainNav=nav; val buttons=row()
-        for(name in listOf("Channels","Live","Guide","Recordings","Backup","Settings")) {
-            val action=button(name) { page=name;render() }
-            navigationButtons[name]=action;buttons.addView(action)
+        val nav=HorizontalScrollView(this); mainNav=nav
+        nav.isHorizontalScrollBarEnabled=false
+        nav.background=rounded(panel)
+        val buttons=row()
+        for((label,destination) in listOf(
+            "Live TV" to "Live", "Channels" to "Channels", "Guide" to "Guide",
+            "Movies" to "Movies", "Series" to "Series", "Sports" to "Sports",
+            "DVR" to "Recordings", "Backup" to "Backup", "Settings" to "Settings"
+        )) {
+            val action=button(label) { navigateDashboard(destination) }
+            navigationButtons[destination]=action;buttons.addView(action)
         }
         nav.addView(buttons); root.addView(nav)
         body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; root.addView(body,LinearLayout.LayoutParams(-1,0,1f))
@@ -222,6 +241,28 @@ class MainActivity:Activity() {
             }; column.addView(spinner)
         }; return column
     }
+    private fun navigateDashboard(destination:String) {
+        if(destination in listOf("Movies","Series","Sports")) {
+            val catalogue=Domain.catalogue(store.read())
+            val hasSection=catalogue.any { Domain.section(it).equals(destination,true) }
+            val hasGenre=catalogue.any { it.optString("genre").equals(destination,true) }
+            countryFilter="";typeFilter="";search="";onlyFavourites=false
+            sectionFilter=if(hasSection) destination else ""
+            genreFilter=if(!hasSection && hasGenre) destination else ""
+            dashboardSection=destination
+            page="Channels"
+            render()
+            if(!hasSection && !hasGenre) {
+                status.text="No $destination category imported yet. Existing channels remain available under Channels."
+            }
+        } else {
+            if(destination=="Channels" && dashboardSection.isNotEmpty()) {
+                sectionFilter="";genreFilter="";dashboardSection=""
+            }
+            page=destination
+            render()
+        }
+    }
     private fun render() {
         if(page!="Live" && (timeshift!=null || pendingTimeshift!=null)) {
             player.stop()
@@ -229,9 +270,10 @@ class MainActivity:Activity() {
         }
         player.detachViews();video=null;seekBar=null;seekInfo=null;liveIndicator=null;liveAction=null;body.removeAllViews();updateZone()
         navigationButtons.forEach { (name,action)->
-            val chosen=name==page
+            val chosen=(name==page && (name!="Channels" || dashboardSection.isEmpty())) ||
+                (page=="Channels" && name==dashboardSection)
             action.background=rounded(if(chosen) edge else panel,if(chosen) accent else edge)
-            action.setTextColor(if(chosen) accent else ink)
+            action.setTextColor(if(chosen) accent else muted)
         }
         brandRow.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         mainNav.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
@@ -319,13 +361,28 @@ class MainActivity:Activity() {
     private fun live() {
         val compact=cinemaMode || screenMode
         if(!compact) {
-            body.addView(text(selected?.let { Domain.displayName(it.getString("name")) }?:"Choose a channel first",20f))
-            selected?.let { ch->
-                val state=store.read(); val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names")); val now=Instant.now().epochSecond
-                indexGuide()
-                val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
-                body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
+            val hero=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL; background=rounded(panel)
+                setPadding(dp(8),dp(6),dp(8),dp(6))
             }
+            hero.addView(text("●  NOW SHOWING",11f).apply { setTextColor(accent); typeface=Typeface.DEFAULT_BOLD })
+            hero.addView(text(selected?.let { Domain.displayName(it.getString("name")) }
+                ?: "Choose a channel",19f).apply { typeface=Typeface.DEFAULT_BOLD })
+            selected?.let { ch->
+                val state=store.read()
+                val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names"))
+                val now=Instant.now().epochSecond
+                indexGuide()
+                val programmes=indexedProgrammes[key].orEmpty()
+                    .filter { it.getLong("end")>now }
+                    .sortedBy { it.getLong("start") }.take(2)
+                val caption=programmes.joinToString("  •  ") {
+                    Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+
+                        " "+it.getString("title")
+                }.ifEmpty { "No EPG match yet • use Map EPG to assign programme listings" }
+                hero.addView(text(caption,12f).apply { setTextColor(muted);maxLines=2 })
+            }
+            body.addView(hero)
         }
         val layout=VLCVideoLayout(this); video=layout
         body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
@@ -380,6 +437,19 @@ class MainActivity:Activity() {
             more.addView(button("Map EPG") { mapChannel() })
             body.addView(HorizontalScrollView(this).apply { addView(more) })
             body.addView(button("Edit categories") { editCategories() })
+            // Compact EPG preview stays connected to the existing native guide.
+            // The full guide retains its tap-to-play / long-press-to-record.
+            val guideCard=LinearLayout(this).apply {
+                orientation=LinearLayout.HORIZONTAL
+                gravity=android.view.Gravity.CENTER_VERTICAL
+                background=rounded(panel)
+                setPadding(dp(6),dp(2),dp(6),dp(2))
+            }
+            guideCard.addView(text("●  LIVE GUIDE",11f).apply {
+                setTextColor(accent);typeface=Typeface.DEFAULT_BOLD
+            },LinearLayout.LayoutParams(0,-2,1f))
+            guideCard.addView(button("Open EPG  ›") { page="Guide";render() })
+            body.addView(guideCard)
         }
     }
     @Suppress("DEPRECATION")
