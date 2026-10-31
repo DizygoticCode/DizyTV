@@ -244,15 +244,22 @@ class MainActivity:Activity() {
     private fun navigateDashboard(destination:String) {
         if(destination in listOf("Movies","Series","Sports")) {
             val catalogue=Domain.catalogue(store.read())
-            val hasSection=catalogue.any { Domain.section(it).equals(destination,true) }
-            val hasGenre=catalogue.any { it.optString("genre").equals(destination,true) }
+            val names=if(destination=="Sports") listOf("Sport","Sports")
+                else if(destination=="Movies") listOf("Movie","Movies")
+                else listOf(destination)
+            val section=catalogue.firstOrNull { ch->
+                names.any { Domain.section(ch).equals(it,true) }
+            }?.let(Domain::section)
+            val genre=catalogue.firstOrNull { ch->
+                names.any { ch.optString("genre").equals(it,true) }
+            }?.optString("genre")
             countryFilter="";typeFilter="";search="";onlyFavourites=false
-            sectionFilter=if(hasSection) destination else ""
-            genreFilter=if(!hasSection && hasGenre) destination else ""
+            sectionFilter=section?:""
+            genreFilter=if(section==null) genre?:"" else ""
             dashboardSection=destination
             page="Channels"
             render()
-            if(!hasSection && !hasGenre) {
+            if(section==null && genre==null) {
                 status.text="No $destination category imported yet. Existing channels remain available under Channels."
             }
         } else {
