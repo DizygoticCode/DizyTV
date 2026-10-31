@@ -76,6 +76,23 @@ class HLSSource(BaseHTTPRequestHandler):
             self.wfile.flush()
             time.sleep(4)
             return
+        elif route == '/hls/trickle.m3u8':
+            body = '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:99\n#EXTINF:4,\n/trickle.ts\n'
+        elif route == '/trickle.ts':
+            self.send_response(200)
+            self.send_header('Content-Type', 'video/mp2t')
+            self.end_headers()
+            try:
+                for _ in range(100):
+                    self.wfile.write(PACKETS[:188])
+                    self.wfile.flush()
+                    time.sleep(.05)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+        elif route == '/truncated.ts':
+            body = PACKETS + b'\x47'
+            content = 'video/mp2t'
         elif route == '/direct.ts':
             self.send_response(200)
             self.send_header('Content-Type', 'video/mp2t')
@@ -204,6 +221,34 @@ class HLSRecordingTests(unittest.TestCase):
             self.assertEqual('completed', second['status'], second)
             self.assertNotEqual(first['path'], second['path'])
             self.assertEqual(2, len(list(Path(folder).glob('*.ts'))))
+
+    def test_eof_with_trailing_partial_packet_preserves_completed_ts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            began = time.monotonic()
+            result = self.record('/truncated.ts', folder, seconds=4)
+            self.assertEqual('partial', result['status'], result)
+            self.assertIn('incomplete MPEG-TS packets', result['error'])
+            self.assertEqual(PACKETS, Path(result['path']).read_bytes())
+            self.assertLess(time.monotonic()-began, 1)
+
+    def test_cancel_or_deadline_interrupts_hls_trickled_segment(self):
+        with tempfile.TemporaryDirectory() as folder:
+            stop = threading.Event()
+            timer = threading.Timer(.2, stop.set)
+            timer.start()
+            try:
+                began = time.monotonic()
+                result = self.record('/hls/trickle.m3u8', folder, seconds=20,
+                                     cancel=stop.is_set)
+                self.assertEqual('cancelled', result['status'], result)
+                self.assertLess(time.monotonic()-began, 1.3)
+            finally:
+                timer.cancel()
+        with tempfile.TemporaryDirectory() as folder:
+            began = time.monotonic()
+            result = self.record('/hls/trickle.m3u8', folder, seconds=.25)
+            self.assertEqual('failed', result['status'], result)
+            self.assertLess(time.monotonic()-began, 1.3)
 
     def test_cancel_stalled_source_is_bounded(self):
         with tempfile.TemporaryDirectory() as folder:
