@@ -7,6 +7,7 @@ Installed packages may omit QtWebEngine; callers then use external browser.
 from __future__ import annotations
 
 from ipaddress import ip_address
+import re
 from urllib.parse import urlsplit
 
 from .matchday import safe_public_url
@@ -16,6 +17,8 @@ def _private_host(host):
     host = (host or '').lower().rstrip('.')
     if (not host or host in ('localhost',) or host.endswith(
             ('.localhost', '.local', '.internal', '.test'))):
+        return True
+    if re.fullmatch(r'(?i)(?:0x[0-9a-f]+|[0-9]+)(?:\\.(?:0x[0-9a-f]+|[0-9]+))*', host):
         return True
     try:
         return not ip_address(host).is_global
