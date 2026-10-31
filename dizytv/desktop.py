@@ -2822,6 +2822,10 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
+        if hasattr(self,'dashboard_grid'):
+            # The second EPG uses time.time() to draw its LIVE marker and
+            # on-air highlight; refresh it on the same established 5s tick.
+            self.dashboard_grid.update()
         self.check_live_timeshift()
         self.check_direct_playback()
         self.sync_subtitles()
