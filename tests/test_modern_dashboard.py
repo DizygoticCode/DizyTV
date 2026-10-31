@@ -106,6 +106,35 @@ class DashboardTests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_collapsed_timeline_releases_space_and_restores_same_guide(self):
+        from PySide6.QtWidgets import QPushButton
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow(Store(directory), start_worker=False)
+            try:
+                window.resize(1150, 730)
+                window.show()
+                self.app.processEvents()
+                timeline = window.dashboard_timeline
+                grid = window.dashboard_grid
+                initial = window.live_layout.stretch(window.live_layout.indexOf(timeline))
+                button = next(b for b in timeline.findChildren(QPushButton)
+                              if b.text() == 'Hide timeline')
+                button.click()
+                self.app.processEvents()
+                self.assertFalse(window.dashboard_grid.isVisible())
+                self.assertEqual(0, window.live_layout.stretch(
+                    window.live_layout.indexOf(timeline)))
+                self.assertLess(timeline.maximumHeight(), 100)
+                self.assertEqual('Show timeline', button.text())
+                button.click()
+                self.app.processEvents()
+                self.assertTrue(window.dashboard_grid.isVisible())
+                self.assertEqual(initial, window.live_layout.stretch(
+                    window.live_layout.indexOf(timeline)))
+                self.assertIs(grid, window.dashboard_grid)
+            finally:
+                window.close()
+
     def test_real_programme_detail_and_theme_and_scale(self):
         from dizytv.desktop_dashboard import update_dashboard_details
         with tempfile.TemporaryDirectory() as directory:
