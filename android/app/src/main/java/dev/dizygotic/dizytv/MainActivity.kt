@@ -35,6 +35,10 @@ class MainActivity:Activity() {
     private lateinit var store:DeviceStore; private lateinit var body:LinearLayout; private lateinit var status:TextView
     private lateinit var zoneLabel:TextView; private lateinit var lib:LibVLC; private lateinit var player:MediaPlayer
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
+    private var matchdayFixtures=emptyList<JSONObject>()
+    private var matchdayRefreshing=false
+    private var matchdayFavouriteOnly=false
+    private var matchdayPlaybackTitle=""
     private var timeshift:DeviceTimeshift?=null
     private var pendingTimeshift:DeviceTimeshift?=null
     private var timeshiftGeneration=0
@@ -164,7 +168,7 @@ class MainActivity:Activity() {
         val brand=row();brandRow=brand;brand.gravity=android.view.Gravity.CENTER_VERTICAL;val image=ImageView(this);image.setImageResource(R.drawable.dizytv_logo);brand.addView(image,LinearLayout.LayoutParams(dp(54),dp(54)));brand.addView(text("DizyTV",24f).apply { typeface=Typeface.DEFAULT_BOLD });root.addView(brand)
         zoneLabel=text(""); root.addView(zoneLabel)
         val nav=HorizontalScrollView(this); mainNav=nav; val buttons=row()
-        for(name in listOf("Channels","Live","Guide","Recordings","Backup","Settings")) {
+        for(name in listOf("Channels","Live","Guide","Matchday","Recordings","Backup","Settings")) {
             val action=button(name) { page=name;render() }
             navigationButtons[name]=action;buttons.addView(action)
         }
@@ -247,8 +251,135 @@ class MainActivity:Activity() {
         brandRow.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         mainNav.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         zoneLabel.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
-        when(page) { "Channels"->channels(); "Live"->live(); "Guide"->guidePage(); "Recordings"->recordings(); "Backup"->backupPage(); "Settings"->settingsPage() }
+        when(page) { "Channels"->channels(); "Live"->live(); "Guide"->guidePage(); "Matchday"->matchdayPage(); "Recordings"->recordings(); "Backup"->backupPage(); "Settings"->settingsPage() }
     }
+
+    private fun safeMatchdayLink(raw:String):String {
+        val url=raw.trim()
+        require(url.length in 10..1500 && !url.contains('\\\\')) { "Invalid public link" }
+        val uri=java.net.URI(url)
+        val host=uri.host?.lowercase()?.trimEnd('.')?:""
+        require(uri.scheme=="https" && host.contains('.') && !host.contains("..")
+            && !host.endsWith(".local") && !host.endsWith(".localhost")
+            && !host.endsWith(".internal") && !host.endsWith(".test")
+            && uri.userInfo==null && uri.query==null && uri.fragment==null
+            && uri.port in listOf(-1,443)
+            && !host.matches(Regex("[0-9.]+")) && !host.contains(":")) {
+            "Only public HTTPS links without tokens or private hosts are accepted"
+        }
+        return url
+    }
+    private fun matchdayPage() {
+        val list=scroller()
+        list.addView(text("⚽ Matchday — free football fixtures",21f))
+        list.addView(text("TheSportsDB public free tier supplies LIMITED fixture entries, not a complete schedule. A fixture does not imply a free broadcast. No viewing rights or playback are automatically verified.",12f))
+        val prefs=getSharedPreferences("dizytv-matchday",MODE_PRIVATE)
+        val club=prefs.getString("club","Southampton")?:"Southampton"
+        list.addView(button("★ Favourite: "+club+" (change)") {
+            val edit=EditText(this).apply { setText(club); setSingleLine(true) }
+            AlertDialog.Builder(this).setTitle("Favourite football club")
+                .setView(edit).setPositiveButton("Save") { _,_->
+                    val name=edit.text.toString().trim().take(80)
+                    if(name.isNotEmpty()) {
+                        prefs.edit().putString("club",name).apply()
+                        if(page=="Matchday") render()
+                    }
+                }.setNegativeButton("Cancel",null).show()
+        })
+        list.addView(button(if(matchdayFavouriteOnly) "★ Show all fixtures" else "★ Favourite club only") {
+            matchdayFavouriteOnly=!matchdayFavouriteOnly; render()
+        })
+        list.addView(button(if(matchdayRefreshing) "Refreshing fixtures…" else "Refresh free fixtures") {
+            if(matchdayRefreshing)return@button
+            matchdayRefreshing=true;status.text="Fetching limited free football fixture metadata…"
+            executor.execute {
+                val result=runCatching { MatchdayFixtures.refresh() }
+                handler.post {
+                    matchdayRefreshing=false
+                    result.onSuccess { (fixtures, errors)->
+                        if(fixtures.isNotEmpty()) {
+                            matchdayFixtures=fixtures
+                            val cache=JSONArray()
+                            fixtures.forEach { cache.put(it) }
+                            File(filesDir,"matchday-fixtures.json").writeText(cache.toString())
+                        }
+                        status.text="${matchdayFixtures.size} fixture entries; ${errors} provider requests failed. Viewing options unverified."
+                    }.onFailure { status.text="Fixture feed unavailable. Last saved list retained." }
+                    if(page=="Matchday")render()
+                }
+            }
+        })
+        if(matchdayFixtures.isEmpty()) {
+            runCatching {
+                val file=File(filesDir,"matchday-fixtures.json")
+                if(file.isFile && file.length()<=1024*1024) {
+                    val cached=JSONArray(file.readText())
+                    matchdayFixtures=(0 until cached.length()).mapNotNull { cached.optJSONObject(it) }
+                }
+            }
+        }
+        val zone=Domain.zone(store.read().getJSONObject("settings").getString("timezone"))
+        val today=java.time.LocalDate.now(zone)
+        for(item in matchdayFixtures) {
+            val date=runCatching { java.time.Instant.ofEpochSecond(item.getLong("kickoff")).atZone(zone) }.getOrNull()?:continue
+            if(date.toLocalDate()<today || date.toLocalDate()>today.plusDays(14))continue
+            val name=item.optString("home")+" v "+item.optString("away")
+            if(matchdayFavouriteOnly && !name.contains(club,true))continue
+            val id=item.optString("id")
+            val wrapper=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=rounded(panel) }
+            wrapper.addView(text((if(name.contains(club,true)) "★ " else "")+
+                date.format(java.time.format.DateTimeFormatter.ofPattern("EEE dd MMM HH:mm"))+
+                " • "+item.optString("competition"),12f))
+            wrapper.addView(text(name,16f))
+            val saved=prefs.getString("link_"+id,null)
+            if(saved!=null) {
+                val data=runCatching { JSONObject(saved) }.getOrNull()
+                if(data!=null) wrapper.addView(button("Open saved source (unverified)") {
+                    val url=safeMatchdayLink(data.getString("url"))
+                    if(data.optString("kind")=="hls") {
+                        require(url.lowercase().endsWith(".m3u8")) { "Not a direct HLS link" }
+                        require(Domain.objects(store.read().getJSONArray("jobs")).none {
+                            it.optString("status")=="recording"
+                        }) { "Finish the active recording before changing playback" }
+                        clearTimeshift(); player.stop(); selected=null
+                        matchdayPlaybackTitle=name
+                        page="Live";render()
+                        val media=Media(lib,Uri.parse(url))
+                        try { player.media=media } finally { media.release() }
+                        player.play()
+                        status.text="Direct HLS requested — audio/video not yet verified"
+                    } else {
+                        startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(url)))
+                        status.text="Opened locally saved authorised link in browser (unverified)"
+                    }
+                })
+            }
+            wrapper.addView(button("Add authorised free viewing link…") {
+                val edit=EditText(this).apply { hint="https://example.org/watch"; setSingleLine(true) }
+                val choices=arrayOf("Browser page","Direct HLS (.m3u8)")
+                var kind="web"
+                AlertDialog.Builder(this).setTitle("Source format").setSingleChoiceItems(choices,0) { _,choice->
+                    kind=if(choice==1) "hls" else "web"
+                }.setPositiveButton("Next") { _,_->
+                    AlertDialog.Builder(this).setTitle("Public HTTPS link").setView(edit)
+                        .setPositiveButton("Continue") { _,_->
+                            attempt {
+                                val url=safeMatchdayLink(edit.text.toString())
+                                require(kind!="hls" || url.lowercase().endsWith(".m3u8")) { "Direct VLC requires a .m3u8 URL" }
+                                AlertDialog.Builder(this).setTitle("Viewing rights confirmation")
+                                    .setMessage("Only save a free link that you are authorised to view. DizyTV has not verified rights, region, video quality or playability. Confirm?")
+                                    .setPositiveButton("I confirm") { _,_->
+                                        prefs.edit().putString("link_"+id,JSONObject().put("url",url).put("kind",kind).toString()).apply()
+                                        if(page=="Matchday")render()
+                                    }.setNegativeButton("Cancel",null).show()
+                            }
+                        }.setNegativeButton("Cancel",null).show()
+                }.setNegativeButton("Cancel",null).show()
+            })
+            list.addView(wrapper)
+        }
+    }
+
     private fun channels() {
         val input=EditText(this).apply { hint="Search channels or groups"; setText(search); setSingleLine(true) }; body.addView(input)
         val filter=CheckBox(this).apply { text="★ Favourites only"; isChecked=onlyFavourites }; body.addView(filter)
@@ -330,7 +461,7 @@ class MainActivity:Activity() {
     private fun live() {
         val compact=cinemaMode || screenMode
         if(!compact) {
-            body.addView(text(selected?.let { Domain.displayName(it.getString("name")) }?:"Choose a channel first",20f))
+            body.addView(text(selected?.let { Domain.displayName(it.getString("name")) } ?: matchdayPlaybackTitle.ifEmpty { "Choose a channel first" },20f))
             selected?.let { ch->
                 val state=store.read(); val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names")); val now=Instant.now().epochSecond
                 indexGuide()
