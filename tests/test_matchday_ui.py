@@ -61,6 +61,25 @@ class MatchdayUITests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_auto_timezone_tracks_dst_changes_across_fixture_dates(self):
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            try:
+                page=window.matchday_page
+                with patch('dizytv.desktop.detected_zone',
+                           return_value='America/New_York'):
+                    zone=page._display_zone()
+                    self.assertEqual('America/New_York',zone.key)
+                    # US DST ends 1 November 2026: 12:00 UTC is 08:00
+                    # local on October 31, but 07:00 on November 3.
+                    from datetime import datetime, timezone
+                    before=int(datetime(2026,10,31,12,tzinfo=timezone.utc).timestamp())
+                    after=int(datetime(2026,11,3,12,tzinfo=timezone.utc).timestamp())
+                    self.assertEqual(8,page._day({'kickoff':before},zone).hour)
+                    self.assertEqual(7,page._day({'kickoff':after},zone).hour)
+            finally:
+                window.close()
+
     def test_direct_hls_uses_existing_native_player_without_fake_channel(self):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
