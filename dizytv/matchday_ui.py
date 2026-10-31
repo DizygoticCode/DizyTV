@@ -177,10 +177,13 @@ class MatchdayPage(QWidget):
         # if repeated for every listed fixture on every keystroke.
         owner = self._main_window
         value = (getattr(owner, 'state', {}) or {}).get('settings', {}).get('timezone', 'auto')
+        # astimezone().tzinfo may be a fixed offset, not DST-aware. Resolve
+        # the same IANA system zone used by the existing EPG instead.
+        from .desktop import detected_zone
         try:
-            return ZoneInfo(value) if value != 'auto' else datetime.now().astimezone().tzinfo
+            return ZoneInfo(detected_zone() if value == 'auto' else value)
         except (ValueError, KeyError, TypeError):
-            return datetime.now().astimezone().tzinfo
+            return ZoneInfo('UTC')
 
     @staticmethod
     def _day(event, zone):
