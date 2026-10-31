@@ -18,7 +18,7 @@ def _private_host(host):
     if (not host or host in ('localhost',) or host.endswith(
             ('.localhost', '.local', '.internal', '.test'))):
         return True
-    if re.fullmatch(r'(?i)(?:0x[0-9a-f]+|[0-9]+)(?:\\.(?:0x[0-9a-f]+|[0-9]+))*', host):
+    if re.fullmatch(r'(?i)(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*', host):
         return True
     try:
         return not ip_address(host).is_global
