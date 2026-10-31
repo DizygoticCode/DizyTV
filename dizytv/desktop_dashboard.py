@@ -65,10 +65,12 @@ QFrame#dashboardVideoFrame {{ background:{bg}; border:1px solid {border}; border
 
 def _select_section(window, section):
     """Navigate to existing catalogue filters; never fabricate media pages."""
+    aliases = {'Sports': ('Sport', 'Sports'), 'Movies': ('Movie', 'Movies'),
+               'Series': ('Series',)}.get(section, (section,))
     for control in (window.section_filter, window.genre_filter):
         for index in range(1, control.count()):
             value = control.itemData(index)
-            if value and str(value).casefold() == section.casefold():
+            if value and str(value).casefold() in {a.casefold() for a in aliases}:
                 window.section_filter.setCurrentIndex(0)
                 window.genre_filter.setCurrentIndex(0)
                 control.setCurrentIndex(index)
@@ -240,6 +242,7 @@ def install_dashboard(window, live_layout, root_layout):
     # This is the original native video widget used for libVLC rendering.
     live_layout.removeWidget(window.video)
     player_layout.addWidget(window.video, 1)
+    window.dashboard_player_layout = player_layout
     player_panel.setMinimumWidth(160)
     hero.addWidget(player_panel)
 
