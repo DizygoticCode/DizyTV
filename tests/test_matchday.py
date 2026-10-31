@@ -68,11 +68,30 @@ class MatchdayTests(unittest.TestCase):
             self.assertEqual(first, old)
             self.assertTrue(stale)
 
+    def test_refresh_cooldown_counts_failed_attempts_too(self):
+        calls = []
+        def failed(_endpoint, _params):
+            calls.append(1)
+            raise OSError('offline')
+        with TemporaryDirectory() as folder:
+            first, errors, stale = cached_fixtures(folder, fetch=failed, now=1000)
+            self.assertEqual([], first)
+            self.assertEqual(11, len(calls))
+            again, errors, cached = cached_fixtures(folder, fetch=failed, now=1010, refresh=True)
+            self.assertEqual([], again)
+            self.assertEqual(11, len(calls))
+            self.assertIn('Refresh cooldown active', errors)
+            refreshed, errors, cached = cached_fixtures(folder, fetch=failed, now=1121, refresh=True)
+            self.assertEqual([], refreshed)
+            self.assertEqual(22, len(calls))
+
     def test_source_rejects_credentials_private_hosts_and_unconfirmed_rights(self):
         bad = ['http://example.com/a.m3u8', 'https://127.0.0.1/a.m3u8',
                'https://localhost/a.m3u8', 'https://user:pass@example.com/a',
                'https://example.com/a?token=xyz', 'https://example.com/a#frag',
-               'https://private.local/a', 'https://example.com:444/a']
+               'https://private.local/a', 'https://example.com:444/a',
+               'https://127.1/live.m3u8', 'https://0177.0.0.1/live.m3u8',
+               'https://0x7f.0.0.1/live.m3u8']
         for url in bad:
             with self.subTest(url=url), self.assertRaises(ValueError):
                 safe_public_url(url)
