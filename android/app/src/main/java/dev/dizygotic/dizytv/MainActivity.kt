@@ -256,7 +256,7 @@ class MainActivity:Activity() {
 
     private fun safeMatchdayLink(raw:String):String {
         val url=raw.trim()
-        require(url.length in 10..1500 && !url.contains('\\\\')) { "Invalid public link" }
+        require(url.length in 10..1500 && url.indexOf(92.toChar()) < 0) { "Invalid public link" }
         val uri=java.net.URI(url)
         val host=uri.host?.lowercase()?.trimEnd('.')?:""
         require(uri.scheme=="https" && host.contains('.') && !host.contains("..")
