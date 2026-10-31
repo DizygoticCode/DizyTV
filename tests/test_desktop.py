@@ -1241,7 +1241,7 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse(window.screen_dialog.isFullScreen())
             window.exit_screen_fullscreen()
             self.assertIsNone(window.screen_dialog)
-            self.assertIs(window.video.parentWidget(),window.tabs.widget(0))
+            self.assertIs(window.video.parentWidget(),window.dashboard_hero.widget(0))
             window.player=None
             window.close()
 
@@ -1259,7 +1259,7 @@ class DesktopTests(unittest.TestCase):
             self.assertIs(window.video.parentWidget(),window.screen_dialog)
             window.exit_screen_fullscreen()
             self.assertIsNone(window.screen_dialog)
-            self.assertIs(window.video.parentWidget(),window.tabs.widget(0))
+            self.assertIs(window.video.parentWidget(),window.dashboard_hero.widget(0))
             self.assertIs(window.player,fake)
             window.player=None
             window.close()
