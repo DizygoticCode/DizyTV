@@ -10,6 +10,11 @@ from dizytv.channel_health import (
 
 
 class HealthTests(unittest.TestCase):
+    def test_http_451_is_access_limited_not_missing(self):
+        status,detail=interpret_http(451)
+        self.assertEqual('access-limited',status)
+        self.assertIn('451',detail)
+
     def test_http_categories_distinguish_weak_evidence_and_access_limits(self):
         self.assertEqual('access-limited',interpret_http(403)[0])
         self.assertEqual('missing',interpret_http(404)[0])

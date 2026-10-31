@@ -172,6 +172,8 @@ def interpret_http(code, content_type='', body=b''):
         return ('missing', 'Stream endpoint missing / expired')
     if code == 429:
         return ('rate-limited', 'Provider rate-limited this check; retry later')
+    if code == 451:
+        return ('access-limited', 'HTTP 451: provider reports a legal access restriction; check official availability')
     if code >= 500:
         return ('provider-error', 'Stream provider returned HTTP '+str(code))
     if code >= 400:

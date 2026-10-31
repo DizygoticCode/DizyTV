@@ -68,6 +68,7 @@ If importing or playback fails:
 - Try another legitimate channel from the same playlist. HTTP/HLS endpoints can expire or have inaccessible media segments even when the manifest responds.
 - Use **Source status** to see which playlist imported and which failed.
 - Inspect **Tools → Check channel health** for an HTTP hint, not a conclusive codec test.
+- **Regional access notice:** On desktop, an HTTP 403/451 diagnosis after failed playback may show a visible **Possible regional restriction** notice in Live TV. Neither response proves geoblocking: subscriptions and authentication rules can cause similar failures. Android shows an **unconfirmed playback** notice after a sustained failed start, without asserting a regional restriction. Check the broadcaster's authorised viewing areas and any VPN you already use. DizyTV does **not** include or operate a VPN, change locations automatically, defeat DRM or guarantee access.
 - Check VLC 3 installation and your active stream subtitles/video decoder settings. Direct HLS performance is different from Ace engine peer health.
 - For Windows updater errors, close the visible app and finish recordings first. The installer protects an active recorder worker rather than indiscriminately killing it.
 

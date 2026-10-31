@@ -40,6 +40,16 @@ class MainActivity:Activity() {
     private var timeshiftGeneration=0
     private var timeshiftLag=0.0
     private var timeshiftPausedAt=0L
+    private var playbackAttempt=0
+    private var accessMessage=""
+    private var accessNotice:TextView?=null
+    private fun showAccessNotice(message:String) {
+        accessMessage=message
+        accessNotice?.apply {
+            text=message
+            visibility=if(message.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
     private lateinit var brandRow:LinearLayout; private lateinit var mainNav:HorizontalScrollView
     private var cinemaMode=false; private var screenMode=false
     private var seekBar:SeekBar?=null; private var seekInfo:TextView?=null
@@ -50,6 +60,7 @@ class MainActivity:Activity() {
     private val playbackTicker=object:Runnable {
         override fun run() {
             if(page=="Live") {
+                if(player.isPlaying && accessMessage.isNotEmpty()) showAccessNotice("")
                 refreshLiveIndicator()
                 val length=player.length
                 val current=player.time
@@ -170,7 +181,7 @@ class MainActivity:Activity() {
     override fun onPause() {
         handler.removeCallbacks(ticker)
         // Never spool video secretly while the viewing Activity is in the background.
-        if(timeshift!=null || pendingTimeshift!=null)player.stop()
+        if(timeshift!=null || pendingTimeshift!=null) { playbackAttempt++; showAccessNotice(""); player.stop() }
         clearTimeshift()
         super.onPause()
     }
@@ -327,6 +338,13 @@ class MainActivity:Activity() {
                 body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
             }
         }
+        val notice=text(accessMessage,12f).apply {
+            setTextColor(Color.rgb(255,211,129))
+            background=rounded(panel,Color.rgb(178,136,52))
+            visibility=if(accessMessage.isEmpty()) View.GONE else View.VISIBLE
+        }
+        accessNotice=notice
+        body.addView(notice)
         val layout=VLCVideoLayout(this); video=layout
         body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
         val controls=row()
@@ -374,7 +392,7 @@ class MainActivity:Activity() {
         volumeBar.addView(volume,LinearLayout.LayoutParams(0,dp(44),1f));body.addView(volumeBar)
         if(!compact) {
             val more=row()
-            more.addView(button("■ Stop") { player.stop(); clearTimeshift() })
+            more.addView(button("■ Stop") { playbackAttempt++; showAccessNotice(""); player.stop(); clearTimeshift() })
             more.addView(button("● Record now") { recordNow() })
             more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } })
             more.addView(button("Map EPG") { mapChannel() })
@@ -574,6 +592,9 @@ class MainActivity:Activity() {
         }
     }
     private fun playMediaUrl(ch:JSONObject,s:JSONObject,isAce:Boolean,source:String) {
+        playbackAttempt++
+        val attempt=playbackAttempt
+        showAccessNotice("")
         val media=Media(lib,Uri.parse(source))
         player.media=media; media.release(); player.play()
         val guideKey=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
@@ -586,8 +607,12 @@ class MainActivity:Activity() {
             else if(isAce) "Connecting to Ace Stream…" else "Connecting to HTTP/HLS stream…"
         val channelId=ch.getString("id")
         handler.postDelayed({
-            if(selected?.optString("id")==channelId && page=="Live" && !player.isPlaying)
-                status.text="Still buffering or unavailable. This stream may be offline, geoblocked or DRM-protected."
+            if(attempt==playbackAttempt && selected?.optString("id")==channelId &&
+               page=="Live" && !player.isPlaying) {
+                status.text="Playback not confirmed for this channel"
+                // A VLC timeout alone cannot establish geoblocking.
+                if(!isAce) showAccessNotice(StreamAccessHelp.unconfirmedPlayback)
+            }
         },25000)
     }
     private fun toggleFavourite(ch:JSONObject) {
