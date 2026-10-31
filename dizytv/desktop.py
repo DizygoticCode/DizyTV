@@ -3320,14 +3320,33 @@ class MainWindow(QMainWindow):
                 self._subtitle_auto_applied=False
             return
         if self._subtitle_manual_track is not None:
+            # Reparenting an HWND/NSView can reset VLC's active SPU even though
+            # the viewer manually selected a track. Reapply it only if lost.
+            target=self._subtitle_manual_track
+            if isinstance(target,int) and target!=-1:
+                try:
+                    if self.player.video_get_spu()!=target:
+                        from .player_worker import AsyncPlayer
+                        if isinstance(self.player,AsyncPlayer):
+                            self.player.set_subtitle(target,lambda value,error:
+                                self.status.setText('Could not restore the selected subtitle track')
+                                if error or value!=0 else None)
+                        else:
+                            self.player.video_set_spu(target)
+                except (AttributeError,OSError,RuntimeError):
+                    pass
             return
         tracks=subtitle_tracks(self.player)
         signature=tuple(tracks)
         if not tracks:return
-        if self._subtitle_auto_applied and signature==self._subtitle_track_signature:return
         target=suggested_subtitle(tracks,self.state['settings'].get('subtitle_language','Auto'))
+        if target is None:return
+        # Track discovery may be unchanged but the output was recreated.
+        # Reapply the preferred language when VLC silently reverts to Off.
+        if (self._subtitle_auto_applied and signature==self._subtitle_track_signature
+                and self.player.video_get_spu()==target):
+            return
         try:
-            if target is None:return
             if self.player.video_get_spu()!=target:
                 from .player_worker import AsyncPlayer
                 if isinstance(self.player,AsyncPlayer):
@@ -3944,7 +3963,8 @@ class MainWindow(QMainWindow):
     def eventFilter(self,obj,event):
         if obj is self.video and event.type() in (QEvent.Resize,QEvent.Move):
             self.position_auto_caption_overlay()
-        if obj is self.screen_dialog and event.type() in (QEvent.Resize,QEvent.Move):
+        if obj is self.screen_dialog and event.type() in (
+                QEvent.Resize,QEvent.Move,QEvent.ScreenChangeInternal):
             self.position_auto_caption_overlay()
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
@@ -4237,7 +4257,12 @@ class MainWindow(QMainWindow):
         if self._auto_caption_overlay is not None:
             self.destroy_auto_caption_overlay()
             if self._auto_caption_worker is not None and self._auto_caption_text:
-                self.receive_auto_caption(self._auto_caption_seq,self._auto_caption_text)
+                # Caption is already visible; don't put it back into the
+                # user-configured delay queue when docking/detaching.
+                self.create_auto_caption_overlay()
+                self._auto_caption_label.setText(self._auto_caption_text)
+                self.position_auto_caption_overlay()
+                self._auto_caption_overlay.show()
         self.detached_mouse_position=QCursor.pos()
         self.detached_mouse_timer.start()
         self.show_detached_controls()
@@ -4307,7 +4332,12 @@ class MainWindow(QMainWindow):
         if self._auto_caption_overlay is not None:
             self.destroy_auto_caption_overlay()
         if self._auto_caption_worker is not None and self._auto_caption_text:
-            self.receive_auto_caption(self._auto_caption_seq,self._auto_caption_text)
+            # Reparent the visible text immediately without imposing the
+            # Vosk delay a second time or resetting its presentation clock.
+            self.create_auto_caption_overlay()
+            self._auto_caption_label.setText(self._auto_caption_text)
+            self.position_auto_caption_overlay()
+            self._auto_caption_overlay.show()
         screen.close()
         screen.deleteLater()
 
