@@ -550,8 +550,8 @@ class DesktopTests(unittest.TestCase):
             store.update(lambda s:s.update(channels=[channel]))
             w=MainWindow(store,start_worker=False)
             self.assertEqual('Green',w.theme_picker.currentText())
-            self.assertEqual(3,w.tabs.count())
-            self.assertEqual(['Live TV','TV Guide','Recordings'],
+            self.assertEqual(4,w.tabs.count())
+            self.assertEqual(['Live TV','TV Guide','Recordings','⚽ Matchday'],
                              [w.tabs.tabText(i) for i in range(w.tabs.count())])
             self.assertFalse(w.tabs.tabBar().expanding())
             self.assertTrue(w.tabs.tabBar().usesScrollButtons())
@@ -1672,7 +1672,7 @@ class DesktopTests(unittest.TestCase):
             window.show(); self.app.processEvents()
             self.assertEqual('DizyTV', window.windowTitle())
             self.assertIn('auto', window.timezone_label.text().lower())
-            self.assertEqual(3, window.tabs.count())
+            self.assertEqual(4, window.tabs.count())
             self.assertEqual(0, window.channels.count())
             window.close()
 
