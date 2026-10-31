@@ -186,8 +186,11 @@ def safe_public_url(url):
     host = (parts.hostname or '').lower().rstrip('.')
     # Browsers decode %31%32%37 and even encoded periods before hostname
     # resolution. Reject escaped authority components before external dispatch.
-    if '%' in parts.netloc:
-        raise ValueError('Encoded hostnames are not permitted')
+    # Unicode full-width digits/dots and IDNA names can normalize to private
+    # addresses in browsers. Keep source authorities plain ASCII; non-ASCII
+    # paths can still be used.
+    if '%' in parts.netloc or any(ord(c) > 127 for c in parts.netloc):
+        raise ValueError('Encoded or non-ASCII hostnames are not permitted')
     if (parts.scheme != 'https' or not host or parts.username or parts.password
             or parts.query or parts.fragment or '\\' in url or parts.port not in (None, 443)
             or host.endswith(('.localhost', '.local', '.internal', '.test'))
