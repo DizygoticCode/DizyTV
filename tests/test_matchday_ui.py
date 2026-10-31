@@ -44,6 +44,23 @@ class MatchdayUITests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_saved_timezone_survives_qt_reparent_without_per_fixture_disk_reads(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=Store(folder)
+            store.update(lambda state: state['settings'].update(timezone='America/Los_Angeles'))
+            window=MainWindow(store,start_worker=False)
+            try:
+                page=window.matchday_page
+                # QTabWidget reparents pages to an internal QStackedWidget.
+                self.assertIsNot(page.parentWidget(),window)
+                with patch.object(store,'try_read',side_effect=AssertionError('read in render')):
+                    self.assertEqual('America/Los_Angeles',page._display_zone().key)
+                    page.fixtures=[dict(id='37',kickoff=1793491200,
+                        home='Southampton',away='QPR',competition='Championship')]
+                    page.render()
+            finally:
+                window.close()
+
     def test_direct_hls_uses_existing_native_player_without_fake_channel(self):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
