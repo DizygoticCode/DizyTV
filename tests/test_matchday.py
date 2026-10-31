@@ -8,6 +8,7 @@ import unittest
 from dizytv.matchday import (LEAGUES, add_source, cached_fixtures,
                              collect_fixtures, is_favourite, load_sources,
                              parse_fixtures, safe_public_url, validate_source)
+from dizytv.matchday_web import _private_host
 
 
 def event(event_id='1234', league='4329', home='Southampton', away='QPR',
@@ -93,10 +94,18 @@ class MatchdayTests(unittest.TestCase):
                'https://127.1/live.m3u8', 'https://0177.0.0.1/live.m3u8',
                'https://0x7f.0.0.1/live.m3u8',
                'https://%31%32%37.0.0.1/watch', 'https://127%2e0%2e0%2e1/watch',
-               'https://%6cocalhost/watch']
+               'https://%6cocalhost/watch',
+               'https://１２７.０.０.１/watch',
+               'https://１２７.0.0.1/watch',
+               'https://ｅｘａｍｐｌｅ.org/watch']
         for url in bad:
             with self.subTest(url=url), self.assertRaises(ValueError):
                 safe_public_url(url)
+        self.assertEqual('https://example.org/café',
+                         safe_public_url('https://example.org/café'))
+        self.assertTrue(_private_host('１２７.０.０.１'))
+        self.assertTrue(_private_host('%31%32%37.0.0.1'))
+        self.assertFalse(_private_host('cdn.example.org'))
         sample = {'event_id':'1234', 'label':'Authorised viewing page',
                   'url':'https://example.org/watch', 'kind':'web'}
         with self.assertRaisesRegex(ValueError, 'permission'):
