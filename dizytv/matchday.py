@@ -184,6 +184,10 @@ def safe_public_url(url):
         raise ValueError('Source URL length is invalid')
     parts = urlsplit(url)
     host = (parts.hostname or '').lower().rstrip('.')
+    # Browsers decode %31%32%37 and even encoded periods before hostname
+    # resolution. Reject escaped authority components before external dispatch.
+    if '%' in parts.netloc:
+        raise ValueError('Encoded hostnames are not permitted')
     if (parts.scheme != 'https' or not host or parts.username or parts.password
             or parts.query or parts.fragment or '\\' in url or parts.port not in (None, 443)
             or host.endswith(('.localhost', '.local', '.internal', '.test'))
