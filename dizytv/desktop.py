@@ -3300,11 +3300,22 @@ class MainWindow(QMainWindow):
                 current=self.player.video_get_spu()
                 if (current!=-1 or not self._subtitle_auto_applied or
                         signature!=self._subtitle_track_signature):
-                    accepted=self.player.video_set_spu(-1)==0
-                    # A decoder without published tracks is not yet ready;
-                    # check again on the next timer, even if it returned 0.
-                    self._subtitle_auto_applied=accepted and bool(tracks)
-                    self._subtitle_track_signature=signature
+                    from .player_worker import AsyncPlayer
+                    if isinstance(self.player,AsyncPlayer):
+                        generation=self.player.generation
+                        def completed(value,error):
+                            if (self.player is not None and self.player.generation==generation
+                                    and (self._subtitle_session_all_off or self._subtitle_manual_track==-1
+                                         or not self.state['settings'].get('subtitles_enabled',True))):
+                                self._subtitle_auto_applied=(error is None and value==0 and bool(tracks))
+                                self._subtitle_track_signature=signature
+                        self.player.set_subtitle(-1,completed)
+                    else:
+                        accepted=self.player.video_set_spu(-1)==0
+                        # A decoder without published tracks is not yet ready;
+                        # check again on the next timer, even if it returned 0.
+                        self._subtitle_auto_applied=accepted and bool(tracks)
+                        self._subtitle_track_signature=signature
             except (AttributeError,OSError,RuntimeError):
                 self._subtitle_auto_applied=False
             return
@@ -3317,10 +3328,22 @@ class MainWindow(QMainWindow):
         target=suggested_subtitle(tracks,self.state['settings'].get('subtitle_language','Auto'))
         try:
             if target is None:return
-            if self.player.video_get_spu()!=target and self.player.video_set_spu(target)!=0:
-                # HLS caption tracks can be listed before VLC is ready to
-                # activate them. Try again on the next timer tick.
-                return
+            if self.player.video_get_spu()!=target:
+                from .player_worker import AsyncPlayer
+                if isinstance(self.player,AsyncPlayer):
+                    generation=self.player.generation
+                    def completed(value,error):
+                        if (self.player is not None and self.player.generation==generation
+                                and self._subtitle_manual_track is None
+                                and not self._subtitle_session_all_off
+                                and error is None and value==0):
+                            self._subtitle_auto_applied=True
+                            self._subtitle_track_signature=signature
+                    self.player.set_subtitle(target,completed)
+                    return
+                if self.player.video_set_spu(target)!=0:
+                    # Track may be listed before native output is ready.
+                    return
             self._subtitle_auto_applied=True
             self._subtitle_track_signature=signature
         except (AttributeError,OSError,RuntimeError):pass
@@ -3341,7 +3364,14 @@ class MainWindow(QMainWindow):
         if not self.player or not self.playback_started:return
         if track!=-1 and track not in {key for key,_ in subtitle_tracks(self.player)}:return
         try:
-            if self.player.video_set_spu(track)!=0:
+            from .player_worker import AsyncPlayer
+            if isinstance(self.player,AsyncPlayer):
+                generation=self.player.generation
+                def completed(value,error):
+                    if self.player is not None and self.player.generation==generation and (error or value!=0):
+                        self.status.setText('This channel could not enable the selected subtitle track.')
+                self.player.set_subtitle(track,completed)
+            elif self.player.video_set_spu(track)!=0:
                 self.status.setText('This channel cannot enable the selected subtitle track.')
                 return
         except (AttributeError,OSError,RuntimeError):
@@ -3363,8 +3393,16 @@ class MainWindow(QMainWindow):
         if not path:return
         try:
             path=external_subtitle_path(path)
-            if not self.player.video_set_subtitle_file(path):
+            from .player_worker import AsyncPlayer
+            if isinstance(self.player,AsyncPlayer):
+                generation=self.player.generation
+                def completed(value,error):
+                    if self.player is not None and self.player.generation==generation and (error or not value):
+                        self.status.setText('VLC could not read this subtitle file')
+                self.player.set_subtitle_file(path,completed)
+            elif not self.player.video_set_subtitle_file(path):
                 raise ValueError('VLC could not read this subtitle file')
+            self._subtitle_session_all_off=False
             # File subtitles are an explicit user choice: the periodic
             # broadcast preference must not replace the newly attached slave.
             self._subtitle_manual_track='external'
