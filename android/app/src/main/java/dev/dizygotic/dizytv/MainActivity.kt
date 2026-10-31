@@ -435,8 +435,12 @@ class MainActivity:Activity() {
             more.addView(button("● Record now") { recordNow() })
             more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } })
             more.addView(button("Map EPG") { mapChannel() })
-            body.addView(HorizontalScrollView(this).apply { addView(more) })
-            body.addView(button("Edit categories") { editCategories() })
+            more.addView(button("Edit categories") { editCategories() })
+            body.addView(HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled=false;addView(more)
+            })
+            // Keep the preview no taller than the former Edit categories row:
+            // a phone's actual VLC video must retain the available height.
             // Compact EPG preview stays connected to the existing native guide.
             // The full guide retains its tap-to-play / long-press-to-record.
             val guideCard=LinearLayout(this).apply {
