@@ -245,7 +245,7 @@ def desktop_style(scale=100, button_size='Normal', theme='Green'):
                .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
     colors=THEME_COLORS.get(theme, {})
     converted=re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
-    return converted+'\n'+modern_desktop_style(theme)+'\n'+dashboard_style(theme)
+    return converted+'\n'+modern_desktop_style(theme)+'\n'+dashboard_style(theme,scale)
 
 
 
