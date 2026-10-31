@@ -3343,8 +3343,7 @@ class MainWindow(QMainWindow):
         if target is None:return
         # Track discovery may be unchanged but the output was recreated.
         # Reapply the preferred language when VLC silently reverts to Off.
-        if (self._subtitle_auto_applied and signature==self._subtitle_track_signature
-                and self.player.video_get_spu()==target):
+        if self._subtitle_auto_applied and signature==self._subtitle_track_signature:
             return
         try:
             if self.player.video_get_spu()!=target:
@@ -4253,6 +4252,11 @@ class MainWindow(QMainWindow):
         if fullscreen:screen.showFullScreen()
         else:screen.show()
         self.video.show()
+        # Detaching/docking can recreate the libVLC video output. Retry a
+        # previously auto-selected subtitle once on the replacement surface,
+        # not on every five-second tick when track status is stale.
+        self._subtitle_auto_applied=False
+        self._subtitle_track_signature=()
         self._rebind_video()
         if self._auto_caption_overlay is not None:
             self.destroy_auto_caption_overlay()
@@ -4328,6 +4332,11 @@ class MainWindow(QMainWindow):
         self.video.setParent(None)
         self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
+        # Detaching/docking can recreate the libVLC video output. Retry a
+        # previously auto-selected subtitle once on the replacement surface,
+        # not on every five-second tick when track status is stale.
+        self._subtitle_auto_applied=False
+        self._subtitle_track_signature=()
         self._rebind_video()
         if self._auto_caption_overlay is not None:
             self.destroy_auto_caption_overlay()
