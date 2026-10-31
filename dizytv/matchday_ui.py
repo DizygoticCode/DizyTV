@@ -45,6 +45,8 @@ class MatchdayPage(QWidget):
         super().__init__(parent)
         self.setObjectName('matchdayPage')
         self.store = store
+        # Qt reparents tabs to QStackedWidget: keep owner independent of parent().
+        self._main_window = parent
         self.on_hls_play = on_hls_play
         self.fixtures = []
         self.visible = []
@@ -173,7 +175,7 @@ class MatchdayPage(QWidget):
     def _display_zone(self):
         # No I/O in render(): a 20,000-channel state validation would stall Qt
         # if repeated for every listed fixture on every keystroke.
-        owner = self.parent()
+        owner = self._main_window
         value = (getattr(owner, 'state', {}) or {}).get('settings', {}).get('timezone', 'auto')
         try:
             return ZoneInfo(value) if value != 'auto' else datetime.now().astimezone().tzinfo
