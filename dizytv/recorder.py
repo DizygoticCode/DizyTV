@@ -100,7 +100,7 @@ def _bounded_stream_write(source, output, result, folder, reserve, max_bytes,
 
 
 def _record_hls(url, opener, output, result, folder, end, reserve,
-                max_bytes, cancel, progress):
+                max_bytes, cancel, progress, initial_manifest=None):
     playlist = url
     variants = set()
     visited = set()
@@ -109,11 +109,15 @@ def _record_hls(url, opener, output, result, folder, end, reserve,
     while time.time() < end:
         if cancel(): raise RecordingStopped('Recording stopped by user')
         try:
-            with _open_recording(opener, playlist) as response:
-                body = response.read(MAX_MANIFEST_BYTES+1)
-                if len(body)>MAX_MANIFEST_BYTES:
-                    raise ValueError('HLS manifest exceeds 2 MiB')
-                final_url = response.geturl()
+            if initial_manifest is not None:
+                body, final_url = initial_manifest
+                initial_manifest = None
+            else:
+                with _open_recording(opener, playlist) as response:
+                    body = response.read(MAX_MANIFEST_BYTES+1)
+                    if len(body)>MAX_MANIFEST_BYTES:
+                        raise ValueError('HLS manifest exceeds 2 MiB')
+                    final_url = response.geturl()
         except (TimeoutError, socket.timeout) as exc:
             if cancel(): raise RecordingStopped('Recording stopped by user') from None
             raise ValueError('HLS manifest request timed out') from None
@@ -183,10 +187,15 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
             hls=('mpegurl' in content or urlsplit(response.geturl()).path.lower().endswith('.m3u8')
                  or head.startswith(b'#EXTM3U'))
             if hls:
-                # The first response has already been fetched. Parsing the manifest
-                # again is safe; the source may be a short-lived live playlist.
+                # Validate the *same* manifest response used for sniffing, before
+                # any segment request. A second fetch could have different content,
+                # and must not happen for rejected encryption/byte-range manifests.
+                body=head+response.read(MAX_MANIFEST_BYTES+1)
+                if len(body)>MAX_MANIFEST_BYTES:
+                    raise ValueError('HLS manifest exceeds 2 MiB')
                 _record_hls(response.geturl(),opener,output,result,folder,end,
-                            reserve,max_bytes,cancel,progress)
+                            reserve,max_bytes,cancel,progress,
+                            initial_manifest=(body,response.geturl()))
             else:
                 if any(k in content for k in ('text/','json','html')) or head[:1]!=b'\x47':
                     raise ValueError('Recording requires a direct MPEG-TS stream or clear TS/HLS playlist')
@@ -230,11 +239,17 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
         result['error']='Recording source returned HTTP '+str(exc.code)
         result['status']='partial' if result['bytes'] else 'failed'
     except (URLError,OSError,ValueError,UnicodeError) as exc:
-        if isinstance(exc, URLError):
+        # A source may time out while a user has already clicked Cancel.
+        # Report the user's cancellation, not a misleading decoder failure.
+        if cancel():
+            result['status']='partial' if result['bytes'] else 'cancelled'
+            result['error']='Recording stopped by user'
+        elif isinstance(exc, URLError):
             result['error']='Recording source connection failed'
         else:
             result['error']=str(exc)[:250]
-        result['status']='partial' if result['bytes'] else 'failed'
+        if not cancel():
+            result['status']='partial' if result['bytes'] else 'failed'
     finally:
         if outpath and outpath.exists():
             if result['bytes']:
