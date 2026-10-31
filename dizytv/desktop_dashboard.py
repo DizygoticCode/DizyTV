@@ -309,14 +309,23 @@ def install_dashboard(window, live_layout, root_layout):
     timeline_scroll.setWidgetResizable(True)
     timeline_scroll.setMinimumHeight(85)
     timeline_layout.addWidget(timeline_scroll, 1)
-    toggle.clicked.connect(
-        lambda: (
-            timeline_scroll.setVisible(not timeline_scroll.isVisible()),
-            toggle.setText('Hide timeline' if timeline_scroll.isVisible() else 'Show timeline'),
-        )
-    )
     window.dashboard_grid = dashboard_grid
     window.dashboard_timeline = timeline
     live_layout.addWidget(timeline, 3)
+
+    def toggle_timeline():
+        expanded = not timeline_scroll.isVisible()
+        timeline_scroll.setVisible(expanded)
+        toggle.setText('Hide timeline' if expanded else 'Show timeline')
+        # Give the native video back its space on collapse, preserving the
+        # guide's channels/scroll position and allowing one-click expansion.
+        margins = timeline_layout.contentsMargins()
+        toolbar_height = max(toggle.sizeHint().height(), expand.sizeHint().height(),
+                             title.sizeHint().height()) + margins.top() + margins.bottom() + 12
+        timeline.setMaximumHeight(16777215 if expanded else toolbar_height)
+        live_layout.setStretch(live_layout.indexOf(timeline), 3 if expanded else 0)
+        timeline.updateGeometry()
+
+    toggle.clicked.connect(toggle_timeline)
     window.tabs.currentChanged.connect(lambda _index: _highlight_navigation(window))
     update_dashboard_details(window)
