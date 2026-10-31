@@ -41,6 +41,7 @@ from .health_history import HealthHistory
 from .duplicates import duplicate_groups, independent_candidates
 from .system_usage import SystemSampler
 from .ui_diagnostics import UiHangMonitor
+from .desktop_dashboard import dashboard_style, install_dashboard, update_dashboard_details
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -244,7 +245,7 @@ def desktop_style(scale=100, button_size='Normal', theme='Green'):
                .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
     colors=THEME_COLORS.get(theme, {})
     converted=re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
-    return converted+'\n'+modern_desktop_style(theme)
+    return converted+'\n'+modern_desktop_style(theme)+'\n'+dashboard_style(theme)
 
 
 
@@ -2074,6 +2075,7 @@ class MainWindow(QMainWindow):
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
         layout.insertWidget(1,self.global_search_button)
+        install_dashboard(self,live_layout,layout)
         self.global_search_shortcut=QShortcut(QKeySequence('Ctrl+K'),self)
         self.global_search_shortcut.activated.connect(self.open_global_search)
         self.status=QLabel('Ready  •  Configure sources and recording storage in Settings');self.status.setObjectName('appStatus');layout.addWidget(self.status)
@@ -2513,11 +2515,14 @@ class MainWindow(QMainWindow):
     def choose_channel(self,item,*_):
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
     def render_now(self):
-        if not self.selected:return
+        if not self.selected:
+            update_dashboard_details(self)
+            return
         cid=self.matched_guide(self.selected); now=time.time()
         by_channel,_=self.guide_index()
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(display_channel_name(self.selected['name'])+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else display_channel_name(self.selected['name'])+' — no guide match')
+        update_dashboard_details(self,items)
     def render_guide(self):
         # Pass ALL channels matching the catalogue's active filters. GuideGrid
         # paints only its visible rows; channels without EPG are retained.
@@ -2543,6 +2548,9 @@ class MainWindow(QMainWindow):
                 programmes.append(p)
         self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
+        if hasattr(self,'dashboard_grid'):
+            self.dashboard_grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
+            self.dashboard_grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(
             format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone())+
             f'  •  {len(channels):,} selected channels')
@@ -2558,6 +2566,8 @@ class MainWindow(QMainWindow):
         self.theme_picker.setCurrentText(theme)
         self.theme_picker.blockSignals(False)
         self.grid.set_theme(theme)
+        if hasattr(self,'dashboard_grid'):
+            self.dashboard_grid.set_theme(theme)
         for rail in (self.seek_slider,self.volume_slider,self.screen_seek_slider):
             if rail is not None:rail.set_rail_theme(theme)
         if self.detached_controls is not None:
