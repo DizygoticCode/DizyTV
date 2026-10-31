@@ -67,6 +67,45 @@ class DashboardTests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_sports_shortcut_filters_canonical_sport_channel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(directory)
+            channel = dict(
+                id='a'*40, name='Local Football', stream='https://example.com/clear.m3u8',
+                group='Sport', genre='Sport', country='United Kingdom',
+                source='https://iptv-org.github.io/iptv/countries/uk.m3u',
+                transport='HTTP', tvg_id='football-uk', kind='TV')
+            store.update(lambda state: state.update(channels=[channel]))
+            window = MainWindow(store, start_worker=False)
+            try:
+                navigate(window, 'Sports')
+                self.assertEqual('Sport', window.section_filter.currentData())
+                self.assertEqual(1, window.channels.count())
+                self.assertEqual('Local Football', window.channels.item(0).data(Qt.UserRole)['name'])
+            finally:
+                window.close()
+
+    def test_navigation_buttons_are_not_clipped_at_saved_80_percent_scale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(directory)
+            store.update(lambda state: state['settings'].update(
+                ui_scale=80, button_size='Compact'))
+            window = MainWindow(store, start_worker=False)
+            try:
+                window.resize(640, 460)
+                window.show()
+                for _ in range(3):
+                    self.app.processEvents()
+                nav = window.dashboard_nav_scroll
+                self.assertGreaterEqual(
+                    nav.height(), nav.widget().sizeHint().height())
+                self.assertEqual(80, store.read()['settings']['ui_scale'])
+                bar = nav.horizontalScrollBar()
+                if bar.maximum() > bar.minimum():
+                    self.assertTrue(window.dashboard_nav_more.isVisible())
+            finally:
+                window.close()
+
     def test_real_programme_detail_and_theme_and_scale(self):
         from dizytv.desktop_dashboard import update_dashboard_details
         with tempfile.TemporaryDirectory() as directory:
