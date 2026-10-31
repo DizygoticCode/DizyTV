@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import OrderedDict
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -114,6 +115,23 @@ class AsyncPlayerTests(unittest.TestCase):
             self.app.processEvents()
             time.sleep(.002)
         self.assertTrue(condition(), 'Timed out waiting for player work')
+
+    def test_pending_native_video_rebind_survives_media_generation(self):
+        from dizytv.player_worker import AsyncPlayer, _empty_snapshot
+        # Exercise queue coalescing without a native VLC/Qt worker race.
+        facade = SimpleNamespace(_condition=threading.Condition(),
+                                 _pending=OrderedDict(), _latest={},
+                                 _generation=0, _serial=0, _closed=False,
+                                 _snapshot=_empty_snapshot())
+        AsyncPlayer._enqueue(facade, 'set_hwnd', (12345,))
+        AsyncPlayer._enqueue(facade, 'video_set_spu', (3,))
+        AsyncPlayer._enqueue(facade, 'play_url',
+                             ('https://example.test/new.ts', (), False),
+                             new_media=True)
+        self.assertIn('video_output', facade._pending)
+        self.assertEqual('set_hwnd', facade._pending['video_output'].operation)
+        self.assertNotIn('video_set_spu', facade._pending)
+        self.assertIn('media', facade._pending)
 
     def test_slow_native_start_keeps_qt_heartbeat_live(self):
         native = NativeFixture()
