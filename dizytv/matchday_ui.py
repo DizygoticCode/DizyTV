@@ -104,6 +104,10 @@ class MatchdayPage(QWidget):
         self.open_button = QPushButton('Open selected source')
         self.open_button.clicked.connect(self.open_source)
         buttons.addWidget(self.open_button)
+        self.embed_button = QPushButton('Try embedded webpage')
+        self.embed_button.setToolTip('Experimental isolated WebEngine; opens browser if unavailable')
+        self.embed_button.clicked.connect(self.open_embed)
+        buttons.addWidget(self.embed_button)
         layout.addLayout(buttons)
         self.status = QLabel('No fixtures loaded. Refresh to request public fixture metadata.')
         self.status.setWordWrap(True)
@@ -252,6 +256,26 @@ class MatchdayPage(QWidget):
             self.status.setText('Locally saved as unverified. No source data was sent to a directory.')
         except (ValueError,OSError) as exc:
             QMessageBox.warning(self,'Source not saved',str(exc))
+
+    def open_embed(self):
+        row = self.sources.currentRow()
+        source_list = getattr(self, '_sources', [])
+        if not 0 <= row < len(source_list):
+            self.status.setText('Select a saved browser source first.')
+            return
+        source = source_list[row]
+        if source['kind'] != 'web':
+            self.status.setText('A direct HLS link belongs in the VLC player, not WebEngine.')
+            return
+        from .matchday_web import open_embedded_player
+        try:
+            if open_embedded_player(source['url'], self):
+                self.status.setText('Third-party page opened in isolated WebEngine (playback not verified).')
+            else:
+                QDesktopServices.openUrl(QUrl(source['url']))
+                self.status.setText('Embedded player unavailable; using the external browser.')
+        except (OSError, ValueError, RuntimeError) as exc:
+            self.status.setText('Embedded playback not available: '+str(exc))
 
     def open_source(self):
         entry=self.chosen_fixture()
