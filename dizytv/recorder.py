@@ -35,6 +35,30 @@ def _open_recording(opener, url):
                                'Accept-Encoding':'identity'}), timeout=1.5)
 
 
+def _read_cancellable(source, max_bytes, cancel, deadline):
+    """Read bounded HTTP data incrementally, checking cancellation and deadline.
+
+    Never use unbounded read() on a trickle-fed playlist: the serial recorder
+    needs to yield promptly so other scheduled recordings can start.
+    """
+    chunks=[]
+    total=0
+    while True:
+        if cancel():
+            raise RecordingStopped('Recording stopped by user')
+        if time.time()>=deadline:
+            raise RecordingStopped('Recording timer elapsed while reading source')
+        # read1 returns available bytes, rather than waiting for EOF/full size.
+        chunk=source.read1(min(16384,max_bytes+1-total))
+        if not chunk:
+            break
+        total+=len(chunk)
+        if total>max_bytes:
+            raise ValueError('HLS response exceeds configured size limit')
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
 def _manifest(text, origin):
     """Read supported, unencrypted TS HLS. Never dereference keys or byte ranges."""
     if not text.lstrip('\ufeff').startswith('#EXTM3U'):
@@ -114,9 +138,7 @@ def _record_hls(url, opener, output, result, folder, end, reserve,
                 initial_manifest = None
             else:
                 with _open_recording(opener, playlist) as response:
-                    body = response.read(MAX_MANIFEST_BYTES+1)
-                    if len(body)>MAX_MANIFEST_BYTES:
-                        raise ValueError('HLS manifest exceeds 2 MiB')
+                    body = _read_cancellable(response,MAX_MANIFEST_BYTES,cancel,end)
                     final_url = response.geturl()
         except (TimeoutError, socket.timeout) as exc:
             if cancel(): raise RecordingStopped('Recording stopped by user') from None
@@ -208,9 +230,7 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
                 # Validate the *same* manifest response used for sniffing, before
                 # any segment request. A second fetch could have different content,
                 # and must not happen for rejected encryption/byte-range manifests.
-                body=head+response.read(MAX_MANIFEST_BYTES+1)
-                if len(body)>MAX_MANIFEST_BYTES:
-                    raise ValueError('HLS manifest exceeds 2 MiB')
+                body=head+_read_cancellable(response,MAX_MANIFEST_BYTES-len(head),cancel,end)
                 _record_hls(response.geturl(),opener,output,result,folder,end,
                             reserve,max_bytes,cancel,progress,
                             initial_manifest=(body,response.geturl()))
