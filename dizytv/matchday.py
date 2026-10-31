@@ -124,7 +124,7 @@ def collect_fixtures(today=None, fetch=None):
     return sorted(matches.values(), key=lambda event: (event['kickoff'], event['id'])), errors
 
 
-def cached_fixtures(folder, fetch=None, refresh=False, now=None):
+def cached_fixtures(folder, fetch=None, refresh=False, now=None, offline=False):
     """Cache separately from state.json: never erase recordings or settings."""
     path = Path(folder) / 'matchday-fixtures.json'
     now = time.time() if now is None else now
@@ -138,6 +138,8 @@ def cached_fixtures(folder, fetch=None, refresh=False, now=None):
                     return prior['fixtures'], [], True
     except (OSError, ValueError, TypeError):
         pass
+    if offline:
+        return (prior['fixtures'] if prior else []), [], bool(prior)
     try:
         fixtures, errors = collect_fixtures(fetch=fetch)
         if errors and prior and not fixtures:
