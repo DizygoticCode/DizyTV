@@ -158,7 +158,11 @@ def cached_fixtures(folder, fetch=None, refresh=False, now=None, offline=False):
     atomic_json(attempt_path, {'at': now}, max_bytes=1000)
     try:
         fixtures, errors = collect_fixtures(fetch=fetch)
-        if errors and prior and not fixtures:
+        if errors and prior:
+            # Incomplete free-tier responses must not discard a league's older
+            # fixtures. Retain the entire known-good snapshot until a complete
+            # provider refresh succeeds; surface partial results only when
+            # there was no saved snapshot to preserve.
             return prior['fixtures'], errors, True
         if fixtures:
             atomic_json(path, {'fetched_at': now, 'fixtures': fixtures}, max_bytes=MAX_BODY)
