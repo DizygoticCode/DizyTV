@@ -3988,6 +3988,15 @@ class MainWindow(QMainWindow):
             self.exit_screen_fullscreen()
         self.cinema_mode=not self.cinema_mode
         self.sidebar.setVisible(not self.cinema_mode)
+        # Cinema keeps playback controls available but removes dashboard chrome.
+        # No widget, recording, caption state or saved preference is destroyed.
+        if hasattr(self,'dashboard_nav_shell'):
+            self.dashboard_nav_shell.setVisible(not self.cinema_mode)
+            self.dashboard_timeline.setVisible(not self.cinema_mode)
+            self.dashboard_hero.widget(1).setVisible(not self.cinema_mode)
+            self.sidebar_scroll.setVisible(not self.cinema_mode)
+            self.header_scroll.setVisible(not self.cinema_mode)
+            self.global_search_button.setVisible(not self.cinema_mode)
         for widget in self.header_buttons:
             if widget:widget.setVisible(not self.cinema_mode)
         # Tabs remain accessible when not in cinema mode.
