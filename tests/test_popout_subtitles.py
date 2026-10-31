@@ -44,7 +44,11 @@ class PopoutSubtitleTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.window = MainWindow(Store(self.folder.name), start_worker=False)
-        self.window.timer.stop()
+        # MainWindow owns named clocks; the old `timer` attribute belongs to a
+        # different dialog and never existed on the desktop main window.
+        self.window.clock.stop()
+        self.window.refresh_clock.stop()
+        self.window.guide_clock.stop()
         self.window.player = SubtitlePlayer()
         self.window.playback_started = 1
         self.window.show()
