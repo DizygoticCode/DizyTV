@@ -110,7 +110,7 @@ class AsyncPlayer(QObject):
             if new_media:
                 self._generation += 1
                 self._pending = OrderedDict((key, value) for key, value in
-                                             self._pending.items() if key in _GLOBAL)
+                                             self._pending.items() if value.operation in _GLOBAL)
                 self._snapshot = _empty_snapshot(
                     'State.Opening' if operation == 'play_url' else 'State.Stopped')
             self._serial += 1
