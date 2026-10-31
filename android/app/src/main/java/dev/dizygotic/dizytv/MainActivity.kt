@@ -310,13 +310,17 @@ class MainActivity:Activity() {
                 handler.post {
                     matchdayRefreshing=false
                     result.onSuccess { (fixtures, errors)->
-                        if(fixtures.isNotEmpty()) {
-                            matchdayFixtures=fixtures
-                            val cache=JSONArray()
-                            fixtures.forEach { cache.put(it) }
-                            File(filesDir,"matchday-fixtures.json").writeText(cache.toString())
+                        if(errors>0 && matchdayFixtures.isNotEmpty()) {
+                            status.text="${errors} fixture requests failed; retaining previous cache. Source availability remains unverified."
+                        } else {
+                            if(fixtures.isNotEmpty()) {
+                                matchdayFixtures=fixtures
+                                val cache=JSONArray()
+                                fixtures.forEach { cache.put(it) }
+                                File(filesDir,"matchday-fixtures.json").writeText(cache.toString())
+                            }
+                            status.text="${matchdayFixtures.size} fixture entries; ${errors} provider requests failed. Viewing options unverified."
                         }
-                        status.text="${matchdayFixtures.size} fixture entries; ${errors} provider requests failed. Viewing options unverified."
                     }.onFailure { status.text="Fixture feed unavailable. Last saved list retained." }
                     if(page=="Matchday")render()
                 }
