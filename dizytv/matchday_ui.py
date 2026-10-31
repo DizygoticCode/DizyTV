@@ -170,24 +170,30 @@ class MatchdayPage(QWidget):
         self._task = None
         self.status.setText(error + '. Existing cached fixtures retained.')
 
-    def _day(self, event):
+    def _display_zone(self):
+        # No I/O in render(): a 20,000-channel state validation would stall Qt
+        # if repeated for every listed fixture on every keystroke.
+        owner = self.parent()
+        value = (getattr(owner, 'state', {}) or {}).get('settings', {}).get('timezone', 'auto')
         try:
-            zone = self.store.try_read()
-            preference = (zone or {}).get('settings', {}).get('timezone', 'auto')
-            local = ZoneInfo(preference) if preference != 'auto' else datetime.now().astimezone().tzinfo
-            return datetime.fromtimestamp(event['kickoff'], tz=local)
-        except (OSError, ValueError, TypeError):
-            return datetime.fromtimestamp(event['kickoff']).astimezone()
+            return ZoneInfo(value) if value != 'auto' else datetime.now().astimezone().tzinfo
+        except (ValueError, KeyError, TypeError):
+            return datetime.now().astimezone().tzinfo
+
+    @staticmethod
+    def _day(event, zone):
+        return datetime.fromtimestamp(event['kickoff'], tz=zone)
 
     def render(self, *_):
-        today = datetime.now().astimezone().date()
+        zone = self._display_zone()
+        today = datetime.now(zone).date()
         mode = self.when.currentText()
         favourite = self.fav_team.text().strip()
         filtered = []
         for entry in self.fixtures:
             if not isinstance(entry, dict) or not isinstance(entry.get('kickoff'), int):
                 continue
-            day = self._day(entry).date()
+            day = self._day(entry,zone).date()
             if mode == 'Today' and day != today:
                 continue
             if mode == 'Tomorrow' and day != today + timedelta(days=1):
@@ -202,7 +208,7 @@ class MatchdayPage(QWidget):
         self.visible = filtered
         self.fixtures_table.setRowCount(len(filtered))
         for row, entry in enumerate(filtered):
-            values = [self._day(entry).strftime('%a %d %b %H:%M'),
+            values = [self._day(entry,zone).strftime('%a %d %b %H:%M'),
                       entry.get('home', '')+' v '+entry.get('away',''),
                       entry.get('competition',''), 'Not verified']
             for column, value in enumerate(values):
