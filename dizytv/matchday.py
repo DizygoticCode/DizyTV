@@ -172,6 +172,10 @@ def safe_public_url(url):
             or host.endswith(('.localhost', '.local', '.internal', '.test'))
             or '.' not in host or '..' in host):
         raise ValueError('Only plain public HTTPS URLs without tokens are accepted')
+    # Some URL stacks recognise 127.1, 0177.0.0.1 and 0x7f.0.0.1
+    # as loopback even though ipaddress rejects those spellings.
+    if re.fullmatch(r'(?i)(?:0x[0-9a-f]+|[0-9]+)(?:\\.(?:0x[0-9a-f]+|[0-9]+))*', host):
+        raise ValueError('Numeric hostnames are not permitted')
     try:
         ip_address(host)
     except ValueError:
