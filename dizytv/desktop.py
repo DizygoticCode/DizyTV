@@ -41,6 +41,7 @@ from .health_history import HealthHistory
 from .duplicates import duplicate_groups, independent_candidates
 from .system_usage import SystemSampler
 from .ui_diagnostics import UiHangMonitor
+from .desktop_dashboard import dashboard_style, install_dashboard, update_dashboard_details
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -244,7 +245,7 @@ def desktop_style(scale=100, button_size='Normal', theme='Green'):
                .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
     colors=THEME_COLORS.get(theme, {})
     converted=re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
-    return converted+'\n'+modern_desktop_style(theme)
+    return converted+'\n'+modern_desktop_style(theme)+'\n'+dashboard_style(theme,scale)
 
 
 
@@ -2086,6 +2087,7 @@ class MainWindow(QMainWindow):
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
         layout.insertWidget(1,self.global_search_button)
+        install_dashboard(self,live_layout,layout)
         self.global_search_shortcut=QShortcut(QKeySequence('Ctrl+K'),self)
         self.global_search_shortcut.activated.connect(self.open_global_search)
         self.status=QLabel('Ready  •  Configure sources and recording storage in Settings');self.status.setObjectName('appStatus');layout.addWidget(self.status)
@@ -2177,7 +2179,7 @@ class MainWindow(QMainWindow):
         # vertically if the window is too short, without consuming extra video
         # space merely because category labels have wide text.
         self.sidebar_scroll.updateGeometry()
-        for area in (self.header_scroll,self.controls_scroll):
+        for area in (self.header_scroll,self.controls_scroll,self.dashboard_nav_scroll):
             child=area.widget()
             if child is None:
                 continue
@@ -2199,7 +2201,8 @@ class MainWindow(QMainWindow):
             extra=(scrollbar.sizeHint().height()
                    if area is self.header_scroll and scrollbar.maximum()>scrollbar.minimum()
                    else 0)
-            desired=base_height+(12 if area is self.header_scroll else 6)+extra
+            desired=base_height+(12 if area is self.header_scroll else
+                                 4 if area is self.dashboard_nav_scroll else 6)+extra
             if area.height()!=desired:
                 area.setFixedHeight(desired)
             area.updateGeometry()
@@ -2526,11 +2529,14 @@ class MainWindow(QMainWindow):
         self.regional_notice.hide()
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
     def render_now(self):
-        if not self.selected:return
+        if not self.selected:
+            update_dashboard_details(self)
+            return
         cid=self.matched_guide(self.selected); now=time.time()
         by_channel,_=self.guide_index()
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(display_channel_name(self.selected['name'])+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else display_channel_name(self.selected['name'])+' — no guide match')
+        update_dashboard_details(self,items)
     def render_guide(self):
         # Pass ALL channels matching the catalogue's active filters. GuideGrid
         # paints only its visible rows; channels without EPG are retained.
@@ -2556,6 +2562,9 @@ class MainWindow(QMainWindow):
                 programmes.append(p)
         self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
+        if hasattr(self,'dashboard_grid'):
+            self.dashboard_grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
+            self.dashboard_grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(
             format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone())+
             f'  •  {len(channels):,} selected channels')
@@ -2571,6 +2580,8 @@ class MainWindow(QMainWindow):
         self.theme_picker.setCurrentText(theme)
         self.theme_picker.blockSignals(False)
         self.grid.set_theme(theme)
+        if hasattr(self,'dashboard_grid'):
+            self.dashboard_grid.set_theme(theme)
         for rail in (self.seek_slider,self.volume_slider,self.screen_seek_slider):
             if rail is not None:rail.set_rail_theme(theme)
         if self.detached_controls is not None:
@@ -2586,11 +2597,12 @@ class MainWindow(QMainWindow):
         self.channel_banner.setStyleSheet(
             'background:'+theme_color('#304d36',theme)+';color:'+
             ('#1e293b' if theme=='Light' else '#ffffff')+';padding:8px;')
-        for scroll in (self.header_scroll,self.controls_scroll):
+        for scroll in (self.header_scroll,self.controls_scroll,self.dashboard_nav_scroll):
             widget=scroll.widget()
             if widget:
                 widget.adjustSize()
-                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
+                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else
+                                                            4 if scroll is self.dashboard_nav_scroll else 6))
         QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
 
     def scroll_player_buttons(self,step):
@@ -2823,6 +2835,10 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
+        if hasattr(self,'dashboard_grid'):
+            # The second EPG uses time.time() to draw its LIVE marker and
+            # on-air highlight; refresh it on the same established 5s tick.
+            self.dashboard_grid.update()
         self.check_live_timeshift()
         self.check_direct_playback()
         self.sync_subtitles()
@@ -4072,6 +4088,15 @@ class MainWindow(QMainWindow):
             self.exit_screen_fullscreen()
         self.cinema_mode=not self.cinema_mode
         self.sidebar.setVisible(not self.cinema_mode)
+        # Cinema keeps playback controls available but removes dashboard chrome.
+        # No widget, recording, caption state or saved preference is destroyed.
+        if hasattr(self,'dashboard_nav_shell'):
+            self.dashboard_nav_shell.setVisible(not self.cinema_mode)
+            self.dashboard_timeline.setVisible(not self.cinema_mode)
+            self.dashboard_hero.widget(1).setVisible(not self.cinema_mode)
+            self.sidebar_scroll.setVisible(not self.cinema_mode)
+            self.header_scroll.setVisible(not self.cinema_mode)
+            self.global_search_button.setVisible(not self.cinema_mode)
         for widget in self.header_buttons:
             if widget:widget.setVisible(not self.cinema_mode)
         # Tabs remain accessible when not in cinema mode.
@@ -4335,7 +4360,10 @@ class MainWindow(QMainWindow):
             overlay.close()
             overlay.deleteLater()
         self.video.setParent(None)
-        self.live_layout.insertWidget(2,self.video,1)
+        if hasattr(self,'dashboard_player_layout'):
+            self.dashboard_player_layout.addWidget(self.video,1)
+        else:
+            self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
         # Detaching/docking can recreate the libVLC video output. Retry a
         # previously auto-selected subtitle once on the replacement surface,
