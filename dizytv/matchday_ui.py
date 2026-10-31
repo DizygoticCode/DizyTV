@@ -109,7 +109,7 @@ class MatchdayPage(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         try:
-            self.fixtures, errors, stale = cached_fixtures(self.store.directory)
+            self.fixtures, errors, stale = cached_fixtures(self.store.directory, offline=True)
             self.status.setText('Cached fixtures (may be old). Refresh for current provider data.' if self.fixtures else
                                 'No cached fixtures. Refresh to load the free fixture feed.')
         except (OSError, ValueError):
@@ -121,7 +121,6 @@ class MatchdayPage(QWidget):
         if not text:
             return
         # A separate optional local preference, never touch recording state.
-        from .storage import atomic_json
         # One-line plain UTF-8, atomically replaced for crash safety.
         path = Path(self.store.directory) / 'matchday-favourite.txt'
         import os, tempfile
