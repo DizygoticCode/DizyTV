@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 
-def dashboard_style(theme='Green'):
-    """Additional palette-aware rules; existing Green/Dark/Light themes remain."""
+def dashboard_style(theme='Green', scale=1.0):
+    """Additional palette-aware, DPI-scaled rules for existing themes."""
     palettes = {
         'Green': ('#0f1713', '#17241c', '#213529', '#3d634b',
                   '#eaf8ef', '#a9c7b1', '#65dca0', '#12271c'),
@@ -28,13 +28,14 @@ def dashboard_style(theme='Green'):
     bg, surface, raised, border, fg, muted, accent, active = palettes.get(
         theme, palettes['Green']
     )
+    scale = max(.75, min(1.5, float(scale)))
     return f"""
 QWidget#dashboardNavigation {{
     background:{surface}; border:1px solid {border}; border-radius:12px;
 }}
 QPushButton#dashboardNavButton {{
     color:{muted}; background:transparent; border:1px solid transparent;
-    border-radius:9px; padding:9px 13px; font-weight:650;
+    border-radius:9px; padding:{round(9*scale)}px {round(13*scale)}px; font-weight:650;
 }}
 QPushButton#dashboardNavButton:hover {{
     color:{fg}; background:{raised}; border-color:{border};
@@ -46,13 +47,13 @@ QFrame#dashboardInfo,QFrame#dashboardTimeline {{
     background:{surface}; border:1px solid {border}; border-radius:12px;
 }}
 QLabel#dashboardEyebrow {{
-    color:{accent}; font-size:11px; font-weight:750; letter-spacing:1px;
+    color:{accent}; font-size:{round(11*scale)}px; font-weight:750; letter-spacing:1px;
 }}
 QLabel#dashboardProgrammeTitle {{
-    color:{fg}; font-size:21px; font-weight:750;
+    color:{fg}; font-size:{round(21*scale)}px; font-weight:750;
 }}
 QLabel#dashboardProgrammeMeta,QLabel#dashboardProgrammeDescription {{
-    color:{muted}; font-size:12px;
+    color:{muted}; font-size:{round(12*scale)}px;
 }}
 QPushButton#dashboardExpandGuide {{
     color:{accent}; background:{raised}; border:1px solid {border};
