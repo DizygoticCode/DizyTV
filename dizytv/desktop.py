@@ -3443,60 +3443,74 @@ class MainWindow(QMainWindow):
         menu.exec(QCursor.pos())
 
     def init_player(self):
-        if self.player:return
-        # An installed application always uses its verified package-private
-        # VLC binaries and modules; never silently load an older system VLC.
-        from .media_runtime import configure_private_vlc
-        configure_private_vlc()
-        import vlc
+        if self.player:
+            return
+        # All native VLC calls, including instance creation/stop and track
+        # queries, must run off Qt's UI thread. The facade returns immutable
+        # cached state for ordinary status and guide/UI polling.
+        from .player_worker import AsyncPlayer
         self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
-        vlc_options=['--no-video-title-show',*self._vlc_subtitle_profile]
+        options=['--no-video-title-show',*self._vlc_subtitle_profile]
         if self.state['settings'].get('vlc_decoder','Auto')=='Software':
-            vlc_options.append('--avcodec-hw=none')
-        self.vlc_instance=vlc.Instance(*vlc_options)
-        self.player=self.vlc_instance.media_player_new()
-        self.player.audio_set_volume(self.volume_slider.value())
-        win=int(self.video.winId())
-        if sys.platform=='darwin':self.player.set_nsobject(win)
-        elif os.name=='nt':self.player.set_hwnd(win)
-        else:self.player.set_xwindow(win)
+            options.append('--avcodec-hw=none')
+        self.player=AsyncPlayer(options=options, video_handle=int(self.video.winId()),
+                                volume=self.volume_slider.value(), parent=self)
+
+    def _async_player_finished(self, result):
+        if result.error:
+            self.playback_started=0
+            self.stop_auto_captions()
+            self.error('Playback could not start. Check that VLC 3 is installed and the stream is available. '
+                       +result.error)
+
     def play_url(self,url,preserve_captions=False):
         self.regional_notice.hide()
-        # Only the in-place DVR caption-sync controls use preserve_captions;
-        # channel tuning, record recovery and ordinary seeks retain old reset.
         if not preserve_captions:
             self.stop_auto_captions()
         self._playback_url=url
         self._active_direct_video=False
         try:
             self.init_player()
-            self.player.stop()
-            media=self.vlc_instance.media_new(url)
-            # Some free HLS origins reject libVLC's default User-Agent.
-            # This is format compatibility, not bypassing geo/DRM restrictions.
+            # File/HTTP playback may still be requested by test fixtures that
+            # explicitly inject a plain mock VLC object. Retain that legacy
+            # contract, while production always uses AsyncPlayer above.
+            from .player_worker import AsyncPlayer
+            options=[]
             if url.lower().startswith(('http://','https://')):
-                media.add_option(':http-user-agent='+PLAYBACK_USER_AGENT)
-                # Apply only to direct network media, not captured local DVR.
-                # VLC's per-media network caching is preferable to global
-                # decoder/reclock changes, and avoids changing working Ace sessions.
+                options.append(':http-user-agent='+PLAYBACK_USER_AGENT)
                 from .core import ace_id
                 direct=(self.selected is not None and
                         not ace_id(self.selected.get('stream','')) and self.timeshift is None)
-                # Browsing a different channel must not change how we monitor
-                # the media already playing, especially an Ace engine session.
                 self._active_direct_video=bool(direct and channel_kind(self.selected)!='Radio')
                 if direct:
-                    media.add_option(':network-caching='+str(
+                    options.append(':network-caching='+str(
                         self.state['settings'].get('http_buffer_ms',4000)))
-            self.player.set_media(media); media.release()
+            if isinstance(self.player,AsyncPlayer):
+                generation=self.player.play_url(
+                    url,options,subtitles_off=self._subtitle_session_all_off,
+                    on_done=self._async_player_finished)
+                if generation is None:
+                    raise RuntimeError('Native playback worker has already been closed')
+            else:
+                self.player.stop()
+                media=self.vlc_instance.media_new(url)
+                try:
+                    for option in options:
+                        media.add_option(option)
+                    self.player.set_media(media)
+                finally:
+                    media.release()
+                if self.player.play()==-1:
+                    raise RuntimeError('libVLC could not start playback')
+                if self._subtitle_session_all_off:
+                    try:self.player.video_set_spu(-1)
+                    except (AttributeError,OSError,RuntimeError):pass
+
             self._subtitle_auto_applied=False
             self._subtitle_manual_track=(-1 if self._subtitle_session_all_off else None)
             self._subtitle_track_signature=()
-            if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
-            if self._subtitle_session_all_off:
-                try:self.player.video_set_spu(-1)
-                except (AttributeError,OSError,RuntimeError):pass
-            self.playback_started=time.monotonic(); self.playback_reported=False
+            self.playback_started=time.monotonic()
+            self.playback_reported=False
             self._last_media_activity=None
             self._video_issue_notified=False
             self._direct_video_sample=None
@@ -3939,7 +3953,7 @@ class MainWindow(QMainWindow):
         if not self.timeshift and not self.player.is_seekable():
             self.seek_notice.setText('This source has no seekable DVR window. Enable on-device timeshift in Settings.')
             return
-        paused=bool(self.player.get_state()==__import__('vlc').State.Paused)
+        paused=str(self.player.get_state()).endswith('.Paused')
         self.player.set_pause(0 if paused else 1)
         self.pause_button.setText('⏸ Pause' if paused else '▶ Resume')
         self.status.setText('Playback resumed' if paused else 'Live TV paused in the available DVR window')
