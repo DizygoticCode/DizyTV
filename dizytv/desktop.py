@@ -2080,7 +2080,7 @@ class MainWindow(QMainWindow):
         # Separate fixture/source browsing: do not alter the existing EPG,
         # channel favourites, saved playlists or recording-tab index (2).
         from .matchday_ui import MatchdayPage
-        self.matchday_page=MatchdayPage(self.store,self.play_matchday_hls)
+        self.matchday_page=MatchdayPage(self.store,self.play_matchday_hls,parent=self)
         self.tabs.addTab(self.matchday_page,'⚽ Matchday')
         self.global_search_button=QPushButton('⌕  Search channels and programmes  •  Ctrl+K');self.global_search_button.setObjectName('globalSearch')
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
