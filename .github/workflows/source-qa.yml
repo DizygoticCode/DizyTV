@@ -46,7 +46,9 @@ jobs:
             suite="${filename##*/}"
             echo "::group::${suite}"
             budget=80
-            if [[ "${suite}" == "test_desktop.py" ]]; then budget=360; fi
+            # The expanded Qt suite can exceed six minutes on hosted runners.
+            # Keep bounded execution while preventing false timeout failures.
+            if [[ "${suite}" == "test_desktop.py" ]]; then budget=480; fi
             if ! timeout --signal=TERM --kill-after=5s "${budget}s" python -m unittest discover -s tests -p "${suite}" -v; then
               echo "::error::Suite ${suite} failed or exceeded ${budget}s"
               errors=$((errors+1))
