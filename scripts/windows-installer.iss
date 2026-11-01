@@ -39,6 +39,10 @@ Name: "acestreamsetup"; Description: "Optional: download and run the original Ac
 
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{tmp}\windows-install-acestream.ps1"""; Description: "Verify and start original Ace Stream setup"; Flags: skipifsilent waituntilterminated; Tasks: acestreamsetup
+; Inno Setup displays this optional checkbox on the final Completed page.
+; Never launch the GUI from /SILENT or /VERYSILENT, including CI upgrades.
+; The per-user app runs separately from the detached recorder worker.
+Filename: "{app}\DizyTV.exe"; Description: "Run DizyTV now"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);

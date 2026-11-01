@@ -177,6 +177,11 @@ jobs:
           $worker.WaitForExit(8000) | Out-Null
           $worker.Refresh()
           if (-not $worker.HasExited) { throw 'Recorder still holds installation executable' }
+          # Guard the native completion-checkbox contract in the real setup source.
+          $iss = Get-Content scripts/windows-installer.iss -Raw
+          if ($iss -notmatch 'Description: "Run DizyTV now"; Flags: postinstall nowait skipifsilent runasoriginaluser') {
+            throw 'Missing optional Run DizyTV now finish-page checkbox'
+          }
           & 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' scripts/windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
 
@@ -267,6 +272,13 @@ jobs:
           # in publish-alpha after waiting for every other platform to finish.
           test -s "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg"
           pkgutil --payload-files "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg"
+          # Final Installer.app Summary must include real DizyTV launch guidance.
+          # Apple PKG does not provide a custom postinstall checkbox.
+          mkdir -p smoke-product
+          pkgutil --expand "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg" smoke-product
+          grep -F 'conclusion.html' smoke-product/Distribution
+          test -s smoke-product/Resources/conclusion.html
+          grep -F 'Applications' smoke-product/Resources/conclusion.html
           codesign --verify --deep --strict dist/DizyTV.app
       - uses: actions/upload-artifact@v4
         with:
