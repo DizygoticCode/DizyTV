@@ -274,7 +274,7 @@ jobs:
           pkgutil --payload-files "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg"
           # Final Installer.app Summary must include real DizyTV launch guidance.
           # Apple PKG does not provide a custom postinstall checkbox.
-          mkdir -p smoke-product
+          # pkgutil --expand creates its destination; it must not exist first.
           pkgutil --expand "dist/DizyTV-0.1.18-alpha-${{ matrix.target }}.pkg" smoke-product
           grep -F 'conclusion.html' smoke-product/Distribution
           test -s smoke-product/Resources/conclusion.html
