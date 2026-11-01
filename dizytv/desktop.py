@@ -1777,6 +1777,9 @@ class MainWindow(QMainWindow):
         self.detached_mouse_timer.setInterval(250)
         self.detached_mouse_timer.timeout.connect(self.poll_detached_mouse)
         self.popout_live_light=None;self.popout_live_button=None
+        # Session-only mute; preserve slider level for a one-click restore.
+        self._tv_muted=False
+        self.detached_mute_buttons=[]
         self.light_phase=False
         self.light_timer=QTimer(self)
         self.light_timer.setInterval(850)
@@ -2056,6 +2059,12 @@ class MainWindow(QMainWindow):
         live_layout.addWidget(self.seek_slider)
         volume_row=QHBoxLayout()
         volume_row.addWidget(QLabel('Volume'))
+        self.mute_button=QPushButton('🔊 Mute')
+        self.mute_button.setObjectName('tvMute')
+        self.mute_button.setToolTip('Mute or restore TV sound without changing the volume slider')
+        self.mute_button.setAccessibleName('Mute TV audio')
+        self.mute_button.clicked.connect(self.toggle_tv_mute)
+        volume_row.addWidget(self.mute_button)
         self.volume_slider=MediaRailSlider(Qt.Horizontal)
         self.volume_slider.setObjectName('volumeBar')
         self.volume_slider.setRange(0,100)
@@ -2103,7 +2112,9 @@ class MainWindow(QMainWindow):
             ensure_worker(self.store.directory)
             # Previously cached Ace channels hid newly configured public feeds.
             # Always refresh on startup, retaining cached channels until success.
-            QTimer.singleShot(200,self.refresh_channels)
+            # Refresh channel sources first, then XMLTV on every launch. The
+            # persisted guide can contain programmes that have all expired.
+            QTimer.singleShot(200,lambda:self.refresh_channels(refresh_guide_after=True))
     def heartbeat_ui(self):
         if self._ui_hang_monitor is not None:
             self._ui_hang_monitor.heartbeat()
@@ -2911,16 +2922,22 @@ class MainWindow(QMainWindow):
                 else:
                     self.status.setText('Stream did not begin within 25 seconds; checking host response…')
                     if self.timeshift is None:self.diagnose_stream()
-    def async_task(self,function,success):
+    def async_task(self,function,success,finished=None):
         if self.task:self.status.setText('A refresh is already running'); return
         self.task=Task(function)
         def done(result):
             self.task=None
             try:success(result)
-            except (ValueError,OSError) as exc:fail(str(exc))
-        def fail(message):self.task=None; self.status.setText('Refresh failed — cached data retained: '+message)
+            except (ValueError,OSError) as exc:
+                fail(str(exc))
+                return
+            if finished is not None:finished()
+        def fail(message):
+            self.task=None
+            self.status.setText('Refresh failed — cached data retained: '+message)
+            if finished is not None:finished()
         self.task.signals.success.connect(done); self.task.signals.failure.connect(fail); self.pool.start(self.task)
-    def refresh_channels(self):
+    def refresh_channels(self, *, refresh_guide_after=False):
         current=self.store.read(); self.status.setText('Importing free channel sources…')
         def done(result):
             channels,success,errors=result
@@ -2930,9 +2947,14 @@ class MainWindow(QMainWindow):
                 self._tree_dirty=True
             self.render_channels()
             self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (open Source status)' if errors else '')+' • use playlist filter to view free HTTP/HLS')
-            if not self.guide['programmes'] and self.state['settings']['xmltv_urls']:
-                QTimer.singleShot(300,self.refresh_guide)
-        self.async_task(lambda:refresh_catalogue(current['settings'],current['channels'],download),done)
+        def finished():
+            # The catalogue and XMLTV tasks share one worker slot. Never start
+            # both at once; refresh the guide after the catalogue settles,
+            # including when a playlist fetch fails. Preserve cached guide
+            # data if the subsequent XMLTV download fails.
+            if self.state['settings']['xmltv_urls'] and (refresh_guide_after or not self.guide['programmes']):
+                QTimer.singleShot(0 if refresh_guide_after else 300,self.refresh_guide)
+        self.async_task(lambda:refresh_catalogue(current['settings'],current['channels'],download),done,finished)
     def refresh_guide(self):
         settings=self.store.read()['settings']
         if not settings['xmltv_urls']:self.error('Add one or more XMLTV URLs in Settings'); return
@@ -3531,7 +3553,7 @@ class MainWindow(QMainWindow):
         if self.state['settings'].get('vlc_decoder','Auto')=='Software':
             options.append('--avcodec-hw=none')
         self.player=AsyncPlayer(options=options, video_handle=int(self.video.winId()),
-                                volume=self.volume_slider.value(), parent=self)
+                                volume=(0 if self._tv_muted else self.volume_slider.value()), parent=self)
 
     def _async_player_finished(self, result):
         if result.error:
@@ -3996,7 +4018,28 @@ class MainWindow(QMainWindow):
                 self.position_detached_overlay()
         return super().eventFilter(obj,event)
 
+    def _refresh_mute_buttons(self):
+        label='🔇 Unmute' if self._tv_muted else '🔊 Mute'
+        hint='Unmute TV audio' if self._tv_muted else 'Mute TV audio'
+        for button in [self.mute_button,*self.detached_mute_buttons]:
+            button.setText(label)
+            button.setToolTip(hint)
+            button.setAccessibleName(hint)
+
+    def toggle_tv_mute(self):
+        """Mute the same VLC worker in every view, preserving slider level."""
+        self._tv_muted=not self._tv_muted
+        if self.player:
+            # AsyncPlayer queues audio_set_volume on its VLC worker. Never
+            # call native VLC audio methods directly from the Qt GUI thread.
+            self.player.audio_set_volume(0 if self._tv_muted else self.volume_slider.value())
+        self._refresh_mute_buttons()
+
     def set_tv_volume(self,volume):
+        # Moving either synchronised slider intentionally unmutes TV audio.
+        if self._tv_muted:
+            self._tv_muted=False
+            self._refresh_mute_buttons()
         if self.player:self.player.audio_set_volume(volume)
 
     def seek_from_slider(self):
@@ -4200,10 +4243,12 @@ class MainWindow(QMainWindow):
         bar=QHBoxLayout(button_row)
         bar.setContentsMargins(0,0,0,0)
         bar.setSpacing(max(2,round(4*ratio)))
+        self.detached_mute_buttons=[]
         for title,callback in (('⏯ Play/Pause',self.toggle_pause),
                                ('↶ 30s',lambda:self.seek_relative(-30000)),
                                ('↷ 30s',lambda:self.seek_relative(30000)),
                                ('LIVE',self.jump_to_live),
+                               ('🔊 Mute',self.toggle_tv_mute),
                                ('☷ Guide',self.show_tv_guide),
                                ('Info',self.show_tv_info),
                                ('CC Subtitles',self.show_subtitle_menu),
@@ -4211,6 +4256,9 @@ class MainWindow(QMainWindow):
                                ('↩ Dock',self.exit_screen_fullscreen)):
             button=QPushButton(title,panel)
             button.clicked.connect(callback)
+            if title=='🔊 Mute':
+                button.setObjectName('tvMute')
+                self.detached_mute_buttons.append(button)
             if title=='LIVE':
                 button.setObjectName('tvLive')
                 self.popout_live_button=button
@@ -4265,6 +4313,11 @@ class MainWindow(QMainWindow):
         panel_layout.addWidget(self.screen_seek_slider)
         volume_line=QHBoxLayout()
         volume_line.addWidget(QLabel('Volume',panel))
+        volume_mute=QPushButton('🔊 Mute',panel)
+        volume_mute.setObjectName('tvMute')
+        volume_mute.clicked.connect(self.toggle_tv_mute)
+        self.detached_mute_buttons.append(volume_mute)
+        volume_line.addWidget(volume_mute)
         volume=MediaRailSlider(Qt.Horizontal,panel)
         volume.setObjectName('volumeBar')
         volume.set_rail_theme(self.state['settings'].get('theme','Green'))
@@ -4274,6 +4327,7 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(volume.setValue)
         volume_line.addWidget(volume,1)
         panel_layout.addLayout(volume_line)
+        self._refresh_mute_buttons()
         self.detached_controls=panel
         self.screen_dialog=screen
         screen.finished.connect(self.exit_screen_fullscreen)
@@ -4355,6 +4409,7 @@ class MainWindow(QMainWindow):
         self.screen_seek_slider=None
         self.detached_controls=None
         self.popout_live_light=None;self.popout_live_button=None
+        self.detached_mute_buttons=[]
         if overlay:
             overlay.hide()
             overlay.close()
