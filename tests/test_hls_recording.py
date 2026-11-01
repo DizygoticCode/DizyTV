@@ -104,6 +104,19 @@ class HLSSource(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
             return
+        elif route == '/truncated-chunked.ts':
+            # Valid TS packets followed by an unterminated chunked HTTP body.
+            # http.client can raise IncompleteRead instead of returning EOF.
+            self.send_response(200)
+            self.send_header('Content-Type', 'video/mp2t')
+            self.send_header('Transfer-Encoding', 'chunked')
+            self.end_headers()
+            self.wfile.write(f'{len(PACKETS):x}\r\n'.encode() + PACKETS + b'\r\n')
+            self.wfile.flush()
+            self.wfile.write(b'200\r\nBROKEN')  # No full chunk / 0-chunk footer.
+            self.wfile.flush()
+            self.close_connection = True
+            return
         elif route == '/truncated.ts':
             body = PACKETS + b'\x47'
             content = 'video/mp2t'
@@ -279,6 +292,24 @@ class HLSRecordingTests(unittest.TestCase):
                 self.assertEqual([], list(Path(folder).iterdir()))
             finally:
                 timer.cancel()
+
+    def test_truncated_chunked_http_response_does_not_crash_detached_recorder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result = self.record('/truncated-chunked.ts?token=private', folder, seconds=3)
+            self.assertIn(result['status'], ('partial', 'failed'), result)
+            self.assertIn('HTTP transfer', result['error'], result)
+            self.assertNotIn('private', result['error'])
+            if result['bytes']:
+                self.assertEqual('partial', result['status'])
+                self.assertEqual(0, result['bytes'] % 188)
+                self.assertEqual(result['bytes'], Path(result['path']).stat().st_size)
+            else:
+                self.assertEqual([], list(Path(folder).glob('*.part')))
+            # An individual source failure must not prevent later scheduled
+            # recordings from using the same still-running worker.
+            later = self.record('/hls/live.m3u8', folder)
+            self.assertEqual('completed', later['status'], later)
+            self.assertGreater(later['bytes'], 0)
 
     def test_cancel_stalled_source_is_bounded(self):
         with tempfile.TemporaryDirectory() as folder:

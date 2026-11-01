@@ -14,6 +14,7 @@ from .network import SafeRedirect
 from .storage import Store, file_lock
 
 from collections import deque
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 import socket
@@ -299,7 +300,7 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
         # HTTPError reason/URL can contain credentials. Do not display either.
         result['error']='Recording source returned HTTP '+str(exc.code)
         result['status']='partial' if result['bytes'] else 'failed'
-    except (URLError,OSError,ValueError,UnicodeError) as exc:
+    except (URLError,OSError,ValueError,UnicodeError,HTTPException) as exc:
         # A source may time out while a user has already clicked Cancel.
         # Report the user's cancellation, not a misleading decoder failure.
         if cancel():
@@ -307,6 +308,11 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
             result['error']='Recording stopped by user'
         elif isinstance(exc, URLError):
             result['error']='Recording source connection failed'
+        elif isinstance(exc, HTTPException):
+            # Truncated chunked HTTP bodies may raise IncompleteRead from read1().
+            # Do not let a malformed provider terminate the detached worker or
+            # expose its URL/headers in the recording status.
+            result['error']='Recording source closed unexpectedly during HTTP transfer'
         else:
             result['error']=str(exc)[:250]
         if not cancel():

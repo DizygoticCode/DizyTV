@@ -21,31 +21,31 @@
 
 DizyTV brings M3U/IPTV playlists, XMLTV listings, Ace Stream and ordinary HTTP/HLS channels into a native TV interface. Browse by country, genre and category, find a programme with global search, save favourites and record broadcasts to your own storage.
 
-**Current public build:** [v0.1.18-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.18-alpha) — all five platform builds and release publication [passed in GitHub Actions](https://github.com/DizygoticCode/DizyTV/actions/runs/38954068009). This is an **experimental development release**, not a verified replacement for a licensed TV service. Third-party channels may be unavailable, region-restricted or unsuitable for embedded playback; build success does **not** establish real-device playback reliability.
+**New alpha release:** [v0.1.19-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.19-alpha) — its direct downloads are published only after the five native builds pass on `main`. The release is experimental: physical-device playback, Windows UI hangs, channel permissions and unsigned development installers still require testing. The [previous v0.1.18-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.18-alpha) remains available unchanged.
 
-**New in 0.1.18-alpha:** packaged VideoLAN VLC 3.0.24 on Windows and both Mac architectures, integrated desktop FFmpeg and bundled English offline Vosk model, original-source [Outpace](https://github.com/jamezrin/outpace) 0.2.0 for compatible public Ace swarms on macOS/Linux, an optional consent-based original Ace Stream setup flow on Windows, improved per-source playback diagnostics, safe alternate saved-source selection, and further worker/playback lifecycle tests. Android remains a distinct native Kotlin/libVLC app without desktop Vosk/FFmpeg parity. See [the release notes below](#new-in-0118-alpha) and [outstanding device tests](#known-limitations-and-unverified-behaviour).
+**New in 0.1.19-alpha:** new desktop/Android dashboard, a limited football Matchday page with user-supplied authorised sources, in-app Android webpage fallback, safer recording cancellations and a Windows installer **Run DizyTV now** option. Mac Installer explains how to open DizyTV from Applications. No fixture listing guarantees a free playable stream.\n\n**Previously in 0.1.18-alpha:** packaged VideoLAN VLC 3.0.24 on Windows and both Mac architectures, integrated desktop FFmpeg and bundled English offline Vosk model, original-source [Outpace](https://github.com/jamezrin/outpace) 0.2.0 for compatible public Ace swarms on macOS/Linux, an optional consent-based original Ace Stream setup flow on Windows, improved per-source playback diagnostics, safe alternate saved-source selection, and further worker/playback lifecycle tests. Android remains a distinct native Kotlin/libVLC app without desktop Vosk/FFmpeg parity. See [the release notes below](#new-in-0118-alpha) and [outstanding device tests](#known-limitations-and-unverified-behaviour).
 
 ## Downloads
 
-Direct installer links (no ZIP extraction required):
+**v0.1.19-alpha** direct installers (no ZIP extraction required). The release links activate after the main-branch build publisher succeeds; check the release page before downloading.
 
 | Platform | Download | Requirement |
 | --- | --- | --- |
-| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-Setup-0.1.18-alpha-windows-x64.exe) | Windows x64; VLC 3, FFmpeg and English Vosk bundled; original Ace engine optional |
-| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-android-universal-debug.apk) | Android 8+; embedded libVLC, debug-signed |
-| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-arm64.pkg) | macOS 13+; private VLC 3, FFmpeg, English Vosk and Outpace bundled |
-| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-x86_64.pkg) | macOS 13+; private VLC 3, FFmpeg, English Vosk and Outpace bundled |
-| **Linux** | [Ubuntu/Debian x64 installer (.deb)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-linux-amd64.deb) | Ubuntu 24.04 x64 CI-tested; APT-managed VLC/FFmpeg, bundled English Vosk and Outpace |
+| **Windows** | [Windows x64 installer (.exe)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-Setup-0.1.18-alpha-windows-x64.exe) | Windows x64; VLC 3, FFmpeg and English Vosk bundled; original Ace engine optional |
+| **Android** | [Universal APK (.apk)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-android-universal-debug.apk) | Android 8+; embedded libVLC, debug-signed |
+| **Mac Apple Silicon** | [arm64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-macos-arm64.pkg) | macOS 13+; private VLC 3, FFmpeg, English Vosk and Outpace bundled |
+| **Mac Intel** | [x86-64 installer (.pkg)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-macos-x86_64.pkg) | macOS 13+; private VLC 3, FFmpeg, English Vosk and Outpace bundled |
+| **Linux** | [Ubuntu/Debian x64 installer (.deb)](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-linux-amd64.deb) | Ubuntu 24.04 x64 CI-tested; APT-managed VLC/FFmpeg, bundled English Vosk and Outpace |
 
 <p align="center">
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-Setup-0.1.18-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
-  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/DizyTV-0.1.18-alpha-linux-amd64.deb"><img alt="Download Ubuntu Linux DEB directly" src="https://img.shields.io/badge/Download-Linux%20DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-Setup-0.1.18-alpha-windows-x64.exe"><img alt="Download Windows EXE directly" src="https://img.shields.io/badge/Download-Windows%20EXE-0078d4?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-android-universal-debug.apk"><img alt="Download Android APK directly" src="https://img.shields.io/badge/Download-Android%20APK-3ddc84?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-macos-arm64.pkg"><img alt="Download Mac Apple Silicon PKG directly" src="https://img.shields.io/badge/Download-Mac%20Apple%20Silicon%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-macos-x86_64.pkg"><img alt="Download Mac Intel PKG directly" src="https://img.shields.io/badge/Download-Mac%20Intel%20PKG-374151?style=for-the-badge" /></a>
+  <a href="https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-linux-amd64.deb"><img alt="Download Ubuntu Linux DEB directly" src="https://img.shields.io/badge/Download-Linux%20DEB-237804?style=for-the-badge&amp;logo=linux&amp;logoColor=white" /></a>
 </p>
 
-[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.18-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
+[All releases](https://github.com/DizygoticCode/DizyTV/releases) · [SHA-256 checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/SHA256SUMS.txt) · [Installation and security notes](docs/DISTRIBUTION.md)
 
 > [!CAUTION]
 > These alpha packages are not yet publicly code-signed: Windows EXE is unsigned, Mac PKGs are unnotarized and the Android APK is debug-signed. **Do not disable browser or device security protections** to get around a security warning. Save a backup before changing test versions; Android debug signing keys can prevent in-place upgrades.
@@ -73,7 +73,16 @@ Direct installer links (no ZIP extraction required):
 
 DizyTV **does not bundle paid IPTV subscriptions, provide DRM circumvention or guarantee any individual stream**. It can list a channel for which the broadcaster has no playable video on your network. Public links are not a substitute for authorised access.
 
-## New in 0.1.18-alpha
+## New in 0.1.19-alpha
+
+- **Five-platform candidate:** Windows EXE, Android APK, Intel/Apple Silicon macOS PKGs and Ubuntu DEB, each built from the integrated Matchday/dashboard branch after full source QA.
+- **Matchday:** limited football fixture metadata, favourite club and date filters. Android offers an isolated viewer for explicitly user-entered authorised HTTPS web pages, direct HLS via libVLC and up to ten manual source alternatives. Web pages, video quality, rights and availability remain unverified.
+- **Desktop dashboard:** responsive navigation and existing live programme guide remain integrated with the native video player, recordings, favourites and search.
+- **Recording safety:** extra interruption/timeout and malformed HTTP handling protects detached recording workers and partial MPEG-TS footage.
+- **Installer finish:** Windows interactive setup offers **Run DizyTV now**; Mac installation summary shows how to launch the installed application safely. Linux and Android retain their platform-managed launch flow.
+- **Limitations:** native CI proves builds, not universal real-device stability; Android debug APK signing can prevent in-place upgrades between runs; Windows and Mac are unsigned/unnotarised development installers.
+
+## Previous highlights: 0.1.18-alpha
 
 - **Windows and macOS VLC included:** native desktop installers ship private VideoLAN VLC **3.0.24** and plugins rather than requiring a system VLC installation. Native CI loads the packaged runtime and tests local synthetic audio/video decoding; actual broadcaster/device playback still needs acceptance testing.
 - **Desktop captions out of the box:** Windows, both Mac architectures and Linux include English Vosk speech models; Windows/Mac bundle FFmpeg and Linux installs FFmpeg through APT. Transcription is opt-in, and additional supported language models are managed in DizyTV Settings.
