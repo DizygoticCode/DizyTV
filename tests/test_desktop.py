@@ -1264,6 +1264,71 @@ class DesktopTests(unittest.TestCase):
             window.player=None
             window.close()
 
+    def test_quick_mute_shared_across_live_cinema_popout_and_fullscreen(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.show()
+            self.app.processEvents()
+            player=Mock()
+            window.player=player
+            self.assertEqual(85,window.volume_slider.value())
+            self.assertEqual('tvMute',window.mute_button.objectName())
+            window.mute_button.click()
+            player.audio_set_volume.assert_called_with(0)
+            self.assertTrue(window._tv_muted)
+            self.assertEqual(85,window.volume_slider.value())
+            self.assertIn('Unmute',window.mute_button.text())
+            window.toggle_cinema()
+            self.assertTrue(window.cinema_mode)
+            window.mute_button.click()
+            player.audio_set_volume.assert_called_with(85)
+            self.assertFalse(window._tv_muted)
+            window.toggle_cinema()
+            window.open_popout()
+            self.assertEqual(2,len(window.detached_mute_buttons))
+            for button in window.detached_mute_buttons:
+                self.assertEqual('tvMute',button.objectName())
+                self.assertIn('Mute',button.text())
+            window.detached_mute_buttons[0].click()
+            player.audio_set_volume.assert_called_with(0)
+            self.assertIn('Unmute',window.mute_button.text())
+            self.assertTrue(all('Unmute' in b.text() for b in window.detached_mute_buttons))
+            window.toggle_screen_fullscreen()
+            self.assertTrue(window.screen_dialog.isFullScreen())
+            window.detached_mute_buttons[1].click()
+            player.audio_set_volume.assert_called_with(85)
+            self.assertFalse(window._tv_muted)
+            window.exit_screen_fullscreen()
+            self.assertEqual([],window.detached_mute_buttons)
+            self.assertFalse(window._tv_muted)
+            window.player=None
+            window.close()
+
+    def test_mute_survives_player_creation_and_volume_slider_unmutes(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder:
+            window=MainWindow(Store(folder),start_worker=False)
+            window.mute_button.click()
+            self.assertTrue(window._tv_muted)
+            with patch('dizytv.player_worker.AsyncPlayer') as create_player:
+                window.init_player()
+                self.assertEqual(0,create_player.call_args.kwargs['volume'])
+            player=Mock()
+            window.player=player
+            window.volume_slider.setValue(42)
+            self.assertFalse(window._tv_muted)
+            player.audio_set_volume.assert_called_with(42)
+            self.assertIn('Mute',window.mute_button.text())
+            self.assertNotIn('Unmute',window.mute_button.text())
+            window.mute_button.click()
+            player.audio_set_volume.assert_called_with(0)
+            window.volume_slider.setValue(56)
+            player.audio_set_volume.assert_called_with(56)
+            self.assertFalse(window._tv_muted)
+            window.player=None
+            window.close()
+
     def test_default_no_implicit_timeshift_and_settings_max_four_hours(self):
         with tempfile.TemporaryDirectory() as folder:
             window=MainWindow(Store(folder),start_worker=False)
