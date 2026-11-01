@@ -1662,6 +1662,60 @@ class DesktopTests(unittest.TestCase):
             self.assertFalse(d.stop_button.isEnabled())
             d.close()
 
+    def test_startup_refreshes_guide_even_with_cached_programmes(self):
+        # A nonempty guide.json can be stale. Startup still fetches fresh XMLTV
+        # after the channel catalogue task completes, never concurrently.
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(directory)
+            window = MainWindow(store, start_worker=False)
+            window.guide = {'names': {'old': 'Old schedule'},
+                            'programmes': [{'channel': 'old', 'title': 'Yesterday',
+                                            'start': 1, 'end': 2}]}
+            with patch.object(window, 'async_task') as schedule, \
+                    patch.object(window, 'refresh_guide') as refresh:
+                window.refresh_channels(refresh_guide_after=True)
+                self.assertEqual(0, refresh.call_count)
+                function, complete, finished = schedule.call_args.args
+                complete(([], 1, []))
+                self.assertEqual(0, refresh.call_count)
+                finished()
+                self.app.processEvents()
+                refresh.assert_called_once_with()
+            window.close()
+
+    def test_manual_channel_refresh_keeps_valid_cached_guide(self):
+        # Explicit channel-only refresh must not redownload an existing EPG.
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow(Store(directory), start_worker=False)
+            window.guide = {'names': {'old': 'Old schedule'},
+                            'programmes': [{'channel': 'old', 'title': 'Cached',
+                                            'start': 1, 'end': 2}]}
+            with patch.object(window, 'async_task') as schedule, \
+                    patch.object(window, 'refresh_guide') as refresh:
+                window.refresh_channels()
+                schedule.call_args.args[2]()
+                self.app.processEvents()
+                refresh.assert_not_called()
+            window.close()
+
+    def test_failed_catalogue_task_still_runs_finished_callback(self):
+        # A failed startup playlist download must not suppress XMLTV refresh.
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow(Store(directory), start_worker=False)
+            window.pool = Mock()
+            fake_task = Mock()
+            callback = Mock()
+            with patch('dizytv.desktop.Task', return_value=fake_task):
+                window.async_task(lambda: None, lambda value: None, callback)
+            self.assertIsNone(callback.call_args)
+            failure = fake_task.signals.failure.connect.call_args.args[0]
+            failure('playlist server unavailable')
+            callback.assert_called_once_with()
+            self.assertIsNone(window.task)
+            self.assertIn('cached data retained', window.status.text())
+            window.close()
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
