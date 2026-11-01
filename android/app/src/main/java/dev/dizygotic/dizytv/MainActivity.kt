@@ -38,6 +38,7 @@ class MainActivity:Activity() {
     private var matchdayFixtures=emptyList<JSONObject>()
     private var matchdayRefreshing=false
     private var matchdayFavouriteOnly=false
+    private var matchdayWhen="Upcoming"
     private var matchdayPlaybackTitle=""
     private var timeshift:DeviceTimeshift?=null
     private var pendingTimeshift:DeviceTimeshift?=null
@@ -315,6 +316,13 @@ class MainActivity:Activity() {
         val list=scroller()
         list.addView(text("⚽ Matchday — free football fixtures",21f))
         list.addView(text("TheSportsDB public free tier supplies LIMITED fixture entries, not a complete schedule. A fixture does not imply a free broadcast. No viewing rights or playback are automatically verified.",12f))
+        val windowNav=row()
+        for(mode in listOf("Today","Tomorrow","Weekend","Upcoming")) {
+            windowNav.addView(button((if(matchdayWhen==mode) "● " else "")+mode) {
+                matchdayWhen=mode;render()
+            })
+        }
+        list.addView(HorizontalScrollView(this).apply { addView(windowNav) })
         val prefs=getSharedPreferences("dizytv-matchday",MODE_PRIVATE)
         val club=prefs.getString("club","Southampton")?:"Southampton"
         list.addView(button("★ Favourite: "+club+" (change)") {
@@ -373,10 +381,10 @@ class MainActivity:Activity() {
             }
         }
         val zone=Domain.zone(store.read().getJSONObject("settings").getString("timezone"))
-        val today=java.time.LocalDate.now(zone)
+        val now=Instant.now()
         for(item in matchdayFixtures) {
             val date=runCatching { java.time.Instant.ofEpochSecond(item.getLong("kickoff")).atZone(zone) }.getOrNull()?:continue
-            if(date.toLocalDate()<today || date.toLocalDate()>today.plusDays(14))continue
+            if(!MatchdayWindow.visible(item.getLong("kickoff"),zone,now,matchdayWhen))continue
             val name=item.optString("home")+" v "+item.optString("away")
             if(matchdayFavouriteOnly && !name.contains(club,true))continue
             val id=item.optString("id")
@@ -385,28 +393,52 @@ class MainActivity:Activity() {
                 date.format(java.time.format.DateTimeFormatter.ofPattern("EEE dd MMM HH:mm"))+
                 " • "+item.optString("competition"),12f))
             wrapper.addView(text(name,16f))
-            val saved=prefs.getString("link_"+id,null)
-            if(saved!=null) {
-                val data=runCatching { JSONObject(saved) }.getOrNull()
-                if(data!=null) wrapper.addView(button("Open saved source (unverified)") {
-                    val url=safeMatchdayLink(data.getString("url"))
-                    if(data.optString("kind")=="hls") {
-                        require(url.lowercase().endsWith(".m3u8")) { "Not a direct HLS link" }
-                        require(Domain.objects(store.read().getJSONArray("jobs")).none {
-                            it.optString("status")=="recording"
-                        }) { "Finish the active recording before changing playback" }
-                        clearTimeshift(); player.stop(); selected=null
-                        matchdayPlaybackTitle=name
-                        page="Live";render()
-                        val media=Media(lib,Uri.parse(url))
-                        try { player.media=media } finally { media.release() }
-                        player.play()
-                        status.text="Direct HLS requested — audio/video not yet verified"
-                    } else {
-                        startActivity(Intent(this,MatchdayWebActivity::class.java)
-                            .putExtra("matchday_url",url))
-                        status.text="Opened isolated Matchday webpage; source is unverified"
+            // Existing single-link preferences are read without discarding them;
+            // adding a new source migrates that fixture to a bounded array.
+            val savedSources=runCatching {
+                prefs.getString("sources_"+id,null)?.let(::JSONArray)
+                    ?: prefs.getString("link_"+id,null)?.let { JSONArray().put(JSONObject(it)) }
+                    ?: JSONArray()
+            }.getOrDefault(JSONArray())
+            for(position in 0 until minOf(savedSources.length(),10)) {
+                val data=savedSources.optJSONObject(position)?:continue
+                val savedUrl=data.optString("url")
+                val kind=data.optString("kind","web")
+                val hostname=runCatching { java.net.URI(savedUrl).host ?: "Unknown" }.getOrDefault("Unknown")
+                wrapper.addView(button("Open source ${position+1}: ${kind.uppercase()} • ${hostname} (unverified)") {
+                    attempt {
+                        val url=safeMatchdayLink(savedUrl)
+                        if(kind=="hls") {
+                            require(url.lowercase().endsWith(".m3u8")) { "Not a direct HLS link" }
+                            require(Domain.objects(store.read().getJSONArray("jobs")).none {
+                                it.optString("status")=="recording"
+                            }) { "Finish the active recording before changing playback" }
+                            clearTimeshift(); player.stop(); selected=null
+                            matchdayPlaybackTitle=name
+                            page="Live";render()
+                            val media=Media(lib,Uri.parse(url))
+                            try { player.media=media } finally { media.release() }
+                            player.play()
+                            status.text="Direct HLS requested — audio/video not yet verified"
+                        } else {
+                            startActivity(Intent(this,MatchdayWebActivity::class.java)
+                                .putExtra("matchday_url",url))
+                            status.text="Opened isolated Matchday webpage; source is unverified"
+                        }
                     }
+                })
+                wrapper.addView(button("Remove source ${position+1}") {
+                    AlertDialog.Builder(this).setTitle("Remove saved Matchday source?")
+                        .setMessage("The other sources for this fixture will remain saved.")
+                        .setPositiveButton("Remove") { _,_->
+                            val updated=JSONArray()
+                            for(index in 0 until savedSources.length()) {
+                                if(index!=position) updated.put(savedSources.get(index))
+                            }
+                            prefs.edit().putString("sources_"+id,updated.toString())
+                                .remove("link_"+id).apply()
+                            if(page=="Matchday")render()
+                        }.setNegativeButton("Cancel",null).show()
                 })
             }
             wrapper.addView(button("Add authorised free viewing link…") {
@@ -424,8 +456,23 @@ class MainActivity:Activity() {
                                 AlertDialog.Builder(this).setTitle("Viewing rights confirmation")
                                     .setMessage("Only save a free link that you are authorised to view. DizyTV has not verified rights, region, video quality or playability. Confirm?")
                                     .setPositiveButton("I confirm") { _,_->
-                                        prefs.edit().putString("link_"+id,JSONObject().put("url",url).put("kind",kind).toString()).apply()
-                                        if(page=="Matchday")render()
+                                        val sources=runCatching {
+                                            prefs.getString("sources_"+id,null)?.let(::JSONArray)
+                                                ?: prefs.getString("link_"+id,null)?.let { JSONArray().put(JSONObject(it)) }
+                                                ?: JSONArray()
+                                        }.getOrDefault(JSONArray())
+                                        if(sources.length()>=10) {
+                                            status.text="Limit of 10 saved source alternatives per fixture"
+                                        } else if((0 until sources.length()).any {
+                                                sources.optJSONObject(it)?.optString("url")==url
+                                            }) {
+                                            status.text="This viewing link is already saved"
+                                        } else {
+                                            sources.put(JSONObject().put("url",url).put("kind",kind))
+                                            prefs.edit().putString("sources_"+id,sources.toString())
+                                                .remove("link_"+id).apply()
+                                            if(page=="Matchday")render()
+                                        }
                                     }.setNegativeButton("Cancel",null).show()
                             }
                         }.setNegativeButton("Cancel",null).show()
