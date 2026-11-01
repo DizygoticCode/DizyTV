@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <queries><package android:name="org.acestream.media" /><package android:name="org.acestream.core" /></queries>
     <application android:theme="@style/DizyTheme" android:label="DizyTV" android:icon="@drawable/dizytv_logo" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
+        <activity android:name=".MatchdayWebActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>

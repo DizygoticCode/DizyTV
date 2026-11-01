@@ -309,20 +309,7 @@ class MainActivity:Activity() {
     }
 
     private fun safeMatchdayLink(raw:String):String {
-        val url=raw.trim()
-        require(url.length in 10..1500 && url.indexOf(92.toChar()) < 0) { "Invalid public link" }
-        val uri=java.net.URI(url)
-        val host=uri.host?.lowercase()?.trimEnd('.')?:""
-        require(uri.scheme=="https" && host.contains('.') && !host.contains("..")
-            && !host.endsWith(".local") && !host.endsWith(".localhost")
-            && !host.endsWith(".internal") && !host.endsWith(".test")
-            && uri.userInfo==null && uri.query==null && uri.fragment==null
-            && uri.port in listOf(-1,443)
-            && !host.matches(Regex("[0-9.]+")) && !host.contains(":")
-            && !host.split('.').all { it.matches(Regex("(?i)(0x[0-9a-f]+|[0-9]+)")) }) {
-            "Only public HTTPS links without tokens or private hosts are accepted"
-        }
-        return url
+        return MatchdayLinkPolicy.validateSource(raw)
     }
     private fun matchdayPage() {
         val list=scroller()
@@ -416,8 +403,9 @@ class MainActivity:Activity() {
                         player.play()
                         status.text="Direct HLS requested — audio/video not yet verified"
                     } else {
-                        startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(url)))
-                        status.text="Opened locally saved authorised link in browser (unverified)"
+                        startActivity(Intent(this,MatchdayWebActivity::class.java)
+                            .putExtra("matchday_url",url))
+                        status.text="Opened isolated Matchday webpage; source is unverified"
                     }
                 })
             }
