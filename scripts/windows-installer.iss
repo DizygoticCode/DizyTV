@@ -1,4 +1,4 @@
-#define AppVersion "0.1.18-alpha"
+#define AppVersion "0.1.19-alpha"
 [Setup]
 AppId={{3F1997BD-12C5-4C17-B013-09C82DA8BAF6}
 AppName=DizyTV
@@ -9,7 +9,7 @@ DefaultDirName={localappdata}\Programs\DizyTV
 DefaultGroupName=DizyTV
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=DizyTV-Setup-0.1.18-alpha-windows-x64
+OutputBaseFilename=DizyTV-Setup-0.1.19-alpha-windows-x64
 SetupIconFile=..\assets\branding\dizytv.ico
 InfoBeforeFile=..\docs\WINDOWS-INCLUDED-COMPONENTS.txt
 UninstallDisplayIcon={app}\DizyTV.exe
@@ -39,6 +39,10 @@ Name: "acestreamsetup"; Description: "Optional: download and run the original Ac
 
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{tmp}\windows-install-acestream.ps1"""; Description: "Verify and start original Ace Stream setup"; Flags: skipifsilent waituntilterminated; Tasks: acestreamsetup
+; Inno Setup displays this optional checkbox on the final Completed page.
+; Never launch the GUI from /SILENT or /VERYSILENT, including CI upgrades.
+; The per-user app runs separately from the detached recorder worker.
+Filename: "{app}\DizyTV.exe"; Description: "Run DizyTV now"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);

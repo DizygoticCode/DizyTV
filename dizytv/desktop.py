@@ -27,7 +27,7 @@ from .storage import Store, atomic_json
 from .recorder import ensure_worker
 from .engine import ensure_ready, engine_diagnostics, start_playback_session
 from .timeshift import RollingTimeshift
-from .stream_diagnostics import probe_stream
+from .stream_diagnostics import probe_stream, regional_access_notice
 from .global_search import GlobalSearch
 from .iptv_directory import DIRECTORY_ROWS, DIRECTORY_TYPES, DIRECTORY_URL, WORLDWIDE_URL, parse_directory, directory_search
 from .subtitles import (COLOURS, POSITIONS, FONTS, vlc_subtitle_options,
@@ -41,6 +41,7 @@ from .health_history import HealthHistory
 from .duplicates import duplicate_groups, independent_candidates
 from .system_usage import SystemSampler
 from .ui_diagnostics import UiHangMonitor
+from .desktop_dashboard import dashboard_style, install_dashboard, update_dashboard_details
 
 ASSETS = Path(getattr(sys,'_MEIPASS', Path(__file__).resolve().parent.parent))/'assets'
 STYLE = '''
@@ -244,7 +245,7 @@ def desktop_style(scale=100, button_size='Normal', theme='Green'):
                .replace('QListWidget::item { padding:12px;',f'QListWidget::item {{ padding:{round(9*scale)}px;'))
     colors=THEME_COLORS.get(theme, {})
     converted=re.sub(r'#[0-9a-fA-F]{6}\b',lambda m: colors.get(m.group(),m.group()),style) if colors else style
-    return converted+'\n'+modern_desktop_style(theme)
+    return converted+'\n'+modern_desktop_style(theme)+'\n'+dashboard_style(theme,scale)
 
 
 
@@ -1942,6 +1943,13 @@ class MainWindow(QMainWindow):
         self.channel_banner.setWordWrap(True)
         self.channel_banner.hide()
         live_layout.addWidget(self.channel_banner)
+        self.regional_notice=QLabel('')
+        self.regional_notice.setObjectName('regionalAccessNotice')
+        self.regional_notice.setAccessibleName('Possible regional access restriction')
+        self.regional_notice.setWordWrap(True)
+        self.regional_notice.setStyleSheet('QLabel { padding: 8px; border: 1px solid #bd9240; border-radius: 6px; }')
+        self.regional_notice.hide()
+        live_layout.addWidget(self.regional_notice)
         self.video=QFrame(); self.video.setStyleSheet('background:black;')
         # The offscreen Qt CI plugin cannot safely reparent native video
         # windows. Real Windows/macOS players still use a native libVLC surface.
@@ -2070,10 +2078,16 @@ class MainWindow(QMainWindow):
         for label,handler in [('Stop / cancel',self.cancel_job),('Rearm restored timer',self.rearm_job),('Play file',self.play_file),('Delete file',self.delete_file)]:
             b=QPushButton(label); b.clicked.connect(handler); rec_buttons.addWidget(b)
         rec_layout.addLayout(rec_buttons); hint=QLabel('One recording at a time. Closing this window leaves the recorder running.\nAfter a reboot, open DizyTV to resume future timers. This alpha does not wake a sleeping computer.'); hint.setWordWrap(True); rec_layout.addWidget(hint); self.tabs.addTab(recordings,'Recordings')
+        # Separate fixture/source browsing: do not alter the existing EPG,
+        # channel favourites, saved playlists or recording-tab index (2).
+        from .matchday_ui import MatchdayPage
+        self.matchday_page=MatchdayPage(self.store,self.play_matchday_hls,parent=self)
+        self.tabs.addTab(self.matchday_page,'⚽ Matchday')
         self.global_search_button=QPushButton('⌕  Search channels and programmes  •  Ctrl+K');self.global_search_button.setObjectName('globalSearch')
         self.global_search_button.setToolTip('Search all imported playlists and upcoming programme titles, independent of filters')
         self.global_search_button.clicked.connect(self.open_global_search)
         layout.insertWidget(1,self.global_search_button)
+        install_dashboard(self,live_layout,layout)
         self.global_search_shortcut=QShortcut(QKeySequence('Ctrl+K'),self)
         self.global_search_shortcut.activated.connect(self.open_global_search)
         self.status=QLabel('Ready  •  Configure sources and recording storage in Settings');self.status.setObjectName('appStatus');layout.addWidget(self.status)
@@ -2165,7 +2179,7 @@ class MainWindow(QMainWindow):
         # vertically if the window is too short, without consuming extra video
         # space merely because category labels have wide text.
         self.sidebar_scroll.updateGeometry()
-        for area in (self.header_scroll,self.controls_scroll):
+        for area in (self.header_scroll,self.controls_scroll,self.dashboard_nav_scroll):
             child=area.widget()
             if child is None:
                 continue
@@ -2187,7 +2201,8 @@ class MainWindow(QMainWindow):
             extra=(scrollbar.sizeHint().height()
                    if area is self.header_scroll and scrollbar.maximum()>scrollbar.minimum()
                    else 0)
-            desired=base_height+(12 if area is self.header_scroll else 6)+extra
+            desired=base_height+(12 if area is self.header_scroll else
+                                 4 if area is self.dashboard_nav_scroll else 6)+extra
             if area.height()!=desired:
                 area.setFixedHeight(desired)
             area.updateGeometry()
@@ -2511,13 +2526,17 @@ class MainWindow(QMainWindow):
             if ch['id']==previous:self.channels.setCurrentItem(item); self.selected=ch
         self.channels.blockSignals(False); self.render_guide()
     def choose_channel(self,item,*_):
+        self.regional_notice.hide()
         self.selected=item.data(Qt.UserRole) if item else None; self.render_now()
     def render_now(self):
-        if not self.selected:return
+        if not self.selected:
+            update_dashboard_details(self)
+            return
         cid=self.matched_guide(self.selected); now=time.time()
         by_channel,_=self.guide_index()
         items=[p for p in by_channel.get(cid,()) if p['end']>now][:2]
         self.now.setText(display_channel_name(self.selected['name'])+'\n'+'\n'.join(format_time(p['start'],self.state['settings']['timezone'],False,detected_zone())+'  '+p['title'] for p in items) if items else display_channel_name(self.selected['name'])+' — no guide match')
+        update_dashboard_details(self,items)
     def render_guide(self):
         # Pass ALL channels matching the catalogue's active filters. GuideGrid
         # paints only its visible rows; channels without EPG are retained.
@@ -2543,6 +2562,9 @@ class MainWindow(QMainWindow):
                 programmes.append(p)
         self.grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
         self.grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
+        if hasattr(self,'dashboard_grid'):
+            self.dashboard_grid.set_guide_scale(self.state['settings'].get('guide_scale',100))
+            self.dashboard_grid.set_data(channels,programmes,resolved,self.state['settings']['timezone'],self.guide_start)
         self.guide_date.setText(
             format_time(self.guide_start,self.state['settings']['timezone'],detected=detected_zone())+
             f'  •  {len(channels):,} selected channels')
@@ -2558,6 +2580,8 @@ class MainWindow(QMainWindow):
         self.theme_picker.setCurrentText(theme)
         self.theme_picker.blockSignals(False)
         self.grid.set_theme(theme)
+        if hasattr(self,'dashboard_grid'):
+            self.dashboard_grid.set_theme(theme)
         for rail in (self.seek_slider,self.volume_slider,self.screen_seek_slider):
             if rail is not None:rail.set_rail_theme(theme)
         if self.detached_controls is not None:
@@ -2573,11 +2597,12 @@ class MainWindow(QMainWindow):
         self.channel_banner.setStyleSheet(
             'background:'+theme_color('#304d36',theme)+';color:'+
             ('#1e293b' if theme=='Light' else '#ffffff')+';padding:8px;')
-        for scroll in (self.header_scroll,self.controls_scroll):
+        for scroll in (self.header_scroll,self.controls_scroll,self.dashboard_nav_scroll):
             widget=scroll.widget()
             if widget:
                 widget.adjustSize()
-                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else 6))
+                scroll.setFixedHeight(widget.sizeHint().height()+(12 if scroll is self.header_scroll else
+                                                            4 if scroll is self.dashboard_nav_scroll else 6))
         QTimer.singleShot(0,self,self.settle_startup_toolbar_layout)
 
     def scroll_player_buttons(self,step):
@@ -2810,6 +2835,10 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value); item.setToolTip(job.get('error','')); self.jobs.setItem(row,col,item)
         self.grid.update()
+        if hasattr(self,'dashboard_grid'):
+            # The second EPG uses time.time() to draw its LIVE marker and
+            # on-air highlight; refresh it on the same established 5s tick.
+            self.dashboard_grid.update()
         self.check_live_timeshift()
         self.check_direct_playback()
         self.sync_subtitles()
@@ -2853,6 +2882,10 @@ class MainWindow(QMainWindow):
             if warning:
                 self._video_issue_notified=True
                 self.status.setText('Video diagnostic: '+warning)
+        # A recovered stream must clear an earlier access-denied notice.
+        if (self.regional_notice.isVisible() and self.player and self.playback_started
+                and str(self.player.get_state()).endswith('.Playing')):
+            self.regional_notice.hide()
         if self.player and self.playback_started and not self.playback_reported:
             state=str(self.player.get_state())
             if state.endswith('.Playing'):
@@ -3288,27 +3321,68 @@ class MainWindow(QMainWindow):
                 current=self.player.video_get_spu()
                 if (current!=-1 or not self._subtitle_auto_applied or
                         signature!=self._subtitle_track_signature):
-                    accepted=self.player.video_set_spu(-1)==0
-                    # A decoder without published tracks is not yet ready;
-                    # check again on the next timer, even if it returned 0.
-                    self._subtitle_auto_applied=accepted and bool(tracks)
-                    self._subtitle_track_signature=signature
+                    from .player_worker import AsyncPlayer
+                    if isinstance(self.player,AsyncPlayer):
+                        generation=self.player.generation
+                        def completed(value,error):
+                            if (self.player is not None and self.player.generation==generation
+                                    and (self._subtitle_session_all_off or self._subtitle_manual_track==-1
+                                         or not self.state['settings'].get('subtitles_enabled',True))):
+                                self._subtitle_auto_applied=(error is None and value==0 and bool(tracks))
+                                self._subtitle_track_signature=signature
+                        self.player.set_subtitle(-1,completed)
+                    else:
+                        accepted=self.player.video_set_spu(-1)==0
+                        # A decoder without published tracks is not yet ready;
+                        # check again on the next timer, even if it returned 0.
+                        self._subtitle_auto_applied=accepted and bool(tracks)
+                        self._subtitle_track_signature=signature
             except (AttributeError,OSError,RuntimeError):
                 self._subtitle_auto_applied=False
             return
         if self._subtitle_manual_track is not None:
+            # Reparenting an HWND/NSView can reset VLC's active SPU even though
+            # the viewer manually selected a track. Reapply it only if lost.
+            target=self._subtitle_manual_track
+            if isinstance(target,int) and target!=-1:
+                try:
+                    if self.player.video_get_spu()!=target:
+                        from .player_worker import AsyncPlayer
+                        if isinstance(self.player,AsyncPlayer):
+                            self.player.set_subtitle(target,lambda value,error:
+                                self.status.setText('Could not restore the selected subtitle track')
+                                if error or value!=0 else None)
+                        else:
+                            self.player.video_set_spu(target)
+                except (AttributeError,OSError,RuntimeError):
+                    pass
             return
         tracks=subtitle_tracks(self.player)
         signature=tuple(tracks)
         if not tracks:return
-        if self._subtitle_auto_applied and signature==self._subtitle_track_signature:return
         target=suggested_subtitle(tracks,self.state['settings'].get('subtitle_language','Auto'))
+        if target is None:return
+        # Track discovery may be unchanged but the output was recreated.
+        # Reapply the preferred language when VLC silently reverts to Off.
+        if self._subtitle_auto_applied and signature==self._subtitle_track_signature:
+            return
         try:
-            if target is None:return
-            if self.player.video_get_spu()!=target and self.player.video_set_spu(target)!=0:
-                # HLS caption tracks can be listed before VLC is ready to
-                # activate them. Try again on the next timer tick.
-                return
+            if self.player.video_get_spu()!=target:
+                from .player_worker import AsyncPlayer
+                if isinstance(self.player,AsyncPlayer):
+                    generation=self.player.generation
+                    def completed(value,error):
+                        if (self.player is not None and self.player.generation==generation
+                                and self._subtitle_manual_track is None
+                                and not self._subtitle_session_all_off
+                                and error is None and value==0):
+                            self._subtitle_auto_applied=True
+                            self._subtitle_track_signature=signature
+                    self.player.set_subtitle(target,completed)
+                    return
+                if self.player.video_set_spu(target)!=0:
+                    # Track may be listed before native output is ready.
+                    return
             self._subtitle_auto_applied=True
             self._subtitle_track_signature=signature
         except (AttributeError,OSError,RuntimeError):pass
@@ -3329,7 +3403,14 @@ class MainWindow(QMainWindow):
         if not self.player or not self.playback_started:return
         if track!=-1 and track not in {key for key,_ in subtitle_tracks(self.player)}:return
         try:
-            if self.player.video_set_spu(track)!=0:
+            from .player_worker import AsyncPlayer
+            if isinstance(self.player,AsyncPlayer):
+                generation=self.player.generation
+                def completed(value,error):
+                    if self.player is not None and self.player.generation==generation and (error or value!=0):
+                        self.status.setText('This channel could not enable the selected subtitle track.')
+                self.player.set_subtitle(track,completed)
+            elif self.player.video_set_spu(track)!=0:
                 self.status.setText('This channel cannot enable the selected subtitle track.')
                 return
         except (AttributeError,OSError,RuntimeError):
@@ -3351,8 +3432,16 @@ class MainWindow(QMainWindow):
         if not path:return
         try:
             path=external_subtitle_path(path)
-            if not self.player.video_set_subtitle_file(path):
+            from .player_worker import AsyncPlayer
+            if isinstance(self.player,AsyncPlayer):
+                generation=self.player.generation
+                def completed(value,error):
+                    if self.player is not None and self.player.generation==generation and (error or not value):
+                        self.status.setText('VLC could not read this subtitle file')
+                self.player.set_subtitle_file(path,completed)
+            elif not self.player.video_set_subtitle_file(path):
                 raise ValueError('VLC could not read this subtitle file')
+            self._subtitle_session_all_off=False
             # File subtitles are an explicit user choice: the periodic
             # broadcast preference must not replace the newly attached slave.
             self._subtitle_manual_track='external'
@@ -3431,59 +3520,74 @@ class MainWindow(QMainWindow):
         menu.exec(QCursor.pos())
 
     def init_player(self):
-        if self.player:return
-        # An installed application always uses its verified package-private
-        # VLC binaries and modules; never silently load an older system VLC.
-        from .media_runtime import configure_private_vlc
-        configure_private_vlc()
-        import vlc
+        if self.player:
+            return
+        # All native VLC calls, including instance creation/stop and track
+        # queries, must run off Qt's UI thread. The facade returns immutable
+        # cached state for ordinary status and guide/UI polling.
+        from .player_worker import AsyncPlayer
         self._vlc_subtitle_profile=tuple(vlc_subtitle_options(self.state['settings']))
-        vlc_options=['--no-video-title-show',*self._vlc_subtitle_profile]
+        options=['--no-video-title-show',*self._vlc_subtitle_profile]
         if self.state['settings'].get('vlc_decoder','Auto')=='Software':
-            vlc_options.append('--avcodec-hw=none')
-        self.vlc_instance=vlc.Instance(*vlc_options)
-        self.player=self.vlc_instance.media_player_new()
-        self.player.audio_set_volume(self.volume_slider.value())
-        win=int(self.video.winId())
-        if sys.platform=='darwin':self.player.set_nsobject(win)
-        elif os.name=='nt':self.player.set_hwnd(win)
-        else:self.player.set_xwindow(win)
+            options.append('--avcodec-hw=none')
+        self.player=AsyncPlayer(options=options, video_handle=int(self.video.winId()),
+                                volume=self.volume_slider.value(), parent=self)
+
+    def _async_player_finished(self, result):
+        if result.error:
+            self.playback_started=0
+            self.stop_auto_captions()
+            self.error('Playback could not start. Check that VLC 3 is installed and the stream is available. '
+                       +result.error)
+
     def play_url(self,url,preserve_captions=False):
-        # Only the in-place DVR caption-sync controls use preserve_captions;
-        # channel tuning, record recovery and ordinary seeks retain old reset.
+        self.regional_notice.hide()
         if not preserve_captions:
             self.stop_auto_captions()
         self._playback_url=url
         self._active_direct_video=False
         try:
             self.init_player()
-            self.player.stop()
-            media=self.vlc_instance.media_new(url)
-            # Some free HLS origins reject libVLC's default User-Agent.
-            # This is format compatibility, not bypassing geo/DRM restrictions.
+            # File/HTTP playback may still be requested by test fixtures that
+            # explicitly inject a plain mock VLC object. Retain that legacy
+            # contract, while production always uses AsyncPlayer above.
+            from .player_worker import AsyncPlayer
+            options=[]
             if url.lower().startswith(('http://','https://')):
-                media.add_option(':http-user-agent='+PLAYBACK_USER_AGENT)
-                # Apply only to direct network media, not captured local DVR.
-                # VLC's per-media network caching is preferable to global
-                # decoder/reclock changes, and avoids changing working Ace sessions.
+                options.append(':http-user-agent='+PLAYBACK_USER_AGENT)
                 from .core import ace_id
                 direct=(self.selected is not None and
                         not ace_id(self.selected.get('stream','')) and self.timeshift is None)
-                # Browsing a different channel must not change how we monitor
-                # the media already playing, especially an Ace engine session.
                 self._active_direct_video=bool(direct and channel_kind(self.selected)!='Radio')
                 if direct:
-                    media.add_option(':network-caching='+str(
+                    options.append(':network-caching='+str(
                         self.state['settings'].get('http_buffer_ms',4000)))
-            self.player.set_media(media); media.release()
+            if isinstance(self.player,AsyncPlayer):
+                generation=self.player.play_url(
+                    url,options,subtitles_off=self._subtitle_session_all_off,
+                    on_done=self._async_player_finished)
+                if generation is None:
+                    raise RuntimeError('Native playback worker has already been closed')
+            else:
+                self.player.stop()
+                media=self.vlc_instance.media_new(url)
+                try:
+                    for option in options:
+                        media.add_option(option)
+                    self.player.set_media(media)
+                finally:
+                    media.release()
+                if self.player.play()==-1:
+                    raise RuntimeError('libVLC could not start playback')
+                if self._subtitle_session_all_off:
+                    try:self.player.video_set_spu(-1)
+                    except (AttributeError,OSError,RuntimeError):pass
+
             self._subtitle_auto_applied=False
             self._subtitle_manual_track=(-1 if self._subtitle_session_all_off else None)
             self._subtitle_track_signature=()
-            if self.player.play()==-1:raise RuntimeError('libVLC could not start playback')
-            if self._subtitle_session_all_off:
-                try:self.player.video_set_spu(-1)
-                except (AttributeError,OSError,RuntimeError):pass
-            self.playback_started=time.monotonic(); self.playback_reported=False
+            self.playback_started=time.monotonic()
+            self.playback_reported=False
             self._last_media_activity=None
             self._video_issue_notified=False
             self._direct_video_sample=None
@@ -3695,6 +3799,12 @@ class MainWindow(QMainWindow):
             if (serial==self.source_check_serial and self.selected and
                     self.selected['id']==channel):
                 self.status.setText(origin_label+': '+message)
+                notice=regional_access_notice(message)
+                if notice:
+                    self.regional_notice.setText(notice)
+                    self.regional_notice.show()
+                else:
+                    self.regional_notice.hide()
         diagnostic.signals.success.connect(ready)
         diagnostic.signals.failure.connect(lambda _message:None)
         self.pool.start(diagnostic)
@@ -3820,6 +3930,7 @@ class MainWindow(QMainWindow):
         is_ace=ace_id(ch['stream']) is not None
         if is_ace and self.engine_task is not None:
             self.status.setText('Ace Stream engine startup is already in progress…'); return
+        self.regional_notice.hide()
         # The viewer has requested a new channel NOW. Remove old Vosk words
         # before an Ace engine/TV source may spend seconds connecting.
         self.stop_auto_captions()
@@ -3872,7 +3983,8 @@ class MainWindow(QMainWindow):
     def eventFilter(self,obj,event):
         if obj is self.video and event.type() in (QEvent.Resize,QEvent.Move):
             self.position_auto_caption_overlay()
-        if obj is self.screen_dialog and event.type() in (QEvent.Resize,QEvent.Move):
+        if obj is self.screen_dialog and event.type() in (
+                QEvent.Resize,QEvent.Move,QEvent.ScreenChangeInternal):
             self.position_auto_caption_overlay()
         if obj is self.video and event.type()==QEvent.MouseButtonDblClick:
             self.toggle_screen_fullscreen()
@@ -3919,7 +4031,7 @@ class MainWindow(QMainWindow):
         if not self.timeshift and not self.player.is_seekable():
             self.seek_notice.setText('This source has no seekable DVR window. Enable on-device timeshift in Settings.')
             return
-        paused=bool(self.player.get_state()==__import__('vlc').State.Paused)
+        paused=str(self.player.get_state()).endswith('.Paused')
         self.player.set_pause(0 if paused else 1)
         self.pause_button.setText('⏸ Pause' if paused else '▶ Resume')
         self.status.setText('Playback resumed' if paused else 'Live TV paused in the available DVR window')
@@ -3976,6 +4088,15 @@ class MainWindow(QMainWindow):
             self.exit_screen_fullscreen()
         self.cinema_mode=not self.cinema_mode
         self.sidebar.setVisible(not self.cinema_mode)
+        # Cinema keeps playback controls available but removes dashboard chrome.
+        # No widget, recording, caption state or saved preference is destroyed.
+        if hasattr(self,'dashboard_nav_shell'):
+            self.dashboard_nav_shell.setVisible(not self.cinema_mode)
+            self.dashboard_timeline.setVisible(not self.cinema_mode)
+            self.dashboard_hero.widget(1).setVisible(not self.cinema_mode)
+            self.sidebar_scroll.setVisible(not self.cinema_mode)
+            self.header_scroll.setVisible(not self.cinema_mode)
+            self.global_search_button.setVisible(not self.cinema_mode)
         for widget in self.header_buttons:
             if widget:widget.setVisible(not self.cinema_mode)
         # Tabs remain accessible when not in cinema mode.
@@ -4161,11 +4282,21 @@ class MainWindow(QMainWindow):
         if fullscreen:screen.showFullScreen()
         else:screen.show()
         self.video.show()
+        # Detaching/docking can recreate the libVLC video output. Retry a
+        # previously auto-selected subtitle once on the replacement surface,
+        # not on every five-second tick when track status is stale.
+        self._subtitle_auto_applied=False
+        self._subtitle_track_signature=()
         self._rebind_video()
         if self._auto_caption_overlay is not None:
             self.destroy_auto_caption_overlay()
             if self._auto_caption_worker is not None and self._auto_caption_text:
-                self.receive_auto_caption(self._auto_caption_seq,self._auto_caption_text)
+                # Caption is already visible; don't put it back into the
+                # user-configured delay queue when docking/detaching.
+                self.create_auto_caption_overlay()
+                self._auto_caption_label.setText(self._auto_caption_text)
+                self.position_auto_caption_overlay()
+                self._auto_caption_overlay.show()
         self.detached_mouse_position=QCursor.pos()
         self.detached_mouse_timer.start()
         self.show_detached_controls()
@@ -4229,13 +4360,26 @@ class MainWindow(QMainWindow):
             overlay.close()
             overlay.deleteLater()
         self.video.setParent(None)
-        self.live_layout.insertWidget(2,self.video,1)
+        if hasattr(self,'dashboard_player_layout'):
+            self.dashboard_player_layout.addWidget(self.video,1)
+        else:
+            self.live_layout.insertWidget(2,self.video,1)
         self.video.show()
+        # Detaching/docking can recreate the libVLC video output. Retry a
+        # previously auto-selected subtitle once on the replacement surface,
+        # not on every five-second tick when track status is stale.
+        self._subtitle_auto_applied=False
+        self._subtitle_track_signature=()
         self._rebind_video()
         if self._auto_caption_overlay is not None:
             self.destroy_auto_caption_overlay()
         if self._auto_caption_worker is not None and self._auto_caption_text:
-            self.receive_auto_caption(self._auto_caption_seq,self._auto_caption_text)
+            # Reparent the visible text immediately without imposing the
+            # Vosk delay a second time or resetting its presentation clock.
+            self.create_auto_caption_overlay()
+            self._auto_caption_label.setText(self._auto_caption_text)
+            self.position_auto_caption_overlay()
+            self._auto_caption_overlay.show()
         screen.close()
         screen.deleteLater()
 
@@ -4304,7 +4448,25 @@ class MainWindow(QMainWindow):
         self.guide_popup=dialog
         dialog.show()
 
+    def play_matchday_hls(self,url):
+        """Play an explicitly user-authorised direct HLS URL in native VLC.
+
+        No channel selection, phantom EPG programme, scheduled recording or
+        third-party iframe transport is constructed here.
+        """
+        from .matchday import safe_public_url
+        try:
+            safe_public_url(url)
+            if not url.lower().split('?',1)[0].endswith('.m3u8'):
+                raise ValueError('Matchday native VLC supports direct HLS only')
+            self.stop_playback()
+            self.selected=None
+            self.play_url(url)
+        except (ValueError,OSError,RuntimeError) as exc:
+            self.status.setText('Matchday source unavailable: '+str(exc))
+
     def stop_playback(self):
+        self.regional_notice.hide()
         self._play_request_serial+=1
         self.engine_task=None
         self.source_check_serial+=1

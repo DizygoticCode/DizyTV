@@ -134,9 +134,42 @@ if sys.platform=='darwin':
     info.write_bytes(plistlib.dumps(value))
     # Re-sign after Info.plist change. Ad-hoc identity is for development only.
     subprocess.run(['codesign','--force','--deep','--sign','-','dist/DizyTV.app'],check=True)
-    subprocess.run(['pkgbuild','--component','dist/DizyTV.app','--install-location','/Applications',
-                    '--identifier','dev.dizygotic.dizytv','--version',mac_version,
-                    f'dist/DizyTV-{mac_version}-alpha-macos-{platform.machine()}.pkg'],check=True)
+    # Installer.app does not support Inno-style post-install launch checkboxes.
+    # Give the user a final Summary page with a safe, explicit way to launch
+    # their installed app rather than running a GUI from root's postinstall.
+    import xml.etree.ElementTree as ET
+    import tempfile
+    target=Path(f'dist/DizyTV-{mac_version}-alpha-macos-{platform.machine()}.pkg')
+    with tempfile.TemporaryDirectory(prefix='dizytv-product-') as tempdir:
+        staging=Path(tempdir)
+        component=staging/'DizyTV-component.pkg'
+        distribution=staging/'Distribution.xml'
+        resources=staging/'Resources'
+        resources.mkdir()
+        conclusion=resources/'conclusion.html'
+        conclusion.write_text(
+            '<!doctype html><html><head><meta charset="utf-8"></head><body>'
+            '<h2>DizyTV is installed</h2>'
+            '<p>To run DizyTV now, close Installer and open '
+            '<strong>Applications &rarr; DizyTV</strong>.</p>'
+            '<p>DizyTV will not start automatically during installation. '
+            'Any current or scheduled recording remains under your control.</p>'
+            '</body></html>', encoding='utf-8')
+        subprocess.run(['pkgbuild','--component','dist/DizyTV.app',
+                        '--install-location','/Applications',
+                        '--identifier','dev.dizygotic.dizytv','--version',mac_version,
+                        str(component)],check=True)
+        subprocess.run(['productbuild','--synthesize','--package',str(component),
+                        str(distribution)],check=True)
+        document=ET.parse(distribution)
+        root=document.getroot()
+        if root.tag!='installer-gui-script':
+            raise RuntimeError('Unexpected macOS distribution XML root')
+        ET.SubElement(root,'conclusion',{'file':'conclusion.html','mime-type':'text/html'})
+        document.write(distribution, encoding='utf-8', xml_declaration=True)
+        subprocess.run(['productbuild','--distribution',str(distribution),
+                        '--resources',str(resources),
+                        '--package-path',str(staging),str(target)],check=True)
 
 for file in Path('dist').glob('*'):
     if file.is_file() and file.suffix in ('.pkg','.exe'):

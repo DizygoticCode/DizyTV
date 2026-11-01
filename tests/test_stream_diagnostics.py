@@ -5,7 +5,7 @@ import socket
 import ssl
 from urllib.error import HTTPError, URLError
 
-from dizytv.stream_diagnostics import probe_stream,explain_status,explain_connection_failure
+from dizytv.stream_diagnostics import probe_stream,explain_status,explain_connection_failure,regional_access_notice
 from dizytv.sources import safe_source_label
 
 class DiagnosticsTests(unittest.TestCase):
@@ -14,6 +14,17 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIn('missing',explain_status(404))
         self.assertIn('rate-limiting',explain_status(429))
         self.assertIn('server error',explain_status(503))
+    def test_regional_hint_is_qualified_and_never_leaks_provider_text(self):
+        for code in (403,451):
+            hint=regional_access_notice(explain_status(code))
+            self.assertIn('regional',hint.lower())
+            self.assertIn('DizyTV does not change your location',hint)
+            self.assertNotIn('definitely',hint)
+        for code in (200,401,404,410,429,500):
+            self.assertEqual('',regional_access_notice(explain_status(code)))
+        self.assertEqual('',regional_access_notice('Stream not started'))
+        self.assertNotIn('SECRET',regional_access_notice('HTTP 403: token=SECRET'))
+
     def test_rejected_stream_does_not_echo_sensitive_url_tokens(self):
         class FakeOpener:
             def open(self,request,timeout):

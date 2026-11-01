@@ -133,14 +133,20 @@ class RecorderTests(unittest.TestCase):
             self.assertFalse((Path(folder)/'missing').exists())
 
     def test_cancel_preserves_bytes(self):
+        # Cancellation is defined by saved footage, not by the number of
+        # cancellation checks: the initial HTTP sniff now checks more often.
+        # The progress callback runs only after a whole TS packet is written.
         with tempfile.TemporaryDirectory() as folder:
-            count = [0]
-            def cancel():
-                count[0] += 1
-                return count[0] > 2
-            result = record_stream(self.url+'/live', folder, 'News', time.time()+5, reserve=0, cancel=cancel)
-            self.assertEqual('partial', result['status'])
+            stop = threading.Event()
+            result = record_stream(
+                self.url+'/live', folder, 'News', time.time()+5,
+                reserve=0, cancel=stop.is_set,
+                progress=lambda *_: stop.set())
+            self.assertTrue(stop.is_set(), result)
+            self.assertEqual('partial', result['status'], result)
             self.assertGreater(result['bytes'], 0)
+            self.assertEqual(0, result['bytes'] % 188)
+            self.assertEqual(result['bytes'], Path(result['path']).stat().st_size)
 
     def test_late_and_missed_jobs_and_worker_exclusion(self):
         now = 2000000000

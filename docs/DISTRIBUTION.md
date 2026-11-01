@@ -1,37 +1,29 @@
 # DizyTV installers and distribution
 
-**0.1.17-alpha native test packages are published as individual GitHub Release files only after the full five-platform `main` CI succeeds.** Downloads do not require extracting a GitHub Actions ZIP or signing into GitHub. These are development packages: native-host package/startup checks and Android compilation/lint/signature checks have passed, but physical-device tests are pending. See [verification](BUILD-VERIFICATION.md) and the [README download buttons](../README.md#downloads).
+## v0.1.19-alpha
 
-## Outputs
+This is a **development pre-release**, not a verified stable or production build. All five native installers have passed source QA and a candidate GitHub Actions build. The GitHub Release assets are published only after the five-platform build triggered by a `main` merge succeeds. The [release page](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.19-alpha) and [checksums](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/SHA256SUMS.txt) must exist before claiming publication.
 
-| Platform | Artifact contents | Signing status |
+| Platform | Direct installer | Signing |
 | --- | --- | --- |
-| Windows x64 | `DizyTV-Setup-0.1.17-alpha-windows-x64.exe` and checksum | Unsigned development installer |
-| Android 8.0+ / API 26 | `DizyTV-0.1.17-alpha-android-universal-debug.apk` and checksum | Verified CI debug signature; no retained release key |
-| Apple Silicon Mac | `DizyTV-0.1.17-alpha-macos-arm64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
-| Intel Mac | `DizyTV-0.1.17-alpha-macos-x86_64.pkg` and checksum | Ad-hoc app signature; unsigned/unnotarized PKG |
-| Ubuntu Linux x64 | `DizyTV-0.1.17-alpha-linux-amd64.deb` and checksum | Unsigned experimental Debian package; Ubuntu 24.04 CI verified |
+| Windows x64 | [DizyTV-Setup-0.1.19-alpha-windows-x64.exe](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-Setup-0.1.19-alpha-windows-x64.exe) | Unsigned development installer |
+| Android 8+ | [DizyTV-0.1.19-alpha-android-universal-debug.apk](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-android-universal-debug.apk) | Debug signature, not stable across CI runs |
+| macOS Apple Silicon | [DizyTV-0.1.19-alpha-macos-arm64.pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-macos-arm64.pkg) | Ad-hoc app, unnotarised package |
+| macOS Intel | [DizyTV-0.1.19-alpha-macos-x86_64.pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-macos-x86_64.pkg) | Ad-hoc app, unnotarised package |
+| Ubuntu/Debian x64 | [DizyTV-0.1.19-alpha-linux-amd64.deb](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.19-alpha/DizyTV-0.1.19-alpha-linux-amd64.deb) | Unsigned experimental DEB |
 
-Mac packages target macOS 13+. Windows builds target x64. Build settings and CI runner results establish package targets; fresh installation and compatibility on user devices are still to be tested.
+### Installation and launch
 
-## Proposed Outpace in the forthcoming macOS packages
+- **Windows:** bundled private VLC 3, FFmpeg and English Vosk. The optional original publisher Ace Stream installer remains **unchecked** and requires separate consent. The final interactive Inno Setup screen offers **Run DizyTV now**, checked by default; silent upgrades do not launch the GUI.
+- **macOS:** the architecture-matched PKG installs `DizyTV.app` into Applications, with private VLC, FFmpeg, English Vosk and a separately licensed Outpace helper for compatible public streams. The standard Installer.app completion summary explains how to open DizyTV from Applications; it has no Windows-style checkbox or unsafe automatic root launch.
+- **Linux:** `sudo apt install ./DizyTV-0.1.19-alpha-linux-amd64.deb`, then launch `dizytv` from the app menu or terminal. VLC and FFmpeg are managed by APT; English Vosk/Outpace are packaged.
+- **Android:** uses the Android installer’s ordinary **Open** action where offered. It includes native libVLC but **not** desktop Vosk/FFmpeg parity. Debug-key changes may mean uninstalling an older debug build and restoring from a DizyTV backup rather than upgrading in place.
 
-For the next desktop release, both macOS Intel and Apple Silicon builds compile the original, separately licensed [Outpace](https://github.com/jamezrin/outpace) v0.2.0 from pinned upstream source and place the native daemon and full AGPL licence inside the DizyTV app. DizyTV can start this bundled helper on demand when a public Ace channel is selected; its native localhost-only streaming API serves decoded media to the existing VLC playback surface. It does not install or modify the proprietary Ace Stream engine, require Docker, enable experimental compatibility endpoints or bypass DRM. Outpace supports public unencrypted Ace-compatible swarms; real peer playback and network/device behaviour require manual tests. Licence and corresponding-source review is mandatory before distribution.
+**Matchday is limited and experimental.** Fixture data is not proof of an authorised free broadcast. A user may add an authorised webpage/HLS link for a fixture; native/web rendering, territory, video/audio and quality remain unverified. No paid/DRM-protected or unauthorised stream access is provided.
 
-**This is development code, not part of the already-published 0.1.17-alpha PKGs.** Those still require an external/remote Ace engine and VLC 3. Do not claim Mac all-in-one completion until the Mac package builds and integration checks pass.
+**Preserve ongoing recordings.** Windows upgrades identify idle background workers but refuse to replace an app with active or imminently queued recordings. Back up playlists, favourites and settings before upgrading. Physical Windows 30-minute playback/UI responsiveness, Vosk On/Off, macOS/Outpace, Android viewing, clean installs and third-party licensing require verification.
 
-## Install and configure
-
-Download the native .exe, .apk, .pkg or .deb directly from the [0.1.17-alpha pre-release](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.17-alpha) and verify against its [SHA256SUMS.txt](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/SHA256SUMS.txt). Run the Windows EXE, install the APK through Android's permitted sideload flow, or open the matching Mac PKG to install `DizyTV.app` in Applications. Unsigned/development builds may trigger browser or operating-system trust warnings. Do not disable protective software to proceed.
-
-- **Windows:** install VLC 3 x64 and a separately installed Ace Stream engine. Start the engine before playback/recording. The app installs per user, without requiring an administrator by default.
-- **Android:** libVLC is embedded; install/open Ace Stream separately. Select a folder through Settings and retain its read/write grant. Allow recording notifications and grant exact-alarm access when scheduling.
-- **Mac:** install VLC 3 for the app architecture and configure a reachable Windows/Linux engine endpoint. No Mac Ace Stream engine is bundled. The player and output files stay on the Mac.
-- **Ubuntu Linux x64 (experimental):** `sudo apt install ./DizyTV-0.1.17-alpha-linux-amd64.deb`, then run `dizytv`. Requires distribution-provided VLC/libVLC 3 and associated Qt runtime libraries; install Ace Stream's `start-engine` separately if needed. [Full instructions](LINUX.md).
-
-In DizyTV Settings, select the recording destination, optional additional M3U URLs, XMLTV feed URLs, timezone/guide correction and timer padding. Five public playlists and two guide URLs are configured by default; imports happen on the device with per-source failure-safe cache. Refresh the guide, map missing channels and edit country/genre/type categories where needed. Some feeds are geo-restricted, use DRM, or do not provide compatible streams. DizyTV does not circumvent those restrictions.
-
-One recorder runs per device. Desktop recording requires an awake machine; closing the window leaves the detached worker running. Open the app after reboot. Android alarms/foreground recording/reboot recovery are implemented, but battery management, force-stop and engine availability need real-device validation.
+**Security:** Do not bypass Chrome, SmartScreen, Play Protect or Gatekeeper blocks. Development signatures are not production trust signals. Licence and corresponding-source obligations require review prior to broader distribution.
 
 ## Windows upgrade from 0.1.0/0.1.1
 
@@ -45,35 +37,11 @@ Android CI debug keys are generated on build hosts and do not provide a guarante
 
 ## Distribution status
 
-The public repository now uses a gated release job: after all five native builds pass on a push to `main`, GitHub Actions creates a **pre-release tagged `v0.1.17-alpha`** and uploads all five files plus a consolidated SHA-256 manifest. If that version already exists, it is not silently overwritten. The release assets are direct downloads without the 30-day GitHub Actions artifact expiry or login requirement.
+GitHub Actions performs source and native smoke tests on the five platforms, then (only on `main`) publishes a versioned pre-release with the five native files and SHA-256 manifest. It refuses to overwrite an existing release. The previous [v0.1.18-alpha](https://github.com/DizygoticCode/DizyTV/releases/tag/v0.1.18-alpha) is preserved.
 
-- [Windows .exe](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-Setup-0.1.17-alpha-windows-x64.exe)
-- [Android .apk](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-android-universal-debug.apk)
-- [Mac arm64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-arm64.pkg)
-- [Mac x86_64 .pkg](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-macos-x86_64.pkg)
-- [Ubuntu Linux x64 .deb](https://github.com/DizygoticCode/DizyTV/releases/download/v0.1.17-alpha/DizyTV-0.1.17-alpha-linux-amd64.deb)
+## Third-party engines and licensing
 
-Direct links do **not** establish a file's reputation with Chrome, Microsoft Defender SmartScreen, Play Protect or Gatekeeper. These are explicitly **untrusted/development** packages: Windows is unsigned; Android is signed with a CI debug key that is not retained between runs; Mac PKGs are unsigned and unnotarized. Never instruct testers to turn off browser or operating-system malware protections. If Chrome reports that a file is harmful or malware, do not override the warning: investigate the exact warning and check the binaries and supply chain first. Routine publisher-identity warnings likewise mean these builds are not yet suitable for broadly trusted public distribution.
-
-Public stable-release tasks remain: device acceptance, persistent Android release signing and upgrade testing, Windows code signing, Apple Developer ID signing/notarization, exact third-party source/relinking information and an owner-selected source licence. Licence texts and component notices are included in the packages; see [third-party notices](../THIRD-PARTY-NOTICES.md).
-
-The engine is separately installed/configured; this project does not rename or redistribute Ace Stream binaries. DizyServer metadata and optional server recording are separate future milestones. Engine endpoints should be configured for trusted networks; this work does not expose a public unauthenticated engine service.
-
-## Build hosts
-
-The workflow uses Windows 2022 x64, macOS 15 Apple Silicon, macOS 15 Intel, Ubuntu 24.04 Linux package and Ubuntu 24.04 Android build hosts. Desktop packaging uses PyInstaller 6.22.3, Inno Setup 6 and macOS `pkgbuild`; Android uses JDK 17, Gradle 8.13 and AGP 8.11.1. Compile SDK 36 satisfies libVLC 3.7.5's AAR requirement while target remains 35 and minimum remains 26.
-
-## Primary references
-
-- [Ace Stream engine products](https://docs.acestream.media/products/)
-- [Android app signing](https://developer.android.com/studio/publish/app-signing)
-- [Apple Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates)
-- [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
-- [Microsoft SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool)
-
-## Optional third-party Ace Stream setup (next Windows alpha)
-
-DizyTV Setup offers an **unchecked** task, "Open the official Ace Stream download page after installing DizyTV." If selected, it opens https://docs.acestream.net/products/ in the default browser; **no Ace executable is embedded, downloaded or silently executed** by DizyTV. Users may obtain the unchanged installer from the publisher and accept its own terms, which include P2P networking and advertising. The Live TV tab also includes a setup link for people who skipped the installer option. DizyTV auto-starts an existing engine on Windows, but no known redistribution/integration permission is implied by these changes. Once installed, regular HTTP/HLS playback remains entirely independent of Ace Stream. Desktop libVLC/VLC 3 requirements are separate.
+Windows may offer an **explicit opt-in** to download and run the unmodified original Ace Stream setup only when a trusted publisher/signature can be verified. No Ace Stream binary is redistributed. Mac/Linux include a separately licensed source-built Outpace helper for compatible public swarms; real-peer functionality and distribution obligations still require field/legal verification.
 
 ## 0.1.16-alpha playback note
 
@@ -97,7 +65,7 @@ Ctrl+K global search (all sources and programme titles); full filtered guide wit
 
 ## 0.1.16-alpha Windows bundled offline captions
 
-The Windows EXE now embeds checksum-verified FFmpeg 8.1.2 and Vosk Small English US 0.15 into DizyTV's private `_internal/speech` directory; neither runs automatically on installation. To transcribe an authorised live channel, choose **CC Subtitles → Generate live subtitles**. Blank model and FFmpeg paths select the bundled copies automatically, and explicit paths override them. The installer is allowed to run only if the build stage downloads, verifies SHA-256 and packages both assets. CI also executes the installed FFmpeg binary and checks Vosk model directories. This changes Windows only: macOS continues to require separate FFmpeg/model setup. Review bundled third-party GPL/source obligations in [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) before distributing a stable release.
+The Windows EXE now embeds checksum-verified FFmpeg 8.1.2 and Vosk Small English US 0.15 into DizyTV's private `_internal/speech` directory; neither runs automatically on installation. To transcribe an authorised live channel, choose **CC Subtitles → Generate live subtitles**. Blank model and FFmpeg paths select the bundled copies automatically, and explicit paths override them. The installer is allowed to run only if the build stage downloads, verifies SHA-256 and packages both assets. CI also executes the installed FFmpeg binary and checks Vosk model directories. This changes Windows only: newer macOS versions bundle FFmpeg and English Vosk. Review bundled third-party GPL/source obligations in [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) before distributing a stable release.
 
 ## 0.1.16-alpha Ace Stream playback handoff
 

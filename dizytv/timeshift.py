@@ -59,13 +59,19 @@ class RollingWindow:
         self.entries = deque()
         self.total = 0
         self.counter = 0
+        self._closed = False
 
     def _evict(self):
         now = self.clock()
+        # Cap the actual playable-media duration, not only wall-clock age:
+        # fast HLS backfills may contain minutes of content in one second.
+        media_seconds = sum(item.duration for item in self.entries)
         while self.entries and (self.total > self.max_bytes or
+                media_seconds > self.minutes * 60 or
                 now - self.entries[0].created > self.minutes * 60 or
                 self.free() < self.reserve_bytes + 2 * MAX_SEGMENT_BYTES):
             item = self.entries.popleft()
+            media_seconds -= item.duration
             self.total -= item.size
             item.path.unlink(missing_ok=True)
 
@@ -74,12 +80,13 @@ class RollingWindow:
             raise ValueError('Timeshift segment is empty or too large')
         if not 0.1 <= duration <= 30:
             raise ValueError('Invalid MPEG-TS segment duration')
-        if self.free() < self.reserve_bytes + len(data) + 2 * MAX_SEGMENT_BYTES:
-            with self.lock:
-                self._evict()
-            if self.free() < self.reserve_bytes + len(data) + 2 * MAX_SEGMENT_BYTES:
-                raise OSError('Timeshift stopped: free disk space reserve reached')
         with self.lock:
+            if self._closed:
+                raise OSError('Timeshift window is closed')
+            if self.free() < self.reserve_bytes + len(data) + 2 * MAX_SEGMENT_BYTES:
+                self._evict()
+                if self.free() < self.reserve_bytes + len(data) + 2 * MAX_SEGMENT_BYTES:
+                    raise OSError('Timeshift stopped: free disk space reserve reached')
             seq = self.counter
             self.counter += 1
             tmp = self.directory / f'{seq:012d}.part'
@@ -163,6 +170,7 @@ class RollingWindow:
 
     def close(self):
         with self.lock:
+            self._closed = True
             while self.entries:
                 self.entries.popleft().path.unlink(missing_ok=True)
             self.total = 0
@@ -173,8 +181,13 @@ class RollingWindow:
             pass
 
 
-def parse_hls(body, base_url):
-    """Return media TS segment URLs, rejecting encrypted/fMP4 and unsupported HLS."""
+def parse_hls(body, base_url, include_sequence=False):
+    """Return clear HLS media segments; optionally return stable media-sequence keys.
+
+    The default (url, duration) shape is retained for existing callers.
+    For live capture, media sequence distinguishes reused URLs and ignores
+    rotating signed query strings for segments already seen.
+    """
     if not body.lstrip('\ufeff').startswith('#EXTM3U'):
         raise ValueError('Not an HLS playlist')
     lines = [line.strip() for line in body.splitlines() if line.strip()]
@@ -182,6 +195,10 @@ def parse_hls(body, base_url):
         raise ValueError('Protected/encrypted HLS is not supported by local timeshift')
     if any(x.startswith('#EXT-X-MAP:') for x in lines):
         raise ValueError('Fragmented-MP4 HLS is not yet supported by local timeshift')
+    if any(x.startswith('#EXT-X-SESSION-KEY:') for x in lines):
+        raise ValueError('HLS session keys are not supported by local timeshift')
+    if any(x.startswith('#EXT-X-BYTERANGE:') for x in lines):
+        raise ValueError('HLS byte range segments are not supported by local timeshift')
     if '#EXT-X-STREAM-INF' in body:
         for i, line in enumerate(lines[:-1]):
             if line.startswith('#EXT-X-STREAM-INF') and not lines[i+1].startswith('#'):
@@ -189,15 +206,29 @@ def parse_hls(body, base_url):
         raise ValueError('HLS master playlist has no playable variant')
     result = []
     duration = 4.0
+    sequence = None
     for line in lines:
-        if line.startswith('#EXTINF:'):
+        if line.startswith('#EXT-X-MEDIA-SEQUENCE:'):
+            try:
+                sequence = int(line.partition(':')[2])
+                if sequence < 0:
+                    raise ValueError()
+            except ValueError as exc:
+                raise ValueError('Invalid HLS media sequence') from exc
+        elif line.startswith('#EXTINF:'):
             try:
                 duration = float(line[8:].split(',', 1)[0])
             except ValueError as exc:
                 raise ValueError('Invalid HLS segment duration') from exc
+            if not math.isfinite(duration) or not .1 <= duration <= 30:
+                raise ValueError('Invalid HLS segment duration')
         elif not line.startswith('#'):
             url = http_url(urljoin(base_url, line))
-            result.append((url, min(30., max(.1, duration))))
+            if include_sequence:
+                identity = ('sequence', sequence + len(result)) if sequence is not None else ('url', url)
+                result.append((url, duration, identity))
+            else:
+                result.append((url, duration))
     return 'segments', result
 
 
@@ -251,33 +282,63 @@ class RollingTimeshift:
                     if len(data) > 2*1024*1024:
                         raise ValueError('HLS playlist exceeds 2 MiB')
                     endpoint = response.geturl()
-                kind, urls = parse_hls(data.decode('utf-8-sig'), endpoint)
+                if self.stop_event.is_set():
+                    break
+                kind, urls = parse_hls(data.decode('utf-8-sig'), endpoint, include_sequence=True)
                 if kind == 'variant':
                     source = urls[0][0]
                     continue
-                for url, duration in urls:
+                for url, duration, identity in urls:
                     if self.stop_event.is_set():
                         break
-                    if url in known:
+                    if identity in known:
                         continue
                     with self._request(url) as response:
                         chunk = response.read(MAX_SEGMENT_BYTES+1)
+                    if self.stop_event.is_set():
+                        break
                     if not chunk or len(chunk)>MAX_SEGMENT_BYTES:
                         raise ValueError('HLS segment missing or exceeds 16 MiB')
                     if chunk[0] != 0x47:
                         raise ValueError('Only MPEG-TS HLS segments can be cached')
                     self.window.append(chunk, duration)
-                    known.add(url); last.append(url)
+                    known.add(identity); last.append(identity)
                     if len(known)>10000:
                         known = set(last)
                     self.ready.set()
                 self.stop_event.wait(1.5)
             except (OSError, ValueError, UnicodeError) as exc:
+                if self.stop_event.is_set():
+                    break
                 self.error = str(exc)[:250]
                 if not self.ready.is_set():
                     self.ready.set()
                     return
                 self.stop_event.wait(2)
+
+    @staticmethod
+    def _pcr_duration(payload):
+        """Estimate TS media seconds from packet PCR timestamps, if present.
+
+        PCR is a 33-bit 90kHz base plus a 9-bit 27MHz extension. Ignore
+        discontinuities and implausible deltas; fall back to wall time.
+        """
+        ticks = []
+        for i in range(0, len(payload) - PACKET + 1, PACKET):
+            packet = payload[i:i+PACKET]
+            if packet[0] != 0x47 or not (packet[3] & 0x20):
+                continue
+            if packet[4] < 7 or not (packet[5] & 0x10):
+                continue
+            p = packet[6:12]
+            base = (p[0] << 25) | (p[1] << 17) | (p[2] << 9) | (p[3] << 1) | (p[4] >> 7)
+            extension = ((p[4] & 1) << 8) | p[5]
+            ticks.append(base * 300 + extension)
+        if len(ticks) < 2:
+            return None
+        delta = (ticks[-1] - ticks[0]) % ((1 << 33) * 300)
+        seconds = delta / 27000000
+        return seconds if .1 <= seconds <= 30 else None
 
     def _capture_ts(self):
         while not self.stop_event.is_set():
@@ -303,7 +364,8 @@ class RollingTimeshift:
                             payload=b''.join(pieces)
                             usable=len(payload)//PACKET*PACKET
                             if usable:
-                                self.window.append(payload[:usable],max(.1,elapsed))
+                                segment = payload[:usable]
+                                self.window.append(segment, self._pcr_duration(segment) or max(.1, elapsed))
                                 self.ready.set()
                             remainder=payload[usable:]
                             pieces=[remainder] if remainder else []
@@ -314,9 +376,12 @@ class RollingTimeshift:
                         payload=b''.join(pieces)
                         usable=len(payload)//PACKET*PACKET
                         if usable:
-                            self.window.append(payload[:usable],max(.1,time.monotonic()-started))
+                            segment = payload[:usable]
+                            self.window.append(segment, self._pcr_duration(segment) or max(.1,time.monotonic()-started))
                             self.ready.set()
             except (OSError, ValueError) as exc:
+                if self.stop_event.is_set():
+                    break
                 self.error = str(exc)[:250]
                 if not self.ready.is_set():
                     self.ready.set()
@@ -330,7 +395,8 @@ class RollingTimeshift:
             else:
                 self._capture_ts()
         except Exception as exc:
-            self.error = str(exc)[:250]
+            if not self.stop_event.is_set():
+                self.error = str(exc)[:250]
             self.ready.set()
 
     def _handler(self):

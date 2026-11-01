@@ -279,11 +279,19 @@ class LocalCaptionWorker:
         self._thread.start()
 
     def stop(self):
+        # May be called by a Qt button or channel switch. Poll/kill can block
+        # inside a subprocess lock; never let FFmpeg shutdown freeze the UI.
         self._stop.set()
         process=self._process
-        if process is not None and process.poll() is None:
-            try:process.kill()
-            except OSError:pass
+        if process is not None:
+            def terminate():
+                try:
+                    if process.poll() is None:
+                        process.kill()
+                except (OSError, RuntimeError):
+                    pass
+            threading.Thread(target=terminate,
+                             name='dizytv-caption-stop', daemon=True).start()
 
     def _run(self):
         reason=''
@@ -307,6 +315,10 @@ class LocalCaptionWorker:
                 else:
                     result=json.loads(recognizer.PartialResult()).get('partial','')
                 result=caption_text(result)
+                # AcceptWaveform or JSON decoding can race with an Off click.
+                # Never surface any final/partial text after cancellation.
+                if self._stop.is_set():
+                    break
                 if result and result!=last:
                     self.on_caption(result)
                     last=result

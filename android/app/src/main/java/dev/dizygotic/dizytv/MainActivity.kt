@@ -35,11 +35,26 @@ class MainActivity:Activity() {
     private lateinit var store:DeviceStore; private lateinit var body:LinearLayout; private lateinit var status:TextView
     private lateinit var zoneLabel:TextView; private lateinit var lib:LibVLC; private lateinit var player:MediaPlayer
     private var video:VLCVideoLayout?=null; private var selected:JSONObject?=null; private var page="Channels"
+    private var matchdayFixtures=emptyList<JSONObject>()
+    private var matchdayRefreshing=false
+    private var matchdayFavouriteOnly=false
+    private var matchdayWhen="Upcoming"
+    private var matchdayPlaybackTitle=""
     private var timeshift:DeviceTimeshift?=null
     private var pendingTimeshift:DeviceTimeshift?=null
     private var timeshiftGeneration=0
     private var timeshiftLag=0.0
     private var timeshiftPausedAt=0L
+    private var playbackAttempt=0
+    private var accessMessage=""
+    private var accessNotice:TextView?=null
+    private fun showAccessNotice(message:String) {
+        accessMessage=message
+        accessNotice?.apply {
+            text=message
+            visibility=if(message.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
     private lateinit var brandRow:LinearLayout; private lateinit var mainNav:HorizontalScrollView
     private var cinemaMode=false; private var screenMode=false
     private var seekBar:SeekBar?=null; private var seekInfo:TextView?=null
@@ -47,9 +62,13 @@ class MainActivity:Activity() {
     private var liveAction:Button?=null
     private var liveDotBright=false
     private val navigationButtons=mutableMapOf<String,Button>()
+    // An optional category shortcut over the existing channel catalogue; no
+    // media/recording/settings data is copied or migrated for the new skin.
+    private var dashboardSection=""
     private val playbackTicker=object:Runnable {
         override fun run() {
             if(page=="Live") {
+                if(player.isPlaying && accessMessage.isNotEmpty()) showAccessNotice("")
                 refreshLiveIndicator()
                 val length=player.length
                 val current=player.time
@@ -93,7 +112,11 @@ class MainActivity:Activity() {
         }
         indexedGuide=guide
     }
-    private val executor=Executors.newSingleThreadExecutor(); private val handler=Handler(Looper.getMainLooper())
+    private val executor=Executors.newSingleThreadExecutor()
+    // Optional fixture metadata must never queue behind or block VLC, Ace,
+    // scheduled recording and local timeshift operations.
+    private val matchdayExecutor=Executors.newSingleThreadExecutor()
+    private val handler=Handler(Looper.getMainLooper())
     private val ticker=object:Runnable { override fun run() { val changed=updateZone(); if(page=="Recordings" || changed && page=="Guide") render(); handler.postDelayed(this,5000) } }
     private fun dp(n:Int)=(n*resources.displayMetrics.density).toInt()
     // Modern streaming-player palette: rounded controls without stock grey blocks.
@@ -150,12 +173,29 @@ class MainActivity:Activity() {
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState); store=DeviceStore(this); lib=LibVLC(this,arrayListOf("--no-video-title-show","--network-caching=1500")); player=MediaPlayer(lib)
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(dp(10),dp(8),dp(10),dp(8)) }
-        val brand=row();brandRow=brand;brand.gravity=android.view.Gravity.CENTER_VERTICAL;val image=ImageView(this);image.setImageResource(R.drawable.dizytv_logo);brand.addView(image,LinearLayout.LayoutParams(dp(54),dp(54)));brand.addView(text("DizyTV",24f).apply { typeface=Typeface.DEFAULT_BOLD });root.addView(brand)
+        val brand=row();brandRow=brand;brand.gravity=android.view.Gravity.CENTER_VERTICAL
+        brand.background=rounded(panel)
+        brand.setPadding(dp(8),dp(2),dp(8),dp(2))
+        val image=ImageView(this);image.setImageResource(R.drawable.dizytv_logo)
+        brand.addView(image,LinearLayout.LayoutParams(dp(54),dp(54)))
+        brand.addView(text("DizyTV",24f).apply { typeface=Typeface.DEFAULT_BOLD })
+        brand.addView(text("LIVE  •  GUIDE  •  DVR",11f).apply {
+            setTextColor(accent);gravity=android.view.Gravity.END
+        },LinearLayout.LayoutParams(0,-2,1f))
+        root.addView(brand)
         zoneLabel=text(""); root.addView(zoneLabel)
-        val nav=HorizontalScrollView(this); mainNav=nav; val buttons=row()
-        for(name in listOf("Channels","Live","Guide","Recordings","Backup","Settings")) {
-            val action=button(name) { page=name;render() }
-            navigationButtons[name]=action;buttons.addView(action)
+        val nav=HorizontalScrollView(this); mainNav=nav
+        nav.isHorizontalScrollBarEnabled=false
+        nav.background=rounded(panel)
+        val buttons=row()
+        for((label,destination) in listOf(
+            "Live TV" to "Live", "Channels" to "Channels", "Guide" to "Guide",
+            "Matchday" to "Matchday", "Movies" to "Movies",
+            "Series" to "Series", "Sports" to "Sports",
+            "DVR" to "Recordings", "Backup" to "Backup", "Settings" to "Settings"
+        )) {
+            val action=button(label) { navigateDashboard(destination) }
+            navigationButtons[destination]=action;buttons.addView(action)
         }
         nav.addView(buttons); root.addView(nav)
         body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; root.addView(body,LinearLayout.LayoutParams(-1,0,1f))
@@ -170,11 +210,11 @@ class MainActivity:Activity() {
     override fun onPause() {
         handler.removeCallbacks(ticker)
         // Never spool video secretly while the viewing Activity is in the background.
-        if(timeshift!=null || pendingTimeshift!=null)player.stop()
+        if(timeshift!=null || pendingTimeshift!=null) { playbackAttempt++; showAccessNotice(""); player.stop() }
         clearTimeshift()
         super.onPause()
     }
-    override fun onDestroy() { clearTimeshift();handler.removeCallbacks(playbackTicker); handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); super.onDestroy() }
+    override fun onDestroy() { clearTimeshift();handler.removeCallbacks(playbackTicker); handler.removeCallbacks(ticker); player.stop(); player.detachViews(); player.release(); lib.release(); executor.shutdown(); matchdayExecutor.shutdownNow(); super.onDestroy() }
     private fun updateZone():Boolean {
         val zone=store.read().getJSONObject("settings").getString("timezone")
         val effective=Domain.zone(zone); val key=effective.id+effective.rules.getOffset(Instant.now()).id; val changed=key!=displayedZone; displayedZone=key
@@ -222,6 +262,35 @@ class MainActivity:Activity() {
             }; column.addView(spinner)
         }; return column
     }
+    private fun navigateDashboard(destination:String) {
+        if(destination in listOf("Movies","Series","Sports")) {
+            val catalogue=Domain.catalogue(store.read())
+            val names=if(destination=="Sports") listOf("Sport","Sports")
+                else if(destination=="Movies") listOf("Movie","Movies")
+                else listOf(destination)
+            val section=catalogue.firstOrNull { ch->
+                names.any { Domain.section(ch).equals(it,true) }
+            }?.let(Domain::section)
+            val genre=catalogue.firstOrNull { ch->
+                names.any { ch.optString("genre").equals(it,true) }
+            }?.optString("genre")
+            countryFilter="";typeFilter="";search="";onlyFavourites=false
+            sectionFilter=section?:""
+            genreFilter=if(section==null) genre?:"" else ""
+            dashboardSection=destination
+            page="Channels"
+            render()
+            if(section==null && genre==null) {
+                status.text="No $destination category imported yet. Existing channels remain available under Channels."
+            }
+        } else {
+            if(destination=="Channels" && dashboardSection.isNotEmpty()) {
+                sectionFilter="";genreFilter="";dashboardSection=""
+            }
+            page=destination
+            render()
+        }
+    }
     private fun render() {
         if(page!="Live" && (timeshift!=null || pendingTimeshift!=null)) {
             player.stop()
@@ -229,15 +298,190 @@ class MainActivity:Activity() {
         }
         player.detachViews();video=null;seekBar=null;seekInfo=null;liveIndicator=null;liveAction=null;body.removeAllViews();updateZone()
         navigationButtons.forEach { (name,action)->
-            val chosen=name==page
+            val chosen=(name==page && (name!="Channels" || dashboardSection.isEmpty())) ||
+                (page=="Channels" && name==dashboardSection)
             action.background=rounded(if(chosen) edge else panel,if(chosen) accent else edge)
-            action.setTextColor(if(chosen) accent else ink)
+            action.setTextColor(if(chosen) accent else muted)
         }
         brandRow.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         mainNav.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
         zoneLabel.visibility=if(cinemaMode || screenMode) View.GONE else View.VISIBLE
-        when(page) { "Channels"->channels(); "Live"->live(); "Guide"->guidePage(); "Recordings"->recordings(); "Backup"->backupPage(); "Settings"->settingsPage() }
+        when(page) { "Channels"->channels(); "Live"->live(); "Guide"->guidePage(); "Matchday"->matchdayPage(); "Recordings"->recordings(); "Backup"->backupPage(); "Settings"->settingsPage() }
     }
+
+    private fun safeMatchdayLink(raw:String):String {
+        return MatchdayLinkPolicy.validateSource(raw)
+    }
+    private fun matchdayPage() {
+        val list=scroller()
+        list.addView(text("⚽ Matchday — free football fixtures",21f))
+        list.addView(text("TheSportsDB public free tier supplies LIMITED fixture entries, not a complete schedule. A fixture does not imply a free broadcast. No viewing rights or playback are automatically verified.",12f))
+        val windowNav=row()
+        for(mode in listOf("Today","Tomorrow","Weekend","Upcoming")) {
+            windowNav.addView(button((if(matchdayWhen==mode) "● " else "")+mode) {
+                matchdayWhen=mode;render()
+            })
+        }
+        list.addView(HorizontalScrollView(this).apply { addView(windowNav) })
+        val prefs=getSharedPreferences("dizytv-matchday",MODE_PRIVATE)
+        val club=prefs.getString("club","Southampton")?:"Southampton"
+        list.addView(button("★ Favourite: "+club+" (change)") {
+            val edit=EditText(this).apply { setText(club); setSingleLine(true) }
+            AlertDialog.Builder(this).setTitle("Favourite football club")
+                .setView(edit).setPositiveButton("Save") { _,_->
+                    val name=edit.text.toString().trim().take(80)
+                    if(name.isNotEmpty()) {
+                        prefs.edit().putString("club",name).apply()
+                        if(page=="Matchday") render()
+                    }
+                }.setNegativeButton("Cancel",null).show()
+        })
+        list.addView(button(if(matchdayFavouriteOnly) "★ Show all fixtures" else "★ Favourite club only") {
+            matchdayFavouriteOnly=!matchdayFavouriteOnly; render()
+        })
+        list.addView(button(if(matchdayRefreshing) "Refreshing fixtures…" else "Refresh free fixtures") {
+            if(matchdayRefreshing)return@button
+            val last=prefs.getLong("last_refresh",0L)
+            if(System.currentTimeMillis()-last in 0 until 120000L) {
+                status.text="Free API refresh is limited to every two minutes to avoid rate limits."
+                return@button
+            }
+            // Reserve the request budget before fetching, even if all 11
+            // provider requests time out or return empty results.
+            prefs.edit().putLong("last_refresh",System.currentTimeMillis()).apply()
+            matchdayRefreshing=true;status.text="Fetching limited free football fixture metadata…"
+            matchdayExecutor.execute {
+                val result=runCatching { MatchdayFixtures.refresh() }
+                handler.post {
+                    matchdayRefreshing=false
+                    result.onSuccess { (fixtures, errors)->
+                        if(errors>0 && matchdayFixtures.isNotEmpty()) {
+                            status.text="${errors} fixture requests failed; retaining previous cache. Source availability remains unverified."
+                        } else {
+                            if(fixtures.isNotEmpty()) {
+                                matchdayFixtures=fixtures
+                                val cache=JSONArray()
+                                fixtures.forEach { cache.put(it) }
+                                File(filesDir,"matchday-fixtures.json").writeText(cache.toString())
+                            }
+                            status.text="${matchdayFixtures.size} fixture entries; ${errors} provider requests failed. Viewing options unverified."
+                        }
+                    }.onFailure { status.text="Fixture feed unavailable. Last saved list retained." }
+                    if(page=="Matchday")render()
+                }
+            }
+        })
+        if(matchdayFixtures.isEmpty()) {
+            runCatching {
+                val file=File(filesDir,"matchday-fixtures.json")
+                if(file.isFile && file.length()<=1024*1024) {
+                    val cached=JSONArray(file.readText())
+                    matchdayFixtures=(0 until cached.length()).mapNotNull { cached.optJSONObject(it) }
+                }
+            }
+        }
+        val zone=Domain.zone(store.read().getJSONObject("settings").getString("timezone"))
+        val now=Instant.now()
+        for(item in matchdayFixtures) {
+            val date=runCatching { java.time.Instant.ofEpochSecond(item.getLong("kickoff")).atZone(zone) }.getOrNull()?:continue
+            if(!MatchdayWindow.visible(item.getLong("kickoff"),zone,now,matchdayWhen))continue
+            val name=item.optString("home")+" v "+item.optString("away")
+            if(matchdayFavouriteOnly && !name.contains(club,true))continue
+            val id=item.optString("id")
+            val wrapper=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=rounded(panel) }
+            wrapper.addView(text((if(name.contains(club,true)) "★ " else "")+
+                date.format(java.time.format.DateTimeFormatter.ofPattern("EEE dd MMM HH:mm"))+
+                " • "+item.optString("competition"),12f))
+            wrapper.addView(text(name,16f))
+            // Existing single-link preferences are read without discarding them;
+            // adding a new source migrates that fixture to a bounded array.
+            val savedSources=runCatching {
+                prefs.getString("sources_"+id,null)?.let(::JSONArray)
+                    ?: prefs.getString("link_"+id,null)?.let { JSONArray().put(JSONObject(it)) }
+                    ?: JSONArray()
+            }.getOrDefault(JSONArray())
+            for(position in 0 until minOf(savedSources.length(),10)) {
+                val data=savedSources.optJSONObject(position)?:continue
+                val savedUrl=data.optString("url")
+                val kind=data.optString("kind","web")
+                val hostname=runCatching { java.net.URI(savedUrl).host ?: "Unknown" }.getOrDefault("Unknown")
+                wrapper.addView(button("Open source ${position+1}: ${kind.uppercase()} • ${hostname} (unverified)") {
+                    attempt {
+                        val url=safeMatchdayLink(savedUrl)
+                        if(kind=="hls") {
+                            require(url.lowercase().endsWith(".m3u8")) { "Not a direct HLS link" }
+                            require(Domain.objects(store.read().getJSONArray("jobs")).none {
+                                it.optString("status")=="recording"
+                            }) { "Finish the active recording before changing playback" }
+                            clearTimeshift(); player.stop(); selected=null
+                            matchdayPlaybackTitle=name
+                            page="Live";render()
+                            val media=Media(lib,Uri.parse(url))
+                            try { player.media=media } finally { media.release() }
+                            player.play()
+                            status.text="Direct HLS requested — audio/video not yet verified"
+                        } else {
+                            startActivity(Intent(this,MatchdayWebActivity::class.java)
+                                .putExtra("matchday_url",url))
+                            status.text="Opened isolated Matchday webpage; source is unverified"
+                        }
+                    }
+                })
+                wrapper.addView(button("Remove source ${position+1}") {
+                    AlertDialog.Builder(this).setTitle("Remove saved Matchday source?")
+                        .setMessage("The other sources for this fixture will remain saved.")
+                        .setPositiveButton("Remove") { _,_->
+                            val updated=JSONArray()
+                            for(index in 0 until savedSources.length()) {
+                                if(index!=position) updated.put(savedSources.get(index))
+                            }
+                            prefs.edit().putString("sources_"+id,updated.toString())
+                                .remove("link_"+id).apply()
+                            if(page=="Matchday")render()
+                        }.setNegativeButton("Cancel",null).show()
+                })
+            }
+            wrapper.addView(button("Add authorised free viewing link…") {
+                val edit=EditText(this).apply { hint="https://example.org/watch"; setSingleLine(true) }
+                val choices=arrayOf("Browser page","Direct HLS (.m3u8)")
+                var kind="web"
+                AlertDialog.Builder(this).setTitle("Source format").setSingleChoiceItems(choices,0) { _,choice->
+                    kind=if(choice==1) "hls" else "web"
+                }.setPositiveButton("Next") { _,_->
+                    AlertDialog.Builder(this).setTitle("Public HTTPS link").setView(edit)
+                        .setPositiveButton("Continue") { _,_->
+                            attempt {
+                                val url=safeMatchdayLink(edit.text.toString())
+                                require(kind!="hls" || url.lowercase().endsWith(".m3u8")) { "Direct VLC requires a .m3u8 URL" }
+                                AlertDialog.Builder(this).setTitle("Viewing rights confirmation")
+                                    .setMessage("Only save a free link that you are authorised to view. DizyTV has not verified rights, region, video quality or playability. Confirm?")
+                                    .setPositiveButton("I confirm") { _,_->
+                                        val sources=runCatching {
+                                            prefs.getString("sources_"+id,null)?.let(::JSONArray)
+                                                ?: prefs.getString("link_"+id,null)?.let { JSONArray().put(JSONObject(it)) }
+                                                ?: JSONArray()
+                                        }.getOrDefault(JSONArray())
+                                        if(sources.length()>=10) {
+                                            status.text="Limit of 10 saved source alternatives per fixture"
+                                        } else if((0 until sources.length()).any {
+                                                sources.optJSONObject(it)?.optString("url")==url
+                                            }) {
+                                            status.text="This viewing link is already saved"
+                                        } else {
+                                            sources.put(JSONObject().put("url",url).put("kind",kind))
+                                            prefs.edit().putString("sources_"+id,sources.toString())
+                                                .remove("link_"+id).apply()
+                                            if(page=="Matchday")render()
+                                        }
+                                    }.setNegativeButton("Cancel",null).show()
+                            }
+                        }.setNegativeButton("Cancel",null).show()
+                }.setNegativeButton("Cancel",null).show()
+            })
+            list.addView(wrapper)
+        }
+    }
+
     private fun channels() {
         val input=EditText(this).apply { hint="Search channels or groups"; setText(search); setSingleLine(true) }; body.addView(input)
         val filter=CheckBox(this).apply { text="★ Favourites only"; isChecked=onlyFavourites }; body.addView(filter)
@@ -319,14 +563,36 @@ class MainActivity:Activity() {
     private fun live() {
         val compact=cinemaMode || screenMode
         if(!compact) {
-            body.addView(text(selected?.let { Domain.displayName(it.getString("name")) }?:"Choose a channel first",20f))
-            selected?.let { ch->
-                val state=store.read(); val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names")); val now=Instant.now().epochSecond
-                indexGuide()
-                val programmes=indexedProgrammes[key].orEmpty().filter { it.getLong("end")>now }.sortedBy { it.getLong("start") }.take(2)
-                body.addView(text(programmes.joinToString("\n") { Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+"  "+it.getString("title") }.ifEmpty { "No guide match — choose Map EPG" }))
+            val hero=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL; background=rounded(panel)
+                setPadding(dp(8),dp(6),dp(8),dp(6))
             }
+            hero.addView(text("●  NOW SHOWING",11f).apply { setTextColor(accent); typeface=Typeface.DEFAULT_BOLD })
+            hero.addView(text(selected?.let { Domain.displayName(it.getString("name")) }
+                ?: matchdayPlaybackTitle.ifEmpty { "Choose a channel" },19f).apply { typeface=Typeface.DEFAULT_BOLD })
+            selected?.let { ch->
+                val state=store.read()
+                val key=Domain.matchGuide(ch,state.getJSONObject("mappings"),guide.getJSONObject("names"))
+                val now=Instant.now().epochSecond
+                indexGuide()
+                val programmes=indexedProgrammes[key].orEmpty()
+                    .filter { it.getLong("end")>now }
+                    .sortedBy { it.getLong("start") }.take(2)
+                val caption=programmes.joinToString("  •  ") {
+                    Domain.time(it.getLong("start"),state.getJSONObject("settings").getString("timezone"),true)+
+                        " "+it.getString("title")
+                }.ifEmpty { "No EPG match yet • use Map EPG to assign programme listings" }
+                hero.addView(text(caption,12f).apply { setTextColor(muted);maxLines=2 })
+            }
+            body.addView(hero)
         }
+        val notice=text(accessMessage,12f).apply {
+            setTextColor(Color.rgb(255,211,129))
+            background=rounded(panel,Color.rgb(178,136,52))
+            visibility=if(accessMessage.isEmpty()) View.GONE else View.VISIBLE
+        }
+        accessNotice=notice
+        body.addView(notice)
         val layout=VLCVideoLayout(this); video=layout
         body.addView(layout,LinearLayout.LayoutParams(-1,0,1f)); player.attachViews(layout,null,false,false)
         val controls=row()
@@ -374,12 +640,29 @@ class MainActivity:Activity() {
         volumeBar.addView(volume,LinearLayout.LayoutParams(0,dp(44),1f));body.addView(volumeBar)
         if(!compact) {
             val more=row()
-            more.addView(button("■ Stop") { player.stop(); clearTimeshift() })
+            more.addView(button("■ Stop") { playbackAttempt++; showAccessNotice(""); player.stop(); clearTimeshift() })
             more.addView(button("● Record now") { recordNow() })
             more.addView(button("★ Favourite") { selected?.let { toggleFavourite(it) } })
             more.addView(button("Map EPG") { mapChannel() })
-            body.addView(HorizontalScrollView(this).apply { addView(more) })
-            body.addView(button("Edit categories") { editCategories() })
+            more.addView(button("Edit categories") { editCategories() })
+            body.addView(HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled=false;addView(more)
+            })
+            // Keep the preview no taller than the former Edit categories row:
+            // a phone's actual VLC video must retain the available height.
+            // Compact EPG preview stays connected to the existing native guide.
+            // The full guide retains its tap-to-play / long-press-to-record.
+            val guideCard=LinearLayout(this).apply {
+                orientation=LinearLayout.HORIZONTAL
+                gravity=android.view.Gravity.CENTER_VERTICAL
+                background=rounded(panel)
+                setPadding(dp(6),dp(2),dp(6),dp(2))
+            }
+            guideCard.addView(text("●  LIVE GUIDE",11f).apply {
+                setTextColor(accent);typeface=Typeface.DEFAULT_BOLD
+            },LinearLayout.LayoutParams(0,-2,1f))
+            guideCard.addView(button("Open EPG  ›") { page="Guide";render() })
+            body.addView(guideCard)
         }
     }
     @Suppress("DEPRECATION")
@@ -574,6 +857,9 @@ class MainActivity:Activity() {
         }
     }
     private fun playMediaUrl(ch:JSONObject,s:JSONObject,isAce:Boolean,source:String) {
+        playbackAttempt++
+        val attempt=playbackAttempt
+        showAccessNotice("")
         val media=Media(lib,Uri.parse(source))
         player.media=media; media.release(); player.play()
         val guideKey=Domain.matchGuide(ch,s.getJSONObject("mappings"),guide.getJSONObject("names"))
@@ -586,8 +872,12 @@ class MainActivity:Activity() {
             else if(isAce) "Connecting to Ace Stream…" else "Connecting to HTTP/HLS stream…"
         val channelId=ch.getString("id")
         handler.postDelayed({
-            if(selected?.optString("id")==channelId && page=="Live" && !player.isPlaying)
-                status.text="Still buffering or unavailable. This stream may be offline, geoblocked or DRM-protected."
+            if(attempt==playbackAttempt && selected?.optString("id")==channelId &&
+               page=="Live" && !player.isPlaying) {
+                status.text="Playback not confirmed for this channel"
+                // A VLC timeout alone cannot establish geoblocking.
+                if(!isAce) showAccessNotice(StreamAccessHelp.unconfirmedPlayback)
+            }
         },25000)
     }
     private fun toggleFavourite(ch:JSONObject) {
