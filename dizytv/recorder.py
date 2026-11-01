@@ -35,6 +35,26 @@ def _open_recording(opener, url):
                                'Accept-Encoding':'identity'}), timeout=1.5)
 
 
+def _read_prefix(source, cancel, deadline, size=8):
+    """Sniff a few bytes without waiting for a slow origin to fill read().
+
+    A stream can trickle one byte per packet: regular read(size) blocks until
+    the full size is delivered, even though the read socket never times out.
+    Keep cancellation and the timer responsive during initial format sniffing.
+    """
+    data = bytearray()
+    while len(data) < size:
+        if cancel():
+            raise RecordingStopped('Recording stopped by user')
+        if time.time() >= deadline:
+            raise RecordingStopped('Recording timer elapsed while identifying source')
+        chunk = source.read1(size-len(data))
+        if not chunk:
+            break
+        data.extend(chunk)
+    return bytes(data)
+
+
 def _read_cancellable(source, max_bytes, cancel, deadline):
     """Read bounded HTTP data incrementally, checking cancellation and deadline.
 
@@ -223,7 +243,7 @@ def record_stream(url, directory, title, end, reserve=1073741824, cancel=lambda:
         with _open_recording(opener,url) as response, outpath.open('xb') as output:
             content=response.headers.get('Content-Type','').lower()
             # Sniff a bounded prefix: some providers serve HLS as octet-stream.
-            head=response.read(8)
+            head=_read_prefix(response,cancel,end)
             hls=('mpegurl' in content or urlsplit(response.geturl()).path.lower().endswith('.m3u8')
                  or head.startswith(b'#EXTM3U'))
             if hls:

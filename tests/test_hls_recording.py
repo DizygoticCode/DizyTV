@@ -90,6 +90,20 @@ class HLSSource(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
             return
+        elif route == '/trickle-prefix':
+            # A response that sends fewer than eight bytes at a time keeps
+            # plain HTTPResponse.read(8) blocked despite a user cancelling.
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.end_headers()
+            try:
+                for byte in b'#EXTM3U\n':
+                    self.wfile.write(bytes((byte,)))
+                    self.wfile.flush()
+                    time.sleep(.16)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         elif route == '/truncated.ts':
             body = PACKETS + b'\x47'
             content = 'video/mp2t'
@@ -249,6 +263,22 @@ class HLSRecordingTests(unittest.TestCase):
             result = self.record('/hls/trickle.m3u8', folder, seconds=.25)
             self.assertEqual('failed', result['status'], result)
             self.assertLess(time.monotonic()-began, 1.3)
+
+    def test_initial_format_sniff_can_be_cancelled_on_trickled_bytes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            stop = threading.Event()
+            timer = threading.Timer(.2, stop.set)
+            timer.start()
+            try:
+                started = time.monotonic()
+                result = self.record('/trickle-prefix', folder, seconds=5,
+                                     cancel=stop.is_set)
+                self.assertEqual('cancelled', result['status'], result)
+                self.assertIn('stopped by user', result['error'])
+                self.assertLess(time.monotonic() - started, .9)
+                self.assertEqual([], list(Path(folder).iterdir()))
+            finally:
+                timer.cancel()
 
     def test_cancel_stalled_source_is_bounded(self):
         with tempfile.TemporaryDirectory() as folder:
