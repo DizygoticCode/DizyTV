@@ -2103,7 +2103,9 @@ class MainWindow(QMainWindow):
             ensure_worker(self.store.directory)
             # Previously cached Ace channels hid newly configured public feeds.
             # Always refresh on startup, retaining cached channels until success.
-            QTimer.singleShot(200,self.refresh_channels)
+            # Refresh channel sources first, then XMLTV on every launch. The
+            # persisted guide can contain programmes that have all expired.
+            QTimer.singleShot(200,lambda:self.refresh_channels(refresh_guide_after=True))
     def heartbeat_ui(self):
         if self._ui_hang_monitor is not None:
             self._ui_hang_monitor.heartbeat()
@@ -2911,16 +2913,22 @@ class MainWindow(QMainWindow):
                 else:
                     self.status.setText('Stream did not begin within 25 seconds; checking host response…')
                     if self.timeshift is None:self.diagnose_stream()
-    def async_task(self,function,success):
+    def async_task(self,function,success,finished=None):
         if self.task:self.status.setText('A refresh is already running'); return
         self.task=Task(function)
         def done(result):
             self.task=None
             try:success(result)
-            except (ValueError,OSError) as exc:fail(str(exc))
-        def fail(message):self.task=None; self.status.setText('Refresh failed — cached data retained: '+message)
+            except (ValueError,OSError) as exc:
+                fail(str(exc))
+                return
+            if finished is not None:finished()
+        def fail(message):
+            self.task=None
+            self.status.setText('Refresh failed — cached data retained: '+message)
+            if finished is not None:finished()
         self.task.signals.success.connect(done); self.task.signals.failure.connect(fail); self.pool.start(self.task)
-    def refresh_channels(self):
+    def refresh_channels(self, *, refresh_guide_after=False):
         current=self.store.read(); self.status.setText('Importing free channel sources…')
         def done(result):
             channels,success,errors=result
@@ -2930,9 +2938,14 @@ class MainWindow(QMainWindow):
                 self._tree_dirty=True
             self.render_channels()
             self.status.setText(f'{len(channels)} channels • {success} sources refreshed'+(f' • {len(errors)} failed (open Source status)' if errors else '')+' • use playlist filter to view free HTTP/HLS')
-            if not self.guide['programmes'] and self.state['settings']['xmltv_urls']:
-                QTimer.singleShot(300,self.refresh_guide)
-        self.async_task(lambda:refresh_catalogue(current['settings'],current['channels'],download),done)
+        def finished():
+            # The catalogue and XMLTV tasks share one worker slot. Never start
+            # both at once; refresh the guide after the catalogue settles,
+            # including when a playlist fetch fails. Preserve cached guide
+            # data if the subsequent XMLTV download fails.
+            if self.state['settings']['xmltv_urls'] and (refresh_guide_after or not self.guide['programmes']):
+                QTimer.singleShot(0 if refresh_guide_after else 300,self.refresh_guide)
+        self.async_task(lambda:refresh_catalogue(current['settings'],current['channels'],download),done,finished)
     def refresh_guide(self):
         settings=self.store.read()['settings']
         if not settings['xmltv_urls']:self.error('Add one or more XMLTV URLs in Settings'); return
